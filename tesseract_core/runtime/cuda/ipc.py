@@ -35,6 +35,8 @@ pip-wheel fallback and forward-compatible version range -- via
 maintaining their own soname list.
 """
 
+import collections
+import functools
 import threading
 import weakref
 from typing import Any, get_args
@@ -257,29 +259,79 @@ def _cai_device_ordinal(arr: Any) -> int:
 #      unconditionally; see :func:`load_cuda_ipc_arraydict`).
 _CUDA_IPC_EXPORT_REGISTRY: list[Any] = []
 
-# Staging buffers in use by the current exports, as (device pointer, size, IPC
-# handle). Released together with _CUDA_IPC_EXPORT_REGISTRY, but returned to
-# _STAGING_POOL instead of dropped.
-_CUDA_IPC_STAGING_BUFFERS: list[tuple[int, int, bytes]] = []
 
-# Idle staging buffers as (device pointer, IPC handle), by size. Iterative
-# callers export the same shapes on every request, so reusing the buffers saves
-# a cudaMalloc/cudaFree and a cudaIpcGetMemHandle per array. Idle buffers
-# beyond _STAGING_POOL_MAX_BYTES are freed.
-_STAGING_POOL: dict[int, list[tuple[int, bytes]]] = {}
-_STAGING_POOL_MAX_BYTES = 1 << 30
-_staging_pool_bytes = 0
+class _BufferPool:
+    """Idle ``cudaMalloc`` buffers kept for reuse, by device and size.
+
+    Iterative callers move the same shapes on every request, so both sides of a
+    cuda_ipc exchange would otherwise free and reallocate the same large buffers
+    each time. That is expensive when two processes share a GPU: a
+    ``cudaMalloc`` that receives memory the other process just freed can take
+    tens of milliseconds per GiB.
+
+    A buffer can carry a value that is kept with it, such as a staging buffer's
+    IPC handle. Once a device's idle buffers exceed :func:`_pool_max_bytes`, the
+    least recently released ones are freed.
+    """
+
+    def __init__(self) -> None:
+        # Device pointer -> (device, size, value), least recently released first.
+        self._idle: collections.OrderedDict[int, tuple[int, int, Any]] = (
+            collections.OrderedDict()
+        )
+        self._idle_bytes: collections.Counter[int] = collections.Counter()
+        self._lock = threading.Lock()
+
+    def take(self, device: int, nbytes: int) -> tuple[int, Any] | None:
+        """Remove an idle buffer of this size and return it with its value, or ``None``."""
+        with self._lock:
+            for ptr in reversed(self._idle):
+                buf_device, buf_nbytes, value = self._idle[ptr]
+                if buf_device == device and buf_nbytes == nbytes:
+                    del self._idle[ptr]
+                    self._idle_bytes[device] -= nbytes
+                    return ptr, value
+        return None
+
+    def put(self, ptr: int, device: int, nbytes: int, value: Any = None) -> None:
+        """Keep a buffer for reuse, freeing the least recently released beyond the cap."""
+        if not ptr:
+            return
+        max_bytes = _pool_max_bytes(device)
+        evicted = []
+        with self._lock:
+            self._idle[ptr] = (device, nbytes, value)
+            self._idle_bytes[device] += nbytes
+            for old_ptr, (old_device, old_nbytes, _) in list(self._idle.items()):
+                if self._idle_bytes[device] <= max_bytes:
+                    break
+                if old_device == device:
+                    del self._idle[old_ptr]
+                    self._idle_bytes[device] -= old_nbytes
+                    evicted.append(old_ptr)
+        for old_ptr in evicted:
+            cuda_api.free(old_ptr)
+
+
+def _pool_max_bytes(device: int) -> int:
+    """Idle bytes a :class:`_BufferPool` may keep on ``device``: an eighth of its memory."""
+    return cuda_api.device_total_memory(device) // 8
+
+
+# Staging buffers in use by the current exports, as (device pointer, device,
+# size, IPC handle). Released together with _CUDA_IPC_EXPORT_REGISTRY, but
+# returned to _STAGING_POOL instead of dropped.
+_CUDA_IPC_STAGING_BUFFERS: list[tuple[int, int, int, bytes]] = []
 _staging_lock = threading.Lock()
 
+# Idle staging buffers, each with its IPC handle, so reuse also saves the
+# cudaIpcGetMemHandle.
+_STAGING_POOL = _BufferPool()
 
-def _stage_for_export(src_ptr: int, nbytes: int) -> bytes:
+
+def _stage_for_export(src_ptr: int, nbytes: int, device: int) -> bytes:
     """Copy ``nbytes`` from ``src_ptr`` into a pooled staging buffer and return its IPC handle."""
-    global _staging_pool_bytes
-    with _staging_lock:
-        free_list = _STAGING_POOL.get(nbytes)
-        pooled = free_list.pop() if free_list else None
-        if pooled is not None:
-            _staging_pool_bytes -= nbytes
+    pooled = _STAGING_POOL.take(device, nbytes)
     ptr, handle = pooled if pooled is not None else (cuda_api.malloc(nbytes), None)
     try:
         cuda_api.memcpy_device_to_device(ptr, src_ptr, nbytes)
@@ -289,7 +341,7 @@ def _stage_for_export(src_ptr: int, nbytes: int) -> bytes:
         cuda_api.free(ptr)
         raise
     with _staging_lock:
-        _CUDA_IPC_STAGING_BUFFERS.append((ptr, nbytes, handle))
+        _CUDA_IPC_STAGING_BUFFERS.append((ptr, device, nbytes, handle))
     return handle
 
 
@@ -302,20 +354,11 @@ def release_pinned_ipc_exports() -> None:
     the next request; client: end of the current request); see the registry
     comment above for why each timing is safe.
     """
-    global _staging_pool_bytes
     _CUDA_IPC_EXPORT_REGISTRY.clear()
-
-    to_free = []
     with _staging_lock:
         staging, _CUDA_IPC_STAGING_BUFFERS[:] = list(_CUDA_IPC_STAGING_BUFFERS), []
-        for ptr, nbytes, handle in staging:
-            if _staging_pool_bytes + nbytes <= _STAGING_POOL_MAX_BYTES:
-                _STAGING_POOL.setdefault(nbytes, []).append((ptr, handle))
-                _staging_pool_bytes += nbytes
-            else:
-                to_free.append(ptr)
-    for ptr in to_free:
-        cuda_api.free(ptr)
+    for ptr, device, nbytes, handle in staging:
+        _STAGING_POOL.put(ptr, device, nbytes, handle)
 
 
 def _pin_cuda_ipc_export(arr: Any) -> None:
@@ -388,7 +431,7 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
         # Legacy IPC rejected this pointer, almost certainly because it's
         # VMM-backed. Stage only this array's own bytes, not the whole
         # (possibly huge) backing allocation.
-        handle_bytes = _stage_for_export(data_ptr, nbytes)
+        handle_bytes = _stage_for_export(data_ptr, nbytes, meta.device)
         storage_offset = 0
         storage_size = nbytes
 
@@ -419,6 +462,11 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
 # dependency. The DLPack ABI machinery lives in
 # :mod:`tesseract_core.runtime.cuda.dlpack`.
 
+# Idle owned buffers of decoded arrays. An array's buffer returns here once the
+# array (or the framework tensor that adopted it) is released, and the next
+# decode of the same size reuses it.
+_OWNED_POOL = _BufferPool()
+
 
 def _finalize_ipc_device_array(state: dict) -> None:
     """Release an :class:`IpcDeviceArray`'s device buffer exactly once.
@@ -429,7 +477,7 @@ def _finalize_ipc_device_array(state: dict) -> None:
     the live object so ``__dlpack__`` can hand ownership off before this runs:
 
     * ``dlpack_token is None`` and not ``freed``: we still own the buffer, so
-      free it.
+      return it to the pool.
     * ``dlpack_token`` set: ``__dlpack__`` moved the buffer into a DLPack bundle;
       drop the bundle iff its capsule was never consumed (a consumer that took
       the capsule already owns the free).
@@ -437,7 +485,7 @@ def _finalize_ipc_device_array(state: dict) -> None:
     try:
         if state["dlpack_token"] is None:
             if not state["freed"]:
-                cuda_api.free(state["ptr"])
+                _OWNED_POOL.put(state["ptr"], state["device"], state["nbytes"])
                 state["freed"] = True
         else:
             dlpack.drop_unconsumed_bundle(state["dlpack_token"])
@@ -449,9 +497,9 @@ def _finalize_ipc_device_array(state: dict) -> None:
 class IpcDeviceArray:
     """Owns a device buffer decoded from a CUDA IPC handle.
 
-    The buffer is a fresh, process-owned ``cudaMalloc`` allocation holding the
-    array's own bytes (the producer's IPC mapping is copied into it and then
-    closed by the decoder). The object is framework-agnostic:
+    The buffer is a process-owned ``cudaMalloc`` allocation holding the array's
+    own bytes (the producer's IPC mapping is copied into it and then closed by
+    the decoder). The object is framework-agnostic:
 
     * ``__cuda_array_interface__`` (v3) lets CuPy / Numba / PyTorch adopt it,
     * ``__dlpack__`` / ``__dlpack_device__`` let Torch and JAX adopt it,
@@ -459,12 +507,12 @@ class IpcDeviceArray:
     both zero-copy. ``.copy_to_host()`` / ``np.asarray(...)`` materialise a host
     NumPy copy so it can be inspected without any GPU framework installed.
 
-    Ownership of the device buffer is released exactly once: either a
-    :func:`weakref.finalize` callback frees it (see
-    :func:`_finalize_ipc_device_array`), or a DLPack consumer takes it (the
-    capsule is renamed to ``"used_dltensor"`` on consumption, transferring the
-    free to the consumer's deleter). ``_state["freed"]`` guards against a double
-    free.
+    Ownership of the device buffer is released exactly once, back to the pool
+    that later decodes reuse: either a :func:`weakref.finalize` callback releases
+    it (see :func:`_finalize_ipc_device_array`), or a DLPack consumer takes it
+    (the capsule is renamed to ``"used_dltensor"`` on consumption, transferring
+    the release to the consumer's deleter). ``_state["freed"]`` guards against a
+    double release.
     """
 
     def __init__(
@@ -480,12 +528,18 @@ class IpcDeviceArray:
             else self.dtype.itemsize
         )
         # Ownership record shared by reference with the finalizer below.
-        #   freed:        True once the buffer is freed or ownership was handed
-        #                 to a DLPack capsule; prevents a double free.
+        #   freed:        True once the buffer is released or ownership was
+        #                 handed to a DLPack capsule; prevents a double release.
         #   dlpack_token: token of the DLPack bundle produced by __dlpack__, or
         #                 None if __dlpack__ was never called. Ownership of the
         #                 buffer moves into that bundle when it is created.
-        self._state: dict = {"ptr": ptr, "freed": False, "dlpack_token": None}
+        self._state: dict = {
+            "ptr": ptr,
+            "device": device,
+            "nbytes": self._nbytes,
+            "freed": False,
+            "dlpack_token": None,
+        }
         self._finalizer = weakref.finalize(
             self, _finalize_ipc_device_array, self._state
         )
@@ -530,17 +584,24 @@ class IpcDeviceArray:
 
         Ownership of the device buffer moves into a self-contained DLPack bundle
         (see :func:`tesseract_core.runtime.cuda.dlpack.make_dlpack_capsule`)
-        whose deleter frees it. The bundle's lifetime is deliberately *not* tied
-        to this object's, because a consumer (Torch/JAX) may keep the tensor long
-        after this ``IpcDeviceArray`` is gone and will call the deleter then.
-        Whoever ends up owning the capsule (the consumer, or the finalizer for an
-        un-consumed capsule) frees the buffer exactly once.
+        whose deleter returns it to the pool. The bundle's lifetime is
+        deliberately *not* tied to this object's, because a consumer (Torch/JAX)
+        may keep the tensor long after this ``IpcDeviceArray`` is gone and will
+        call the deleter then. Whoever ends up owning the capsule (the consumer,
+        or the finalizer for an un-consumed capsule) releases the buffer exactly
+        once.
         """
         if self._state["freed"]:
             raise RuntimeError("device buffer has been released")
 
         capsule, token = dlpack.make_dlpack_capsule(
-            self._ptr, self.device, self.shape, self.dtype
+            self._ptr,
+            self.device,
+            self.shape,
+            self.dtype,
+            release=functools.partial(
+                _OWNED_POOL.put, self._ptr, self.device, self._nbytes
+            ),
         )
         # The buffer now belongs to the bundle; this object must not free it.
         # The finalizer reads this shared state to drop the bundle iff its
@@ -556,10 +617,11 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     The calling process must share the IPC namespace with the producer
     (e.g. both run with --ipc=host on Docker) and see the same GPU.
 
-    Returns a freshly-allocated, caller-owned :class:`IpcDeviceArray`: the IPC
-    handle is opened, the array's own bytes are copied device-to-device into a
-    ``cudaMalloc`` buffer owned by this process, the copy is synchronised, and
-    the IPC mapping is closed before returning. The borrow of the producer's
+    Returns a caller-owned :class:`IpcDeviceArray`: the IPC handle is opened,
+    the array's own bytes are copied device-to-device into a ``cudaMalloc``
+    buffer owned by this process (reused from an earlier decode of the same size
+    when one has been released), the copy is synchronised, and the IPC mapping
+    is closed before returning. The borrow of the producer's
     memory therefore lasts only for a single on-GPU copy, so the producer is
     free to reuse or release the exported buffer as soon as this call returns.
 
@@ -578,10 +640,20 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
-    # Allocate the owned buffer up front (on the target device) so that if any
-    # later step fails we still close the IPC mapping and free the buffer cleanly.
+    # Get the owned buffer up front (on the target device) so that if any later
+    # step fails we still close the IPC mapping and free the buffer cleanly.
     cuda_api.set_device(device)
-    owned_ptr = cuda_api.malloc(nbytes)
+    pooled = _OWNED_POOL.take(device, nbytes)
+    if pooled is None:
+        owned_ptr = cuda_api.malloc(nbytes)
+    else:
+        owned_ptr, _ = pooled
+        # The buffer's previous array was released when its consumer dropped
+        # it, but kernels the consumer queued on its own streams may still be
+        # reading it, and the copy below is not ordered after them. Wait for
+        # them first. This costs little: the synchronize after the copy waits
+        # for the same work.
+        cuda_api.device_synchronize()
 
     try:
         # Opening the IPC handle can fail too; if it does, we still own the

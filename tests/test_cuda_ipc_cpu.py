@@ -309,7 +309,7 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     assert unpacked["storage_size"] == 128
     # Staging buffer registered for a later release.
     assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
-        (0xD000, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
+        (0xD000, 0, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
     ]
 
 
@@ -352,18 +352,33 @@ def test_release_recycles_staging_buffers(mocked_cuda):
 
 
 def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
-    """Idle staging buffers beyond the pool's byte limit are freed."""
-    monkeypatch.setattr(cuda_ipc, "_STAGING_POOL_MAX_BYTES", 16)
+    """Idle staging buffers beyond the pool's byte limit are freed, oldest first."""
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 16)
     mocked_cuda.reject_foreign_ipc = True
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x6000))
     cuda_ipc.release_pinned_ipc_exports()
-    assert mocked_cuda.calls["free"] == [0xE000]
+    assert mocked_cuda.calls["free"] == [0xD000]
 
     # The next export reuses the pooled buffer, not the freed one.
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x7000))
-    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x7000, 16)
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xE000, 0x7000, 16)
     assert mocked_cuda.calls["malloc"] == [16, 16]
+
+
+def test_staging_pool_makes_room_for_a_new_size(mocked_cuda, monkeypatch):
+    """A buffer of a new size evicts idle buffers of other sizes instead of being freed."""
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 64)
+    mocked_cuda.reject_foreign_ipc = True
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+    cuda_ipc.release_pinned_ipc_exports()
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((16,), "<f4", data_ptr=0x6000))
+    cuda_ipc.release_pinned_ipc_exports()
+    assert mocked_cuda.calls["free"] == [0xD000]
+
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((16,), "<f4", data_ptr=0x7000))
+    assert mocked_cuda.calls["malloc"] == [16, 64]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xE000, 0x7000, 64)
 
 
 def test_client_request_releases_input_exports(mocked_cuda):
@@ -604,12 +619,43 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     assert iface["typestr"] == np.dtype("float32").str
 
 
-def test_load_frees_owned_buffer_on_del(mocked_cuda):
-    """When no DLPack consumer adopts it, the wrapper frees its buffer on GC."""
+def test_load_reuses_owned_buffer_released_on_del(mocked_cuda):
+    """A decoded array's buffer is reused by the next decode of the same size."""
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    del out
+    import gc
+
+    gc.collect()
+    assert mocked_cuda.calls["free"] == []
+
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x2000, 8)
+    # One sync after each copy, plus one before copying into the reused buffer.
+    assert mocked_cuda.calls["sync"] == [True] * 3
+
+
+def test_load_reuses_owned_buffer_released_by_dlpack_deleter(mocked_cuda):
+    """A buffer handed out via DLPack returns to the pool when its deleter runs."""
+    from tesseract_core.runtime.cuda import dlpack
+
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    out.__dlpack__()
+    # Nobody consumed the capsule, so dropping it runs the deleter.
+    dlpack.drop_unconsumed_bundle(out._state["dlpack_token"])
+    assert mocked_cuda.calls["free"] == []
+
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8]
+
+
+def test_owned_buffers_beyond_pool_limit_are_freed(mocked_cuda, monkeypatch):
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 0)
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     )
-    assert mocked_cuda.calls["free"] == []
     del out
     import gc
 

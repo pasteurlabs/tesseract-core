@@ -14,11 +14,13 @@ directions without depending on any GPU framework:
   foreign producer's device pointer, shape, and dtype, used by the encode path to
   route a CAI-less array (e.g. JAX) over a CUDA transport.
 
-All ctypes and the CPython capsule API stay here; the buffer is always freed
-through :func:`tesseract_core.runtime.cuda.api.free`.
+All ctypes and the CPython capsule API stay here; an exported buffer is released
+through the caller's release callback, or freed with
+:func:`tesseract_core.runtime.cuda.api.free` if there is none.
 """
 
 import ctypes
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -122,13 +124,18 @@ _NEXT_TOKEN = 0
 
 
 def make_dlpack_capsule(
-    ptr: int, device: int, shape: tuple[int, ...], dtype: np.dtype
+    ptr: int,
+    device: int,
+    shape: tuple[int, ...],
+    dtype: np.dtype,
+    release: Callable[[], None] | None = None,
 ) -> tuple[Any, int]:
     """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
 
-    Returns ``(capsule, token)``. The buffer is freed exactly once, by the
+    Returns ``(capsule, token)``. The buffer is released exactly once, by the
     deleter, whether the capsule is consumed by a framework or dropped
-    un-consumed via :func:`drop_unconsumed_bundle`.
+    un-consumed via :func:`drop_unconsumed_bundle`. ``release`` is called to
+    release it; by default the buffer is freed.
     """
     global _NEXT_TOKEN
     token = _NEXT_TOKEN
@@ -145,13 +152,16 @@ def make_dlpack_capsule(
     managed.dl_tensor.strides = ctypes.cast(None, ctypes.POINTER(ctypes.c_int64))
     managed.dl_tensor.byte_offset = 0
 
-    def _deleter(_managed_ptr: int) -> None:
-        # Runs when the consumer releases the tensor. Free the buffer and drop
-        # our registry entry so the ctypes state can be reclaimed. Guard against
-        # a second invocation (bundle already gone).
+    def _deleter(_managed_ptr: int | None) -> None:
+        # Runs when the consumer releases the tensor. Release the buffer and
+        # drop our registry entry so the ctypes state can be reclaimed. Guard
+        # against a second invocation (bundle already gone).
         bundle = _BUNDLES.pop(token, None)
         if bundle is not None:
-            api.free(ptr)
+            if release is None:
+                api.free(ptr)
+            else:
+                release()
 
     c_deleter = _DLManagedTensorDeleter(_deleter)
     managed.deleter = c_deleter

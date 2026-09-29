@@ -587,6 +587,82 @@ def test_ring1_serial_reuse():
                 proc.join(timeout=5)
 
 
+def _reuse_while_read_client(req_q, resp_q, result_q):
+    """Drop a decoded tensor while a queued kernel still reads it, then decode again.
+
+    The second decode reuses the dropped tensor's buffer. The kernel runs on a
+    non-blocking stream behind a sleep, so it must still see the first output.
+    """
+    try:
+        import torch
+
+        from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
+
+        def fetch(i):
+            req_q.put(i)
+            _, encoded = resp_q.get(timeout=_TIMEOUT)
+            return torch.from_dlpack(load_cuda_ipc_arraydict(encoded))
+
+        side = torch.cuda.Stream()
+        # The first launch on a new stream can block; get it out of the way.
+        with torch.cuda.stream(side):
+            torch.ones(1, device="cuda").sum()
+        side.synchronize()
+
+        first = fetch(0)
+        first_ptr = first.data_ptr()
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(200_000_000)
+            total = first.sum()
+        del first
+        pending = not side.query()
+        second = fetch(1)
+        req_q.put(None)
+        side.synchronize()
+        result_q.put(
+            (
+                "OK",
+                {
+                    "pending": pending,
+                    "reused": second.data_ptr() == first_ptr,
+                    "total": total.item(),
+                    "second": second.cpu().numpy(),
+                },
+            )
+        )
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
+        traceback.print_exc()
+        result_q.put(("CLIENT_ERROR", traceback.format_exc()))
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_reused_owned_buffer_waits_for_pending_reads():
+    """Reusing a released decode buffer never overwrites it under a pending read."""
+    ctx = multiprocessing.get_context("spawn")
+    req_q, resp_q, result_q = (ctx.Queue() for _ in range(3))
+    server = ctx.Process(target=_ring1_server, args=(req_q, resp_q))
+    client = ctx.Process(
+        target=_reuse_while_read_client, args=(req_q, resp_q, result_q)
+    )
+    server.start()
+    client.start()
+    try:
+        status, payload = result_q.get(timeout=_TIMEOUT)
+        assert status == "OK", f"{status}:\n{payload}"
+        assert payload["pending"], "the read finished before the buffer was reused"
+        assert payload["reused"]
+        assert payload["total"] == float(np.sum(np.arange(1024) + 100.0))
+        np.testing.assert_array_equal(payload["second"], np.arange(1024) + 200.0)
+    finally:
+        client.join(timeout=_TIMEOUT)
+        server.join(timeout=_TIMEOUT)
+        for proc in (client, server):
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
+
+
 # ── Test 3: SDK client-side encode path ─────────────────────────────────
 
 

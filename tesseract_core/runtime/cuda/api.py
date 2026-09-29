@@ -216,3 +216,17 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     if ret != 0:
         raise RuntimeError(f"cuMemGetAddressRange failed with error code {ret}")
     return base.value, size.value
+
+
+def device_total_memory(device: int) -> int:
+    """Return the total memory of CUDA device ``device`` in bytes."""
+    driver = _get_driver()
+    handle = ctypes.c_int()
+    ret = driver.cuDeviceGet(ctypes.byref(handle), device)
+    if ret != 0:
+        raise RuntimeError(f"cuDeviceGet failed with error code {ret}")
+    total = ctypes.c_size_t()
+    ret = driver.cuDeviceTotalMem_v2(ctypes.byref(total), handle.value)
+    if ret != 0:
+        raise RuntimeError(f"cuDeviceTotalMem failed with error code {ret}")
+    return total.value

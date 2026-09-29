@@ -723,6 +723,9 @@ def mocked_cuda(monkeypatch):
         def ipc_close_mem_handle(self, device_ptr: int) -> None:
             self.calls["close"].append(device_ptr)
 
+        def device_total_memory(self, device: int) -> int:
+            return 8 << 30
+
     fake = FakeCuda()
 
     for name in (
@@ -736,18 +739,19 @@ def mocked_cuda(monkeypatch):
         "ipc_get_mem_handle",
         "ipc_open_mem_handle",
         "ipc_close_mem_handle",
+        "device_total_memory",
     ):
         monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
-    # Each test starts with empty export registries and staging pool, and must
+    # Each test starts with empty export registries and buffer pools, and must
     # not leave fake pointers behind for the next one.
     def _reset() -> None:
         cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
         cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
-        cuda_ipc._STAGING_POOL.clear()
-        cuda_ipc._staging_pool_bytes = 0
 
     _reset()
+    monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())
+    monkeypatch.setattr(cuda_ipc, "_OWNED_POOL", cuda_ipc._BufferPool())
     yield fake
     _reset()
 
