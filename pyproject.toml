@@ -198,6 +198,7 @@ ignore = [
     "D213", # Pydocstyle: multiline docstring summary start on 2nd line. Conflicts with D212
     "ANN202", # Type annotations: allow missing return type for private functions
     "ANN401", # Type annotations: allow Any
+    "C408",  # Unnecessary dict() call, mirrors Tesseract's named-input API
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]

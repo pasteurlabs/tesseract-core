@@ -163,7 +163,7 @@ def _cached_function(*, key_fn: Callable) -> Callable:
             if key not in cache:
                 try:
                     cache[key] = fn(*args, **kwargs)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - cached and re-raised below
                     cache[key] = e
             if isinstance(cache[key], Exception):
                 raise cache[key]
@@ -611,7 +611,7 @@ def check_endpoint_gradients(
                         idx,
                         **grad_kwargs,
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - user endpoint code; reported as a failure
                     tb = traceback.extract_tb(e.__traceback__)
                     exc_info = f"{type(e).__name__}: '{e}' in file {tb[-1].filename}, line {tb[-1].lineno}"
                     failure = GradientCheckResult(

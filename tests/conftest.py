@@ -63,7 +63,7 @@ def pytest_collection_modifyitems(config, items):
             docker = docker_client_module.CLIDockerClient()
             docker.info()
             return True
-        except Exception:
+        except (docker_client_module.APIError, OSError):
             return False
 
     run_endtoend = config.getvalue("run_endtoend")
@@ -104,10 +104,11 @@ def _has_cuda_gpu() -> bool:
                 ["nvidia-smi", "-L"],
                 capture_output=True,
                 timeout=10,
+                check=False,
             ).returncode
             == 0
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
@@ -273,8 +274,10 @@ def serve_in_subprocess():
                 [
                     sys.executable,
                     "-c",
-                    "from tesseract_core.runtime.serve import serve; "
-                    f"serve(host='localhost', port={port}, num_workers={num_workers})",
+                    (
+                        "from tesseract_core.runtime.serve import serve; "
+                        f"serve(host='localhost', port={port}, num_workers={num_workers})"
+                    ),
                 ],
                 env={**os.environ, "TESSERACT_API_PATH": str(api_file), **(env or {})},
                 stdout=subprocess.PIPE,
@@ -390,7 +393,7 @@ def _docker_cleanup(docker_client, request):
                     container_obj = container
 
                 container_obj.remove(v=True, force=True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(
                     f"Failed to remove container {container}: {pprint_exc(e)}"
                 )
@@ -404,7 +407,7 @@ def _docker_cleanup(docker_client, request):
                     image_obj = image
 
                 docker_client.images.remove(image_obj.id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
 
         # Remove volumes
@@ -416,7 +419,7 @@ def _docker_cleanup(docker_client, request):
                     volume_obj = volume
 
                 volume_obj.remove(force=True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
 
         from tesseract_core.sdk.config import get_config
@@ -430,7 +433,7 @@ def _docker_cleanup(docker_client, request):
                     check=True,
                     capture_output=True,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(f"Failed to remove network {network}: {pprint_exc(e)}")
 
         if failures:
@@ -617,7 +620,7 @@ def mocked_docker(monkeypatch):
     def hacked_get(url, *args, **kwargs):
         if url.endswith("/health"):
             # Simulate a successful health check
-            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+            return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
     monkeypatch.setattr(serving.requests, "get", hacked_get)
@@ -832,6 +835,7 @@ def mlflow_server():
             ["docker", "compose", "-f", str(compose_file), "-p", project_name, "logs"],
             capture_output=True,
             text=True,
+            check=False,
         )
         print(result.stdout)
         # Stop and remove containers
@@ -847,4 +851,5 @@ def mlflow_server():
                 "-v",
             ],
             capture_output=True,
+            check=False,
         )

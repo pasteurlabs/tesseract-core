@@ -330,7 +330,8 @@ def is_differentiable(obj: Any) -> bool:
 
 def _ensure_valid_shapedtype(expected_shape: Any, expected_dtype: Any) -> tuple:
     if not isinstance(expected_shape, (tuple, EllipsisType)):
-        raise ValueError(
+        # Public error type; switching to TypeError would break callers catching ValueError.
+        raise ValueError(  # noqa: TRY004
             "Shape in Array[<shape>, <dtype>] must be a tuple or '...' (ellipsis)"
         )
 
