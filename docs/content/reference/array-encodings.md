@@ -152,7 +152,7 @@ arrays move between them without base64-encoding into the HTTP body. See
 
 ### lz4 compression
 
-Set the `TESSERACT_COMPRESSION=lz4` config variable to compress arrays in the output. This applies to both `json+binref` and `json+base64` formats. For binref, each array is compressed individually, preserving offset-based random access, with the compressed size embedded in the buffer path (`<file>:<offset>:<compressed_size>`).
+Set the `TESSERACT_COMPRESSION=lz4` config variable to compress arrays in the output by default (served Tesseracts can also [compress per request](#choosing-the-encoding-per-request)). This applies to both `json+binref` and `json+base64` formats. For binref, each array is compressed individually, preserving offset-based random access, with the compressed size embedded in the buffer path (`<file>:<offset>:<compressed_size>`).
 
 `TESSERACT_COMPRESSION` only affects how a Tesseract encodes its _output_; inputs are always decoded according to their own per-array `compression` field, so no configuration is needed to read compressed data.
 
@@ -165,3 +165,29 @@ $ cat /tmp/output/results.json
 ```
 
 When calling `tesseract-runtime` directly (e.g. inside a container), the plain `TESSERACT_COMPRESSION=lz4 tesseract-runtime ...` prefix works as usual.
+
+## Choosing the encoding per request
+
+For a served Tesseract, `--output-format` and `TESSERACT_COMPRESSION` only set defaults. A client can request a different encoding for each call through the `Accept` header, where the media type selects the output format and the `compression` parameter selects the compression.
+
+```bash
+$ curl \
+  -H "Accept: application/json+base64; compression=lz4" \
+  -H "Content-Type: application/json" \
+  -d @examples/vectoradd/example_inputs.json \
+  http://<tesseract-address>:<port>/apply
+```
+
+Anything the header leaves out falls back to the server's defaults. If the server cannot produce any encoding the header accepts, it responds with `406 Not Acceptable` without running the endpoint and lists what it supports. The same values are advertised in the server's OpenAPI schema (`/openapi.json`) as `x-supported-output-formats`, `x-supported-compressions` and `x-supported-gpu-transports`.
+
+The experimental GPU transports (the `gpu_transport` parameter) must also be enabled on the server, and are only used for requests that ask for them.
+
+In the Python SDK, `Tesseract.server_capabilities` reads what the server supports, and `Tesseract.with_encoding` returns a view of the Tesseract that requests a different encoding for every call made through it:
+
+```python
+from tesseract_core import Tesseract
+
+with Tesseract.from_image("vectoradd") as tess:
+    print(tess.server_capabilities.compressions)  # ('none', 'lz4')
+    result = tess.with_encoding(compression="lz4").apply(inputs)
+```
