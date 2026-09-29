@@ -526,7 +526,7 @@ class Tesseract:
             weakref.finalize(obj, _purge_tempdir, str(scratch))
         return obj
 
-    def __enter__(self) -> Tesseract:
+    def __enter__(self) -> Tesseract:  # noqa: PYI034 - typing.Self needs py3.11
         """Enter the Tesseract context.
 
         This will start the Tesseract server if it is not already running.
@@ -913,7 +913,8 @@ def _subprocess_spawn_config(
     Tesseracts can be configured independently.
     """
     if not isinstance(tesseract_api, str | Path):
-        raise ValueError(
+        # Public error type; switching to TypeError would break callers catching ValueError.
+        raise ValueError(  # noqa: TRY004
             "`from_source` requires a path to a `tesseract_api.py` file, but an "
             f"already imported module was given "
             f"({getattr(tesseract_api, '__name__', tesseract_api)!r}). A module "
@@ -1020,7 +1021,7 @@ def _is_gpu_array(arr: Any) -> bool:
         return False
     try:
         device_type, _device_id = dlpack_device()
-    except Exception:
+    except Exception:  # noqa: BLE001 - third-party producer; any failure means "not CUDA"
         return False
     return device_type == _DLDEVICE_CUDA
 
@@ -1657,7 +1658,7 @@ class LocalClient:
                     # Print profiling stats inside start_run context
                     # so they go through stdio redirection to the configured sink
                     profiler.print_stats()
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - user endpoint code; re-raised with traceback
                 # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
                 # format the traceback here to include it in the error message.
                 tb = traceback.format_exc()

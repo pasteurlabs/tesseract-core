@@ -110,6 +110,7 @@ def test_io_path_interactions(
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         assert run_res.returncode == 0, run_res.stderr
         assert run_res.stdout
@@ -142,6 +143,7 @@ def test_io_path_interactions(
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         assert run_res.returncode == 0, run_res.stderr
         assert run_res.stdout
@@ -215,6 +217,7 @@ def test_binref_lz4_compression(built_image_name, dummy_tesseract_module, tmp_pa
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
 
@@ -257,6 +260,7 @@ def test_profiling(built_image_name, tmpdir):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
     # Profiling output should contain statistics header and profiling data
@@ -282,6 +286,7 @@ def test_tracing(built_image_name, tmpdir):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
     # Tracing output should contain DEBUG level messages from tesseract_runtime logger

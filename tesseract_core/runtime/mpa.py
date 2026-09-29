@@ -40,27 +40,22 @@ class BaseBackend(ABC):
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter."""
-        pass
 
     @abstractmethod
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric."""
-        pass
 
     @abstractmethod
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact."""
-        pass
 
     @abstractmethod
     def start_run(self) -> None:
         """Start a new run."""
-        pass
 
     @abstractmethod
     def end_run(self) -> None:
         """End the current run."""
-        pass
 
 
 class FileBackend(BaseBackend):
@@ -91,7 +86,9 @@ class FileBackend(BaseBackend):
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to CSV file."""
-        timestamp = datetime.now().isoformat()
+        # Naive local time on purpose: this string is written to the metrics CSV,
+        # and adding a UTC offset would change the file format users parse.
+        timestamp = datetime.now().isoformat()  # noqa: DTZ005
         step_value = (
             step
             if step is not None
@@ -121,11 +118,9 @@ class FileBackend(BaseBackend):
 
     def start_run(self) -> None:
         """Start a new run. File backend doesn't need special start logic."""
-        pass
 
     def end_run(self) -> None:
         """End the current run. File backend doesn't need special end logic."""
-        pass
 
 
 class MLflowBackend(BaseBackend):

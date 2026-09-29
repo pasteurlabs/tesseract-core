@@ -276,7 +276,7 @@ def wait_for_health_or_dispose(
     # Only the call itself is guarded, so a mistake of ours still raises.
     try:
         raw_logs = served.logs()
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001 - see comment above
         logger.warning(f"Failed to get logs for {served}: {ex}")
         raw_logs = b""
     logs = raw_logs.decode(errors="replace")
@@ -287,7 +287,7 @@ def wait_for_health_or_dispose(
     if not timed_out:
         try:
             status = served.wait(timeout=_HEALTH_REQUEST_TIMEOUT)
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001 - see comment above
             logger.warning(f"Failed to read the exit code of {served}: {ex}")
         else:
             exit_code = status["StatusCode"]
@@ -324,7 +324,7 @@ def wait_for_health_or_dispose(
         try:
             # Forced: it may still be running, and an unforced remove would refuse.
             served.remove(force=True)
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             # Deliberately broad: an exception raised in a `finally` replaces
             # the one in flight, so anything at all escaping here would destroy
             # the failure we came to report.
