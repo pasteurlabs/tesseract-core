@@ -659,7 +659,6 @@ def mocked_cuda(monkeypatch):
                 "get_handle": [],
                 "open": [],
                 "close": [],
-                "capable": [],
             }
             # Simulated device memory, keyed by device pointer.
             self._buffers: dict[int, bytearray] = {}
@@ -708,15 +707,8 @@ def mocked_cuda(monkeypatch):
             # arithmetic is exercised with a non-zero value.
             return device_ptr - 256, 4096
 
-        def _rejects(self, device_ptr: int) -> bool:
-            return self.reject_foreign_ipc and device_ptr not in self._buffers
-
-        def is_legacy_ipc_capable(self, device_ptr: int) -> bool:
-            self.calls["capable"].append(device_ptr)
-            return not self._rejects(device_ptr)
-
         def ipc_get_mem_handle(self, device_ptr: int) -> bytes:
-            if self._rejects(device_ptr):
+            if self.reject_foreign_ipc and device_ptr not in self._buffers:
                 raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
             self.calls["get_handle"].append(device_ptr)
             return b"\x01" * IPC_HANDLE_SIZE
@@ -741,19 +733,16 @@ def mocked_cuda(monkeypatch):
         "ipc_get_mem_handle",
         "ipc_open_mem_handle",
         "ipc_close_mem_handle",
-        "is_legacy_ipc_capable",
     ):
         monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
-    # Each test starts with empty export registries, staging pool and mapping
-    # cache, and must not leave fake pointers behind for the next one.
+    # Each test starts with empty export registries and staging pool, and must
+    # not leave fake pointers behind for the next one.
     def _reset() -> None:
         cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
         cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
         cuda_ipc._STAGING_POOL.clear()
-        cuda_ipc._OPEN_MAPPINGS.clear()
         cuda_ipc._staging_pool_bytes = 0
-        cuda_ipc._open_mappings_bytes = 0
 
     _reset()
     yield fake

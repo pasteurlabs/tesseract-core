@@ -214,22 +214,3 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     if ret != 0:
         raise RuntimeError(f"cuMemGetAddressRange failed with error code {ret}")
     return base.value, size.value
-
-
-_CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE = 10
-
-
-def is_legacy_ipc_capable(device_ptr: int) -> bool:
-    """Whether ``cudaIpcGetMemHandle`` accepts the allocation containing ``device_ptr``.
-
-    VMM-backed memory, such as JAX/XLA's default allocator hands out, is not.
-    """
-    flag = ctypes.c_int()
-    ret = _get_driver().cuPointerGetAttribute(
-        ctypes.byref(flag),
-        _CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
-        ctypes.c_ulonglong(device_ptr),
-    )
-    if ret != 0:
-        raise RuntimeError(f"cuPointerGetAttribute failed with error code {ret}")
-    return bool(flag.value)

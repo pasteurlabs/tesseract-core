@@ -35,7 +35,6 @@ pip-wheel fallback and forward-compatible version range -- via
 maintaining their own soname list.
 """
 
-import collections
 import threading
 import weakref
 from typing import Any, get_args
@@ -247,9 +246,9 @@ def _cai_device_ordinal(arr: Any) -> int:
 #
 #   * Client: releases at the END of the request. The server decodes the
 #     client's inputs *during* request handling, and :func:`load_cuda_ipc_arraydict`
-#     copies each input into server-owned memory before the response is sent.
-#     By the time the HTTP call returns (with the body buffered), the inputs
-#     are provably dead and can be released immediately.
+#     copies each input into server-owned memory and closes the mapping before
+#     the response is sent. By the time the HTTP call returns (with the body
+#     buffered), the inputs are provably dead and can be released immediately.
 #
 # Both rely on the same two assumptions:
 #   1. Requests are issued *serially* (never concurrently).
@@ -265,8 +264,7 @@ _CUDA_IPC_STAGING_BUFFERS: list[tuple[int, int, bytes]] = []
 
 # Idle staging buffers as (device pointer, IPC handle), by size. Iterative
 # callers export the same shapes on every request, so reusing the buffers saves
-# a cudaMalloc/cudaFree and a cudaIpcGetMemHandle per array, and keeps handles
-# stable for the consumer's mapping cache (see _OPEN_MAPPINGS). Idle buffers
+# a cudaMalloc/cudaFree and a cudaIpcGetMemHandle per array. Idle buffers
 # beyond _STAGING_POOL_MAX_BYTES are freed.
 _STAGING_POOL: dict[int, list[tuple[int, bytes]]] = {}
 _STAGING_POOL_MAX_BYTES = 1 << 30
@@ -376,31 +374,20 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     # paths identical cleanup.)
     _pin_cuda_ipc_export(arr)
 
-    # Ask whether legacy IPC accepts this allocation before trying, since for
-    # VMM-backed memory (JAX/XLA) the attempt fails on every export. If the
-    # answer is unavailable or wrong, the failed attempt still falls back.
+    # IPC handles reference the *whole* backing allocation, not the array's
+    # (possibly offset) data pointer. Pooled allocators (CuPy, PyTorch) hand
+    # out many arrays from a single cudaMalloc block, so we must resolve the
+    # allocation base, take the handle on that base, and record the byte offset
+    # of this array within the allocation.
+    base_ptr, storage_size = cuda_api.get_allocation_base(data_ptr)
+    storage_offset = data_ptr - base_ptr
+
     try:
-        capable = cuda_api.is_legacy_ipc_capable(data_ptr)
+        handle_bytes = cuda_api.ipc_get_mem_handle(base_ptr)
     except RuntimeError:
-        capable = True
-
-    handle_bytes = None
-    if capable:
-        # IPC handles reference the *whole* backing allocation, not the array's
-        # (possibly offset) data pointer. Pooled allocators (CuPy, PyTorch) hand
-        # out many arrays from a single cudaMalloc block, so we must resolve the
-        # allocation base, take the handle on that base, and record the byte
-        # offset of this array within the allocation.
-        base_ptr, storage_size = cuda_api.get_allocation_base(data_ptr)
-        storage_offset = data_ptr - base_ptr
-        try:
-            handle_bytes = cuda_api.ipc_get_mem_handle(base_ptr)
-        except RuntimeError:
-            pass
-
-    if handle_bytes is None:
-        # Stage only this array's own bytes, not the whole (possibly huge)
-        # backing allocation.
+        # Legacy IPC rejected this pointer, almost certainly because it's
+        # VMM-backed. Stage only this array's own bytes, not the whole
+        # (possibly huge) backing allocation.
         handle_bytes = _stage_for_export(data_ptr, nbytes)
         storage_offset = 0
         storage_size = nbytes
@@ -563,57 +550,6 @@ class IpcDeviceArray:
         return capsule
 
 
-# Open IPC mappings, keyed by device and handle. Opening and closing a mapping
-# costs more than the copy for small and medium arrays, and an iterative
-# exporter hands out the same handles on every request (see _STAGING_POOL), so
-# mappings stay open for reuse. CUDA gives memory that is freed and reallocated
-# at the same address a new handle, so a cached mapping cannot alias a
-# different allocation. A mapping of memory the exporter has since freed is
-# never hit again and is closed when evicted.
-_OPEN_MAPPINGS: collections.OrderedDict[tuple[int, bytes], tuple[int, int]] = (
-    collections.OrderedDict()
-)
-_OPEN_MAPPINGS_MAX = 64
-_OPEN_MAPPINGS_MAX_BYTES = 1 << 30
-_open_mappings_bytes = 0
-_open_mappings_lock = threading.Lock()
-
-
-def _open_mapping(
-    handle_bytes: bytes, device: int, storage_size: int
-) -> tuple[int, bool]:
-    """Return a mapping of ``handle_bytes`` and whether the cache keeps it open."""
-    global _open_mappings_bytes
-    key = (device, handle_bytes)
-    with _open_mappings_lock:
-        cached = _OPEN_MAPPINGS.get(key)
-        if cached is not None:
-            _OPEN_MAPPINGS.move_to_end(key)
-            return cached[0], True
-        base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
-        if storage_size > _OPEN_MAPPINGS_MAX_BYTES:
-            return base_ptr, False
-        _OPEN_MAPPINGS[key] = (base_ptr, storage_size)
-        _open_mappings_bytes += storage_size
-        while (
-            len(_OPEN_MAPPINGS) > _OPEN_MAPPINGS_MAX
-            or _open_mappings_bytes > _OPEN_MAPPINGS_MAX_BYTES
-        ):
-            _, (old_ptr, old_size) = _OPEN_MAPPINGS.popitem(last=False)
-            _open_mappings_bytes -= old_size
-            cuda_api.ipc_close_mem_handle(old_ptr)
-        return base_ptr, True
-
-
-def _drop_mapping(handle_bytes: bytes, device: int) -> None:
-    """Remove a mapping from the cache without closing it."""
-    global _open_mappings_bytes
-    with _open_mappings_lock:
-        entry = _OPEN_MAPPINGS.pop((device, handle_bytes), None)
-        if entry is not None:
-            _open_mappings_bytes -= entry[1]
-
-
 def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     """Load a CUDA array from a JSON dict with a CUDA IPC handle.
 
@@ -621,24 +557,22 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     (e.g. both run with --ipc=host on Docker) and see the same GPU.
 
     Returns a freshly-allocated, caller-owned :class:`IpcDeviceArray`: the IPC
-    handle is opened (or its cached mapping reused, see :func:`_open_mapping`),
-    the array's own bytes are copied device-to-device into a ``cudaMalloc``
-    buffer owned by this process, and the copy is synchronised before
-    returning. The borrow of the producer's memory therefore lasts only for a
-    single on-GPU copy, so the producer is free to reuse or release the exported
-    buffer as soon as this call returns.
+    handle is opened, the array's own bytes are copied device-to-device into a
+    ``cudaMalloc`` buffer owned by this process, the copy is synchronised, and
+    the IPC mapping is closed before returning. The borrow of the producer's
+    memory therefore lasts only for a single on-GPU copy, so the producer is
+    free to reuse or release the exported buffer as soon as this call returns.
 
     The result carries no framework dependency: it exposes both
     ``__cuda_array_interface__`` and ``__dlpack__`` so Torch/JAX/CuPy can adopt
     it zero-copy, plus ``.copy_to_host()`` / ``np.asarray(...)`` for inspection.
     """
-    device_str, handle_b64, storage_offset_str, storage_size_str = val["data"][
+    device_str, handle_b64, storage_offset_str, _storage_size_str = val["data"][
         "buffer"
     ].split(":")
     handle_bytes = pybase64.b64decode(handle_b64, validate=True)
     device = int(device_str)
     storage_offset = int(storage_offset_str)
-    storage_size = int(storage_size_str)
 
     dtype = np.dtype(val["dtype"])
     shape = tuple(val["shape"])
@@ -652,22 +586,17 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     try:
         # Opening the IPC handle can fail too; if it does, we still own the
         # buffer allocated above and must free it (the except below).
-        base_ptr, in_cache = _open_mapping(handle_bytes, device, storage_size)
+        base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
         try:
             # Copy only this array's own bytes out of the producer's (offset)
             # mapping into our fresh buffer, then block until the copy is done so
-            # the producer may reuse its buffer once this returns.
+            # we never unmap mid-copy.
             cuda_api.memcpy_device_to_device(
                 owned_ptr, base_ptr + storage_offset, nbytes
             )
             cuda_api.device_synchronize()
-        except Exception:
-            # Don't keep a mapping that just failed.
-            if in_cache:
-                _drop_mapping(handle_bytes, device)
-            cuda_api.ipc_close_mem_handle(base_ptr)
-            raise
-        if not in_cache:
+        finally:
+            # Only reached once the mapping was opened; always unmap it.
             cuda_api.ipc_close_mem_handle(base_ptr)
     except Exception:
         cuda_api.free(owned_ptr)

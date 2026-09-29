@@ -298,7 +298,7 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)  # nbytes = 4*8*4 = 128
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
-    # The capability check spares the call that would fail.
+    # Only the staging buffer's handle was taken.
     assert mocked_cuda.calls["get_handle"] == [0xD000]
     # The array's own bytes are copied into a fresh buffer.
     assert mocked_cuda.calls["malloc"] == [128]
@@ -310,19 +310,6 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     # Staging buffer registered for a later release.
     assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
         (0xD000, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
-    ]
-
-
-def test_dump_falls_back_to_staging_when_handle_fails(mocked_cuda, monkeypatch):
-    """A handle failure on memory reported as capable still falls back."""
-    mocked_cuda.reject_foreign_ipc = True
-    monkeypatch.setattr(cuda_api, "is_legacy_ipc_capable", lambda ptr: True)
-
-    out = cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
-
-    assert _unpack_cuda_ipc(out["data"])["storage_offset"] == 0
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
-        (0xD000, 16, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
     ]
 
 
@@ -582,8 +569,8 @@ def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
     }
 
 
-def test_load_copies_own_bytes_at_offset(mocked_cuda):
-    """Decode allocates the array's own nbytes and copies from base+offset."""
+def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
+    """Decode allocates the array's own nbytes, copies from base+offset, closes."""
     handle = b"\x02" * cuda_api.IPC_HANDLE_SIZE
     encoded = _encoded((4, 8), "float32", device=1, offset=128, storage_size=4096)
 
@@ -601,9 +588,9 @@ def test_load_copies_own_bytes_at_offset(mocked_cuda):
     assert dst == 0xD000
     assert src == 0x2000 + 128
     assert size == nbytes
-    # Synchronised before returning; the mapping stays open for reuse.
+    # Synchronised before the mapping was closed.
     assert mocked_cuda.calls["sync"] == [True]
-    assert mocked_cuda.calls["close"] == []
+    assert mocked_cuda.calls["close"] == [0x2000]
     # Returned wrapper is framework-agnostic and correctly shaped.
     assert isinstance(out, cuda_ipc.IpcDeviceArray)
     assert out.shape == (4, 8)
@@ -615,39 +602,6 @@ def test_load_copies_own_bytes_at_offset(mocked_cuda):
     assert iface["data"] == (0xD000, False)
     assert iface["strides"] is None
     assert iface["typestr"] == np.dtype("float32").str
-
-
-def test_load_reuses_open_mapping(mocked_cuda):
-    """A handle seen before is copied from its open mapping, not reopened."""
-    encoded = _encoded((4,), "float32", device=0, offset=0, storage_size=16)
-    cuda_ipc.load_cuda_ipc_arraydict(encoded)
-    cuda_ipc.load_cuda_ipc_arraydict(encoded)
-    assert len(mocked_cuda.calls["open"]) == 1
-    assert mocked_cuda.calls["close"] == []
-    assert len(mocked_cuda.calls["memcpy_d2d"]) == 2
-
-
-def test_load_evicts_least_recent_mapping(mocked_cuda, monkeypatch):
-    """Beyond the cache limit, the least recently used mapping is closed."""
-    monkeypatch.setattr(cuda_ipc, "_OPEN_MAPPINGS_MAX", 1)
-    opened = iter([0x2000, 0x3000])
-    monkeypatch.setattr(cuda_api, "ipc_open_mem_handle", lambda h, d: next(opened))
-    cuda_ipc.load_cuda_ipc_arraydict(
-        _encoded((4,), "float32", device=0, offset=0, storage_size=16, fill=b"\x02")
-    )
-    cuda_ipc.load_cuda_ipc_arraydict(
-        _encoded((4,), "float32", device=0, offset=0, storage_size=16, fill=b"\x03")
-    )
-    assert mocked_cuda.calls["close"] == [0x2000]
-
-
-def test_load_closes_mapping_too_large_to_cache(mocked_cuda, monkeypatch):
-    """A mapping larger than the cache's byte limit is closed right away."""
-    monkeypatch.setattr(cuda_ipc, "_OPEN_MAPPINGS_MAX_BYTES", 8)
-    cuda_ipc.load_cuda_ipc_arraydict(
-        _encoded((4,), "float32", device=0, offset=0, storage_size=16)
-    )
-    assert mocked_cuda.calls["close"] == [0x2000]
 
 
 def test_load_frees_owned_buffer_on_del(mocked_cuda):
@@ -675,7 +629,7 @@ def test_load_closes_handle_even_on_copy_failure(mocked_cuda, monkeypatch):
         cuda_ipc.load_cuda_ipc_arraydict(
             _encoded((2,), "float32", device=0, offset=0, storage_size=8)
         )
-    # Owned buffer freed, IPC mapping closed and evicted from the cache.
+    # Owned buffer freed and the IPC mapping closed despite the failure.
     assert mocked_cuda.calls["free"] == [0xD000]
     assert mocked_cuda.calls["close"] == [0x2000]
 
