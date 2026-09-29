@@ -334,6 +334,10 @@ def _stage_for_export(src_ptr: int, nbytes: int, device: int) -> bytes:
     pooled = _STAGING_POOL.take(device, nbytes)
     ptr, handle = pooled if pooled is not None else (cuda_api.malloc(nbytes), None)
     try:
+        # The copy runs on the legacy default stream, which is not ordered after
+        # the producer's non-blocking streams (JAX's, for one), so wait for the
+        # producer's kernels to finish writing the source first.
+        cuda_api.device_synchronize()
         cuda_api.memcpy_device_to_device(ptr, src_ptr, nbytes)
         if handle is None:
             handle = cuda_api.ipc_get_mem_handle(ptr)

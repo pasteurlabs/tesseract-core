@@ -281,8 +281,8 @@ def _build_jax():
     return [(arr, np.asarray(arr))]
 
 
-def _build_force_staging():
-    """A CuPy array plus a global patch that forces the VMM staging fallback.
+def _reject_first_ipc_handle():
+    """Patch ``ipc_get_mem_handle`` so the next export takes the staging fallback.
 
     Makes the first ``ipc_get_mem_handle`` call (on the array's base pointer)
     raise, so encode falls back to staging; the second call (on the staging
@@ -302,8 +302,35 @@ def _build_force_staging():
 
     cuda_api.ipc_get_mem_handle = flaky
 
+
+def _build_force_staging():
+    """A CuPy array exported through the staging fallback."""
+    _reject_first_ipc_handle()
     arr = cupy.arange(1024, dtype=cupy.float32) + 7.0
     return [(arr, cupy.asnumpy(arr))]
+
+
+def _build_pending_write():
+    """A tensor still being written on a non-blocking stream when it is exported.
+
+    Forces the staging fallback, whose copy runs on the legacy default stream and
+    so must wait for the write explicitly.
+    """
+    import torch
+
+    _reject_first_ipc_handle()
+    t = torch.zeros(1 << 20, device="cuda:0")
+    side = torch.cuda.Stream()
+    # The first launch on a new stream can block; get it out of the way.
+    with torch.cuda.stream(side):
+        torch.ones(1, device="cuda:0").sum()
+    side.synchronize()
+    with torch.cuda.stream(side):
+        torch.cuda._sleep(200_000_000)
+        t.fill_(7.0)
+    if side.query():
+        raise RuntimeError("the write finished before the export")
+    return [(t, np.full(1 << 20, 7.0, dtype=np.float32))]
 
 
 _BUILDERS = {
@@ -313,6 +340,7 @@ _BUILDERS = {
     "torch": _build_torch,
     "jax": _build_jax,
     "force_staging": _build_force_staging,
+    "pending_write": _build_pending_write,
 }
 
 
@@ -661,6 +689,15 @@ def test_reused_owned_buffer_waits_for_pending_reads():
             if proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=5)
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_staging_copy_waits_for_pending_writes():
+    """The staging copy sees the producer's writes still queued on its streams."""
+    results = run_cross_process("pending_write")
+    assert len(results) == 1
+    assert results[0]["match"], results[0]
 
 
 # ── Test 3: SDK client-side encode path ─────────────────────────────────
