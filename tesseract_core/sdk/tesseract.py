@@ -1001,23 +1001,6 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
-def _check_device_host_copy(arr: Any) -> None:
-    """Raise if implicit device-to-host copies are forbidden via the environment.
-
-    SDK-side twin of :func:`tesseract_core.runtime.cuda.ipc.check_device_host_copy`,
-    reading the same ``TESSERACT_FORBID_DEVICE_HOST_COPY`` variable. Kept
-    separate so the host path works on a base SDK install without the runtime.
-    """
-    if os.environ.get("TESSERACT_FORBID_DEVICE_HOST_COPY", "").lower() in {
-        "1",
-        "true",
-    }:
-        raise RuntimeError(
-            f"Implicit device-to-host copy of a {type(arr).__name__} GPU array "
-            "(TESSERACT_FORBID_DEVICE_HOST_COPY is set)."
-        )
-
-
 def _encode_array(
     arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
 ) -> dict:
@@ -1028,7 +1011,12 @@ def _encode_array(
     if hasattr(arr, "__cuda_array_interface__"):
         if encoding == "cuda_ipc":
             return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
-        _check_device_host_copy(arr)
+        # Only reach for the runtime when the flag is set, so a base SDK install
+        # can still host-copy GPU arrays.
+        if os.environ.get("TESSERACT_FORBID_DEVICE_HOST_COPY"):
+            _import_cuda_ipc().check_device_host_copy(
+                f"a {type(arr).__name__} GPU array"
+            )
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")

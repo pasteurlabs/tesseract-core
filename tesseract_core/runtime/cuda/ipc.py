@@ -36,9 +36,10 @@ pip-wheel fallback and forward-compatible version range -- via
 maintaining their own soname list.
 """
 
+import math
 import os
 import weakref
-from typing import Any, get_args
+from typing import Any, NamedTuple, get_args
 
 import numpy as np
 import pybase64
@@ -125,47 +126,70 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     )
 
 
-def _get_cuda_array_info(arr: Any) -> tuple[int, int, tuple[int, ...], str]:
-    """Extract (device_ptr, nbytes, shape, numpy_dtype_str) from a CUDA array.
+class _CudaArrayInfo(NamedTuple):
+    """Device-array metadata read from ``__cuda_array_interface__``.
 
-    Works with any object that implements __cuda_array_interface__ (v2+):
-    PyTorch tensors, CuPy arrays, JAX DeviceArrays, Numba device arrays, etc.
+    ``strides`` is in bytes; ``None`` means row-major contiguous.
+    """
+
+    data_ptr: int
+    nbytes: int
+    shape: tuple[int, ...]
+    dtype: np.dtype
+    device: int
+    strides: tuple[int, ...] | None
+
+    def is_c_contiguous(self) -> bool:
+        """Whether the array's memory is row-major contiguous.
+
+        cuda_ipc transfers a flat, contiguous byte range: encode copies (or
+        hands off) ``prod(shape) * itemsize`` consecutive bytes and decode
+        rebuilds a contiguous array from shape/dtype alone (the payload carries
+        no strides). A non-contiguous source would therefore be silently
+        misread, so callers must reject it.
+
+        Explicit strides are still contiguous iff they equal the row-major
+        strides implied by shape and itemsize.
+        """
+        if self.strides is None:
+            return True
+        expected = []
+        acc = self.dtype.itemsize
+        for dim in reversed(self.shape):
+            expected.append(acc)
+            acc *= dim
+        expected.reverse()
+        return self.strides == tuple(expected)
+
+
+def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
+    """Read a CUDA array's metadata from ``__cuda_array_interface__`` (v2+).
+
+    Works with PyTorch tensors, CuPy arrays, JAX arrays, Numba device arrays,
+    etc. The protocol carries no device field, so the ordinal comes from the
+    framework's own attribute (CuPy ``.device.id``, PyTorch ``.device.index``),
+    defaulting to 0.
     """
     iface = arr.__cuda_array_interface__
-    data_ptr = iface["data"][0]
     shape = tuple(iface["shape"])
-    typestr = iface["typestr"]  # e.g. "<f4", "|b1"
-    dtype = np.dtype(typestr)
-    nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
-    return data_ptr, nbytes, shape, dtype.name
-
-
-def _is_c_contiguous(arr: Any) -> bool:
-    """Whether a CUDA array's memory is C-contiguous per __cuda_array_interface__.
-
-    cuda_ipc transfers a flat, contiguous byte range: encode copies (or hands
-    off) ``prod(shape) * itemsize`` consecutive bytes and decode rebuilds a
-    contiguous array from shape/dtype alone (the payload carries no strides). A
-    non-contiguous source would therefore be silently misread, so callers must
-    reject it.
-
-    Per the protocol, ``strides = None`` means row-major contiguous. A non-None
-    ``strides`` is still contiguous iff it equals the row-major strides implied
-    by shape and itemsize.
-    """
-    iface = arr.__cuda_array_interface__
+    dtype = np.dtype(iface["typestr"])  # e.g. "<f4", "|b1"
     strides = iface.get("strides")
-    if strides is None:
-        return True
-    shape = tuple(iface["shape"])
-    itemsize = np.dtype(iface["typestr"]).itemsize
-    expected = []
-    acc = itemsize
-    for dim in reversed(shape):
-        expected.append(acc)
-        acc *= dim
-    expected.reverse()
-    return tuple(strides) == tuple(expected)
+
+    device = 0
+    dev = getattr(arr, "device", None)
+    if hasattr(dev, "id"):
+        device = dev.id  # CuPy
+    elif getattr(dev, "index", None) is not None:
+        device = dev.index  # PyTorch
+
+    return _CudaArrayInfo(
+        data_ptr=iface["data"][0],
+        nbytes=math.prod(shape) * dtype.itemsize,
+        shape=shape,
+        dtype=dtype,
+        device=device,
+        strides=None if strides is None else tuple(strides),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,15 +303,15 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
             f"(object with __cuda_array_interface__), got {type(arr).__name__}"
         )
 
-    if not _is_c_contiguous(arr):
+    info = _read_cuda_array_info(arr)
+    if not info.is_c_contiguous():
         raise ValueError(
             "cuda_ipc encoding requires a C-contiguous array; got one with "
-            f"strides {arr.__cuda_array_interface__.get('strides')}. Make a "
-            "contiguous copy first (e.g. cupy.ascontiguousarray / "
-            "torch.Tensor.contiguous)."
+            f"strides {info.strides}. Make a contiguous copy first (e.g. "
+            "cupy.ascontiguousarray / torch.Tensor.contiguous)."
         )
 
-    data_ptr, nbytes, shape, dtype_name = _get_cuda_array_info(arr)
+    data_ptr, nbytes = info.data_ptr, info.nbytes
 
     # Keep the source allocation alive until exports are explicitly released.
     # (Still needed even on the VMM fallback path below: stage_for_legacy_ipc
@@ -317,23 +341,13 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
         storage_size = nbytes
         handle_bytes = cuda_api.ipc_get_mem_handle(staging_ptr)
 
-    # Determine device ordinal
-    device = 0
-    # CuPy arrays expose .device.id, torch tensors expose .device.index
-    if hasattr(arr, "device"):
-        dev = arr.device
-        if hasattr(dev, "id"):
-            device = dev.id  # CuPy
-        elif hasattr(dev, "index") and dev.index is not None:
-            device = dev.index  # PyTorch
-
     handle_b64 = pybase64.b64encode_as_string(handle_bytes)
     return {
         "object_type": "array",
-        "shape": list(shape),
-        "dtype": dtype_name,
+        "shape": list(info.shape),
+        "dtype": info.dtype.name,
         "data": {
-            "buffer": f"{device}:{handle_b64}:{storage_offset}:{storage_size}",
+            "buffer": f"{info.device}:{handle_b64}:{storage_offset}:{storage_size}",
             "encoding": "cuda_ipc",
         },
     }
@@ -550,7 +564,8 @@ def validate_cuda_array(
     :func:`tesseract_core.runtime.array_encoding._coerce_shape_dtype`, but never
     casts (a cast would need a device copy the caller did not ask for).
     """
-    _, _, shape, dtype_name = _get_cuda_array_info(val)
+    info = _read_cuda_array_info(val)
+    shape, dtype_name = info.shape, info.dtype.name
 
     # Shape: Ellipsis means "no check"; otherwise each dim must match unless the
     # expected dim is None (a polymorphic wildcard).
