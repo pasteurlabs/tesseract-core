@@ -465,7 +465,7 @@ def test_load_frees_owned_buffer_on_open_failure(mocked_cuda, monkeypatch):
     assert mocked_cuda.calls["close"] == []
 
 
-def test_copy_to_host_reads_device_bytes(mocked_cuda):
+def test_copy_to_host_reads_device_bytes(mocked_cuda, allow_device_host_copy):
     """copy_to_host performs a device->host memcpy + sync and returns the bytes."""
     expected = np.arange(6, dtype=np.float32).reshape(2, 3)
     mocked_cuda.device_bytes = expected.tobytes()
@@ -586,7 +586,7 @@ def test_output_to_bytes_mixed_gpu_and_cpu_arrays(mocked_cuda):
     np.testing.assert_array_equal(decoded_cpu, np.arange(3, dtype=np.float32))
 
 
-def test_cuda_array_to_host_branches():
+def test_cuda_array_to_host_branches(allow_device_host_copy):
     """cuda_array_to_host handles CuPy-, torch-, __array__-like, and rejects others."""
 
     class CupyLike:
@@ -612,6 +612,37 @@ def test_cuda_array_to_host_branches():
     assert cuda_ipc.cuda_array_to_host(ArrayLike()).tolist() == [5.0, 6.0]
     with pytest.raises(TypeError, match="Cannot copy GPU array"):
         cuda_ipc.cuda_array_to_host(object())
+
+
+def test_forbid_device_host_copy_blocks_implicit_copies(mocked_cuda):
+    """With TESSERACT_FORBID_DEVICE_HOST_COPY set, implicit host copies raise.
+
+    Covers every implicit device-to-host path: a GPU output serialized without a
+    device transport (runtime), a GPU input encoded without one (SDK), and
+    ``np.asarray`` on a decoded device array. An explicit ``copy_to_host`` still
+    works. The flag is set for all tests by the ``forbid_device_host_copy``
+    autouse fixture.
+    """
+    from tesseract_core.sdk.tesseract import _encode_array
+
+    match = "TESSERACT_FORBID_DEVICE_HOST_COPY"
+    with pytest.raises(RuntimeError, match=match):
+        array_encoding.encode_array(
+            FakeCudaArray((3,), "<f4"),
+            _info(True, {"array_encoding": "base64"}),
+            (None,),
+            "float32",
+        )
+    with pytest.raises(RuntimeError, match=match):
+        _encode_array(FakeCudaArray((3,), "<f4"), encoding="base64")
+
+    mocked_cuda.device_bytes = np.arange(3, dtype=np.float32).tobytes()
+    decoded = cuda_ipc.load_cuda_ipc_arraydict(
+        _encoded((3,), "float32", device=0, offset=0, storage_size=12)
+    )
+    with pytest.raises(RuntimeError, match=match):
+        np.asarray(decoded)
+    np.testing.assert_array_equal(decoded.copy_to_host(), np.arange(3))
 
 
 # ── GPU-transport gating ────────────────────────────────────────────────

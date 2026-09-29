@@ -20,7 +20,9 @@ other array-data models in :mod:`array_encoding`; the public entry points used
 by :mod:`array_encoding` are:
 
 * :func:`has_cuda_array_interface` / :func:`cuda_array_to_host` -- host-copy
-  helpers for non-IPC encodings of GPU arrays,
+  helpers for non-IPC encodings of GPU arrays (both implicit device-to-host
+  paths can be turned into errors for testing via
+  ``TESSERACT_FORBID_DEVICE_HOST_COPY``; see :func:`check_device_host_copy`),
 * :func:`validate_cuda_array` -- shape/dtype validation without a device copy,
 * :func:`dump_cuda_ipc_arraydict` / :func:`load_cuda_ipc_arraydict` -- the
   encode/decode pair,
@@ -34,6 +36,7 @@ pip-wheel fallback and forward-compatible version range -- via
 maintaining their own soname list.
 """
 
+import os
 import weakref
 from typing import Any, get_args
 
@@ -48,6 +51,7 @@ from tesseract_core.runtime.device_transport import DeviceTransport
 
 __all__ = [
     "IpcDeviceArray",
+    "check_device_host_copy",
     "cuda_array_to_host",
     "dump_cuda_ipc_arraydict",
     "has_cuda_array_interface",
@@ -67,6 +71,28 @@ def has_cuda_array_interface(obj: Any) -> bool:
     return hasattr(obj, "__cuda_array_interface__")
 
 
+# Set to a truthy value to make implicit device-to-host copies raise instead of
+# silently round-tripping GPU data through host memory. A testing aid: it turns
+# "this path should be zero-copy" into an assertion that holds across process
+# and container boundaries (the SDK checks the same variable).
+FORBID_DEVICE_HOST_COPY_ENV = "TESSERACT_FORBID_DEVICE_HOST_COPY"
+
+
+def check_device_host_copy(what: str) -> None:
+    """Raise if implicit device-to-host copies are forbidden via the environment.
+
+    Called on every path where the runtime would otherwise copy a GPU array to
+    the host without being asked to (a GPU output serialized without a device
+    transport, or ``np.asarray`` on a decoded device array). Explicit copies
+    such as :meth:`IpcDeviceArray.copy_to_host` are never blocked.
+    """
+    if os.environ.get(FORBID_DEVICE_HOST_COPY_ENV, "").lower() in {"1", "true"}:
+        raise RuntimeError(
+            f"Implicit device-to-host copy of {what} "
+            f"({FORBID_DEVICE_HOST_COPY_ENV} is set)."
+        )
+
+
 def cuda_array_to_host(arr: Any) -> np.ndarray:
     """Copy a GPU array to a host NumPy array (explicit device-to-host copy).
 
@@ -74,7 +100,11 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     CuPy (``.get()``) and PyTorch (``.cpu().numpy()``) explicitly, then falls
     back to ``np.asarray`` for any other framework whose arrays support
     ``__array__`` (e.g. JAX, which fetches to host on conversion).
+
+    Raises if ``TESSERACT_FORBID_DEVICE_HOST_COPY`` is set (see
+    :func:`check_device_host_copy`).
     """
+    check_device_host_copy(f"a {type(arr).__name__} GPU array")
     get = getattr(arr, "get", None)
     if callable(get):  # CuPy
         return np.asarray(get())
@@ -357,7 +387,9 @@ class IpcDeviceArray:
     * ``__dlpack__`` / ``__dlpack_device__`` let Torch and JAX adopt it,
 
     both zero-copy. ``.copy_to_host()`` / ``np.asarray(...)`` materialise a host
-    NumPy copy so it can be inspected without any GPU framework installed.
+    NumPy copy so it can be inspected without any GPU framework installed. The
+    implicit ``np.asarray`` route raises if ``TESSERACT_FORBID_DEVICE_HOST_COPY``
+    is set (see :func:`check_device_host_copy`); ``.copy_to_host()`` never does.
 
     Ownership of the device buffer is released exactly once: either a
     :func:`weakref.finalize` callback frees it (see
@@ -417,6 +449,7 @@ class IpcDeviceArray:
         return host
 
     def __array__(self, dtype: Any = None) -> np.ndarray:
+        check_device_host_copy("an IpcDeviceArray")
         host = self.copy_to_host()
         return host if dtype is None else host.astype(dtype)
 

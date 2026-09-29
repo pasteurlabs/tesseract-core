@@ -121,6 +121,24 @@ def tesseract_output_dir(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def forbid_device_host_copy(monkeypatch):
+    """Make implicit device-to-host copies raise in every test by default.
+
+    GPU arrays on a device transport are meant to stay on-device end to end, so
+    any silent host round-trip is a bug. The variable is inherited by subprocess
+    servers; containers need it passed explicitly. Tests that deliberately
+    exercise a host fallback opt out via ``allow_device_host_copy``.
+    """
+    monkeypatch.setenv("TESSERACT_FORBID_DEVICE_HOST_COPY", "1")
+
+
+@pytest.fixture
+def allow_device_host_copy(monkeypatch):
+    """Opt a test out of ``forbid_device_host_copy``."""
+    monkeypatch.delenv("TESSERACT_FORBID_DEVICE_HOST_COPY")
+
+
+@pytest.fixture(autouse=True)
 def reset_config():
     """Reset the runtime configuration before each test."""
     import tesseract_core.runtime.config

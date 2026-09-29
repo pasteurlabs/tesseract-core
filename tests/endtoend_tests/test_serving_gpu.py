@@ -83,6 +83,16 @@ def gpu_image_name(
     return image_tag
 
 
+def _forbid_host_copy_env() -> dict[str, str]:
+    """Container env that makes implicit device-to-host copies raise.
+
+    Containers don't inherit the test process environment (where the conftest
+    fixture sets this), so it is forwarded explicitly. A fresh dict per call,
+    since serving updates the dict it is given in place.
+    """
+    return {"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"}
+
+
 @requires_cuda
 def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     """A GPU Tesseract with gpu_transport='cuda_ipc' returns correct device memory.
@@ -106,6 +116,7 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
         gpus=["all"],
         output_format="json+base64",
         runtime_config={"gpu_transport": "cuda_ipc"},
+        environment=_forbid_host_copy_env(),
     ) as t:
         result = t.apply({"a": a, "b": b, "s": s})
 
@@ -130,6 +141,7 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
         gpus=["all"],
         output_format="json+base64",
         runtime_config={"gpu_transport": "cuda_ipc"},
+        environment=_forbid_host_copy_env(),
     ) as t:
         for i in range(3):
             a = np.full(4, float(i), dtype=np.float32)
