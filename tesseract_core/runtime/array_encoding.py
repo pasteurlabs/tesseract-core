@@ -632,6 +632,58 @@ def _coerce_shape_dtype(
     return arr
 
 
+def _check_uncast_shape_dtype(
+    shape: tuple[int, ...],
+    dtype_name: str,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+    no_cast_reason: str,
+) -> None:
+    """Check array metadata against the expected shape and dtype, without casting.
+
+    For arrays that are validated from metadata alone and passed through
+    unchanged (GPU arrays, on-disk binref references). Mirrors the checks in
+    :func:`_coerce_shape_dtype`, but never broadcasts or casts;
+    ``no_cast_reason`` explains why in the dtype-mismatch error.
+    """
+    # Shape: Ellipsis means "no check"; otherwise each dim must match unless the
+    # expected dim is None (a polymorphic wildcard).
+    if expected_shape is not Ellipsis and (
+        len(shape) != len(expected_shape)
+        or any(
+            exp is not None and got != exp
+            for got, exp in zip(shape, expected_shape, strict=False)
+        )
+    ):
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} is incompatible with expected "
+            "shape {expected_shape}",
+            {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
+        )
+
+    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
+    if dtype_name not in allowed_dtypes:
+        raise PydanticCustomError(
+            "array_invalid_dtype",
+            "Array has unsupported dtype '{actual_dtype}'; must be one of: "
+            "{allowed_dtypes}",
+            {"actual_dtype": dtype_name, "allowed_dtypes": ", ".join(allowed_dtypes)},
+        )
+
+    if expected_dtype is not None and dtype_name != expected_dtype:
+        raise PydanticCustomError(
+            "array_dtype_mismatch",
+            "Array dtype '{actual_dtype}' does not match expected dtype "
+            "'{expected_dtype}' ({no_cast_reason})",
+            {
+                "actual_dtype": dtype_name,
+                "expected_dtype": expected_dtype,
+                "no_cast_reason": no_cast_reason,
+            },
+        )
+
+
 def python_to_array(
     val: Any,
     expected_shape: ShapeType,

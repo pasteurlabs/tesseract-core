@@ -92,11 +92,11 @@ of one file per array. Use it when a Tesseract emits many small arrays (like a
 per-timestep trajectory):
 
 ```python
-with BinrefWriter() as checkpoints:
-    trajectory = [checkpoints.write(field)]
-    for _ in range(steps):
-        field = step(field)
-        trajectory.append(checkpoints.write(field))
+checkpoints = BinrefWriter()
+trajectory = [checkpoints.write(field)]
+for _ in range(steps):
+    field = step(field)
+    trajectory.append(checkpoints.write(field))
 ```
 
 **`BinrefArray.from_file(path, shape, dtype)`** — reference a buffer that some

@@ -65,11 +65,11 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # Checkpoint every timestep to disk as the solve proceeds. BinrefWriter packs
     # all the snapshots into a few shared buffers instead of one file each, and
     # never keeps more than the current field in memory.
-    with BinrefWriter() as checkpoints:
-        trajectory = [checkpoints.write(field)]
-        for _ in range(inputs.steps):
-            field = _step(field, inputs.diffusivity)
-            trajectory.append(checkpoints.write(field))
+    checkpoints = BinrefWriter()
+    trajectory = [checkpoints.write(field)]
+    for _ in range(inputs.steps):
+        field = _step(field, inputs.diffusivity)
+        trajectory.append(checkpoints.write(field))
 
     # The final field gets its own buffer.
     final = BinrefArray.write(field)

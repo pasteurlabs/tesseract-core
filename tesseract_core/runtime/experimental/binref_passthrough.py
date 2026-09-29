@@ -26,8 +26,8 @@ than one file each::
 
 
     def apply(inputs):
-        with BinrefWriter() as writer:
-            chunks = [writer.write(a) for a in produce_chunks(inputs)]
+        writer = BinrefWriter()
+        chunks = [writer.write(a) for a in produce_chunks(inputs)]
         return OutputSchema(chunks=chunks)
 """
 
@@ -36,11 +36,10 @@ from __future__ import annotations
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from typing import Any, get_args
 from uuid import uuid4
 
 import numpy as np
-from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.array_encoding import (
     MAX_BINREF_BUFFER_SIZE,
@@ -48,13 +47,11 @@ from tesseract_core.runtime.array_encoding import (
     ArrayDict,
     ArrayLike,
     ShapeType,
+    _check_uncast_shape_dtype,
     _dump_binref_arraydict,
     _load_binref_arraydict,
 )
 from tesseract_core.runtime.config import get_config
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
 
 
 class BinrefArray:
@@ -75,8 +72,7 @@ class BinrefArray:
 
     * :meth:`write` -- write a NumPy array to disk and reference it.
     * :meth:`from_file` -- reference a buffer some other code already wrote (e.g.
-      a compiled solver), building the buffer spec from a path + offset.
-    * :meth:`from_spec` -- for full control, pass an explicit buffer spec string.
+      a compiled solver).
 
     Example (compiled code wrote ``mesh.bin`` itself)::
 
@@ -102,48 +98,8 @@ class BinrefArray:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         raise RuntimeError(
             "BinrefArray cannot be instantiated directly; use one of the named "
-            "constructors: BinrefArray.write(arr), "
-            "BinrefArray.from_file(path, shape, dtype), or "
-            "BinrefArray.from_spec(buffer, shape, dtype)."
-        )
-
-    @classmethod
-    def from_spec(
-        cls,
-        buffer: str,
-        shape: Sequence[int],
-        dtype: str,
-        *,
-        compression: str | None = None,
-    ) -> BinrefArray:
-        """Reference a binref buffer by its raw spec string.
-
-        Args:
-            buffer: A ``<path>[:<offset>[:<compressed_size>]]`` spec. The path is
-                resolved against the served ``output_path`` (see class docs).
-            shape: Shape of the array.
-            dtype: NumPy dtype name (e.g. ``"float64"``).
-            compression: Compression applied to the buffer, if any (``"lz4"``).
-                When set, ``buffer`` must include the compressed size.
-        """
-        if not isinstance(buffer, str) or not buffer:
-            raise ValueError("BinrefArray buffer must be a non-empty path spec")
-        allowed_dtypes = [d.lower() for d in get_args(AllowedDtypes)]
-        if dtype not in allowed_dtypes:
-            raise ValueError(
-                f"BinrefArray dtype '{dtype}' is not supported; must be one of: "
-                f"{', '.join(allowed_dtypes)}"
-            )
-        data: dict[str, Any] = {"buffer": buffer, "encoding": "binref"}
-        if compression is not None:
-            data["compression"] = compression
-        return cls._from_arraydict(
-            {
-                "object_type": "array",
-                "shape": [int(s) for s in shape],
-                "dtype": dtype,
-                "data": data,
-            }
+            "constructors: BinrefArray.write(arr) or "
+            "BinrefArray.from_file(path, shape, dtype)."
         )
 
     @classmethod
@@ -170,13 +126,33 @@ class BinrefArray:
                 ``compression`` is set so the reader knows how much to read.
         """
         spec = str(path)
+        if not spec:
+            raise ValueError("BinrefArray path must be non-empty")
+        allowed_dtypes = [d.lower() for d in get_args(AllowedDtypes)]
+        if dtype not in allowed_dtypes:
+            raise ValueError(
+                f"BinrefArray dtype '{dtype}' is not supported; must be one of: "
+                f"{', '.join(allowed_dtypes)}"
+            )
+
+        data: dict[str, Any] = {"encoding": "binref"}
         if compression is not None:
             if compressed_size is None:
                 raise ValueError("compressed_size is required when compression is set")
-            spec = f"{spec}:{int(offset)}:{int(compressed_size)}"
+            data["buffer"] = f"{spec}:{int(offset)}:{int(compressed_size)}"
+            data["compression"] = compression
         elif offset:
-            spec = f"{spec}:{int(offset)}"
-        return cls.from_spec(spec, shape, dtype, compression=compression)
+            data["buffer"] = f"{spec}:{int(offset)}"
+        else:
+            data["buffer"] = spec
+        return cls._from_arraydict(
+            {
+                "object_type": "array",
+                "shape": [int(s) for s in shape],
+                "dtype": dtype,
+                "data": data,
+            }
+        )
 
     @classmethod
     def write(
@@ -199,18 +175,7 @@ class BinrefArray:
                 ``output_path`` (see class docs on path resolution).
             compression: Optional compression to apply (currently only ``"lz4"``).
         """
-        if output_dir is None:
-            output_dir = get_config().output_path
-        arr = np.ascontiguousarray(arr)
-        arraydict, _ = _dump_binref_arraydict(
-            arr,
-            base_dir=output_dir,
-            subdir=None,
-            current_binref_uuid=str(uuid4()),
-            max_file_size=MAX_BINREF_BUFFER_SIZE,
-            compression=compression,
-        )
-        return cls._from_arraydict(arraydict)
+        return BinrefWriter(output_dir, compression=compression).write(arr)
 
     @classmethod
     def _from_arraydict(cls, arraydict: ArrayDict) -> BinrefArray:
@@ -246,30 +211,21 @@ class BinrefArray:
         ``base_dir`` in ``context`` if given, else the configured
         ``output_path``.
         """
-        return _load_ref(self, context or {})
+        base_dir = (context or {}).get("base_dir", get_config().output_path)
+        return _load_binref_arraydict(self._arraydict, base_dir)
 
-    def __array__(self, dtype: Any = None) -> np.ndarray:
+    def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
         # Lets NumPy (and any array-like consumer) materialize the reference on
-        # demand via ``np.asarray(ref)``.
+        # demand via ``np.asarray(ref)``. Loading always produces a fresh array,
+        # so ``copy`` needs no handling beyond being accepted.
         arr = self.load()
-        return arr.astype(dtype) if dtype is not None else arr
+        return arr.astype(dtype, copy=False) if dtype is not None else arr
 
     def __repr__(self) -> str:
         return (
             f"BinrefArray(buffer={self.buffer!r}, shape={self.shape!r}, "
             f"dtype={self.dtype!r})"
         )
-
-
-def _load_ref(val: BinrefArray, context: dict[str, Any]) -> np.ndarray:
-    """Load a :class:`BinrefArray`'s buffer into a NumPy array.
-
-    The buffer path is relative to the served ``output_path``, which is also
-    where binref serialization resolves relative paths from, so we reuse the
-    binref loader with it as ``base_dir``.
-    """
-    base_dir = context.get("base_dir", get_config().output_path)
-    return _load_binref_arraydict(val.to_arraydict(), base_dir)
 
 
 def validate_binref_array(
@@ -280,44 +236,16 @@ def validate_binref_array(
     Returns the reference unchanged so it can later be forwarded verbatim (see
     :func:`~tesseract_core.runtime.array_encoding.encode_array`). Only the
     reference's declared ``shape``/``dtype`` are inspected -- no file is opened.
-    Mirrors the shape/dtype checks of ordinary ``Array`` validation but never
-    casts (a cast would require reading and
-    rewriting the buffer, defeating the point of a passthrough).
+    Never casts: a cast would require reading and rewriting the buffer,
+    defeating the point of a passthrough.
     """
-    shape = val.shape
-    dtype_name = val.dtype
-
-    if expected_shape is not Ellipsis and (
-        len(shape) != len(expected_shape)
-        or any(
-            exp is not None and got != exp
-            for got, exp in zip(shape, expected_shape, strict=False)
-        )
-    ):
-        raise PydanticCustomError(
-            "array_shape_mismatch",
-            "Binref array shape {actual_shape} is incompatible with expected "
-            "shape {expected_shape}",
-            {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
-        )
-
-    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
-    if dtype_name not in allowed_dtypes:
-        raise PydanticCustomError(
-            "array_invalid_dtype",
-            "Binref array has unsupported dtype '{actual_dtype}'; must be one "
-            "of: {allowed_dtypes}",
-            {"actual_dtype": dtype_name, "allowed_dtypes": ", ".join(allowed_dtypes)},
-        )
-
-    if expected_dtype is not None and dtype_name != expected_dtype:
-        raise PydanticCustomError(
-            "array_dtype_mismatch",
-            "Binref array dtype '{actual_dtype}' does not match expected dtype "
-            "'{expected_dtype}' (a passthrough binref is not cast)",
-            {"actual_dtype": dtype_name, "expected_dtype": expected_dtype},
-        )
-
+    _check_uncast_shape_dtype(
+        val.shape,
+        val.dtype,
+        expected_shape,
+        expected_dtype,
+        no_cast_reason="a passthrough binref is not cast",
+    )
     return val
 
 
@@ -340,21 +268,21 @@ def load_for_inline_encoding(
         RuntimeWarning,
         stacklevel=3,
     )
-    return _load_ref(val, context)
+    return val.load(context)
 
 
 class BinrefWriter:
     """Write many arrays into shared, rotating binref buffers.
 
     Each :meth:`write` appends to the current ``.bin`` file and returns a
-    :class:`BinrefArray` referencing the array's slice of it, rolling over to a fresh file once the current one
-    exceeds ``max_file_size``. This packs many small arrays into a few files --
-    the same layout the runtime's own binref serializer produces -- instead of
-    the one-file-per-array behaviour of :meth:`BinrefArray.write`.
+    :class:`BinrefArray` referencing the array's slice of it, rolling over to a
+    fresh file once the current one exceeds ``max_file_size``. This packs many
+    small arrays into a few files -- the same layout the runtime's own binref
+    serializer produces -- instead of the one-file-per-array behaviour of
+    :meth:`BinrefArray.write`.
 
-    The writer keeps only a small buffer identifier between calls, so it holds no
-    array data; there is nothing to flush and the context manager is optional
-    (it is provided for symmetry and readability).
+    The writer keeps only the current buffer's identifier between calls and holds
+    no array data, so there is nothing to flush or close.
 
     Args:
         output_dir: Directory to write buffers into. Defaults to the Tesseract's
@@ -396,9 +324,3 @@ class BinrefWriter:
             compression=self._compression,
         )
         return BinrefArray._from_arraydict(arraydict)
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None

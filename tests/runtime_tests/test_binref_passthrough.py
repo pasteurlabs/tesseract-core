@@ -77,13 +77,6 @@ def test_from_file_encodes_offset_and_compression():
     assert ref.to_arraydict()["data"]["compression"] == "lz4"
 
 
-def test_from_spec_takes_a_buffer_spec():
-    ref = BinrefArray.from_spec("f.bin:0", (4,), "float64")
-    assert ref.buffer == "f.bin:0"
-    assert ref.shape == (4,)
-    assert ref.dtype == "float64"
-
-
 def test_direct_instantiation_raises():
     with pytest.raises(RuntimeError, match="named constructors"):
         BinrefArray("f.bin:0", (4,), "float64")
@@ -91,11 +84,11 @@ def test_direct_instantiation_raises():
         BinrefArray()
 
 
-def test_from_spec_rejects_bad_inputs():
+def test_from_file_rejects_bad_inputs():
     with pytest.raises(ValueError, match="dtype"):
-        BinrefArray.from_spec("f.bin", (4,), "float128")
+        BinrefArray.from_file("f.bin", (4,), "float128")
     with pytest.raises(ValueError, match="non-empty"):
-        BinrefArray.from_spec("", (4,), "float64")
+        BinrefArray.from_file("", (4,), "float64")
 
 
 def test_from_file_requires_compressed_size_when_compressed():
@@ -280,8 +273,8 @@ def test_write_writes_one_file_per_call(tmp_path):
 
 def test_writer_packs_into_one_buffer(tmp_path):
     arrays = [np.arange(4, dtype=np.float64) + i for i in range(5)]
-    with BinrefWriter(tmp_path) as w:
-        refs = [w.write(a) for a in arrays]
+    w = BinrefWriter(tmp_path)
+    refs = [w.write(a) for a in arrays]
 
     assert all(isinstance(r, BinrefArray) for r in refs)
     binfiles = list(tmp_path.glob("*.bin"))
@@ -297,8 +290,8 @@ def test_writer_packs_into_one_buffer(tmp_path):
 
 def test_writer_rotates_at_max_file_size(tmp_path):
     arr = np.arange(4, dtype=np.float64)  # 32 bytes
-    with BinrefWriter(tmp_path, max_file_size=20) as w:
-        refs = [w.write(arr) for _ in range(3)]
+    w = BinrefWriter(tmp_path, max_file_size=20)
+    refs = [w.write(arr) for _ in range(3)]
 
     binfiles = {r.buffer.split(":")[0] for r in refs}
     assert len(binfiles) > 1
@@ -312,8 +305,7 @@ def test_writer_and_write_produce_equivalent_data(tmp_path):
         result: Array[(6,), Float64]
 
     ref_single = BinrefArray.write(arr, output_dir=tmp_path)
-    with BinrefWriter(tmp_path) as w:
-        ref_packed = w.write(arr)
+    ref_packed = BinrefWriter(tmp_path).write(arr)
 
     for ref in (ref_single, ref_packed):
         dumped = M(result=ref).model_dump(
