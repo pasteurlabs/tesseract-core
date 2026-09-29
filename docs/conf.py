@@ -231,7 +231,7 @@ def _emit_config_schema(app) -> None:
 def _collect_blog_posts() -> list[dict]:
     """Collect metadata from all blog posts for the blog index."""
     import logging
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     import yaml
 
@@ -266,7 +266,9 @@ def _collect_blog_posts() -> list[dict]:
                 md_file.name,
             )
             continue
-        date = datetime.strptime(str(blog_date), "%Y-%m-%d")
+        date = datetime.strptime(str(blog_date), "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
         posts.append(
             {
                 "file": md_file.stem,

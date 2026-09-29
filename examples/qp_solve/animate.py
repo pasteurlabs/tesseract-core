@@ -1,7 +1,6 @@
-import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import patheffects
+from matplotlib import animation, patheffects
 from matplotlib.colors import Normalize
 
 

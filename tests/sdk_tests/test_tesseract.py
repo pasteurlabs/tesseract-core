@@ -502,10 +502,8 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     assert mock_serving["container"].removals == [True]
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
-    with pytest.raises(RuntimeError):
-        with t:
-            with t:
-                pass
+    with pytest.raises(RuntimeError), t, t:
+        pass
 
 
 @pytest.mark.parametrize(
@@ -1174,8 +1172,6 @@ def test_tree_map():
 
 class _ForeignDtype:
     """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
-
-    pass
 
 
 class _ForeignTensor:

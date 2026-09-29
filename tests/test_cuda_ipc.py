@@ -23,6 +23,7 @@ opened the handle, otherwise a pooled allocator may recycle and overwrite the
 memory -- the harness below enforces that with an explicit handshake.
 """
 
+import contextlib
 import multiprocessing
 import queue as queue_mod
 import sys
@@ -37,21 +38,21 @@ try:
     import cupy
 
     _CUDA_AVAILABLE = cupy.cuda.runtime.getDeviceCount() > 0
-except Exception:
+except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _CUDA_AVAILABLE = False
 
 try:
     import torch as _torch
 
     _TORCH_AVAILABLE = _torch.cuda.is_available()
-except Exception:
+except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _TORCH_AVAILABLE = False
 
 try:
     import jax as _jax
 
     _JAX_AVAILABLE = any(d.platform == "gpu" for d in _jax.devices())
-except Exception:
+except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _JAX_AVAILABLE = False
 
 # Every test in this module drives real CUDA IPC and therefore needs a physical
@@ -118,12 +119,10 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
         to_consumer.put(payloads)
         from_consumer.get(timeout=_TIMEOUT)
         del arrays
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
-        try:
+        with contextlib.suppress(OSError, ValueError):
             to_consumer.put(("PRODUCER_ERROR", traceback.format_exc()))
-        except Exception:
-            pass
         sys.exit(2)
 
 
@@ -167,14 +166,12 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             )
 
         result_q.put(("OK", results))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         result_q.put(("CONSUMER_ERROR", traceback.format_exc()))
     finally:
-        try:
+        with contextlib.suppress(OSError, ValueError):
             from_consumer.put("done")
-        except Exception:
-            pass
 
 
 def run_cross_process(build_fn_name, *args):
@@ -523,7 +520,7 @@ def _ring1_server(req_q, resp_q):
                 del tmp
             out = cupy.arange(1024, dtype=cupy.float32) + (i + 1) * 100.0
             resp_q.put((i, dump_cuda_ipc_arraydict(out)))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         resp_q.put(("SERVER_ERROR", traceback.format_exc()))
 
@@ -557,7 +554,7 @@ def _ring1_client(req_q, resp_q, result_q, n):
             for j, a in kept
         )
         result_q.put(("OK", all_ok))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         result_q.put(("CLIENT_ERROR", traceback.format_exc()))
 
@@ -743,14 +740,12 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
         cupy_absent = "cupy" not in sys.modules
 
         result_q.put(("OK", (host_ok, torch_ok, cupy_absent)))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         result_q.put(("CONSUMER_ERROR", traceback.format_exc()))
     finally:
-        try:
+        with contextlib.suppress(OSError, ValueError):
             from_consumer.put("done")
-        except Exception:
-            pass
 
 
 @requires_cuda

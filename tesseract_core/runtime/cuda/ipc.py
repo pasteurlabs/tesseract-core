@@ -341,7 +341,7 @@ def _finalize_ipc_device_array(state: dict) -> None:
                 state["freed"] = True
         else:
             dlpack.drop_unconsumed_bundle(state["dlpack_token"])
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         # Finalizers must never raise.
         pass
 
@@ -521,17 +521,19 @@ def validate_cuda_array(
 
     # Shape: Ellipsis means "no check"; otherwise each dim must match unless the
     # expected dim is None (a polymorphic wildcard).
-    if expected_shape is not Ellipsis:
-        if len(shape) != len(expected_shape) or any(
+    if expected_shape is not Ellipsis and (
+        len(shape) != len(expected_shape)
+        or any(
             exp is not None and got != exp
             for got, exp in zip(shape, expected_shape, strict=False)
-        ):
-            raise PydanticCustomError(
-                "array_shape_mismatch",
-                "Array shape {actual_shape} is incompatible with expected "
-                "shape {expected_shape}",
-                {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
-            )
+        )
+    ):
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} is incompatible with expected "
+            "shape {expected_shape}",
+            {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
+        )
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if dtype_name not in allowed_dtypes:

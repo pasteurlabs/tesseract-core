@@ -153,9 +153,7 @@ def _run_process(
 def _is_valid_docker_tag(tag: str) -> bool:
     if not (1 <= len(tag) <= 128):
         return False
-    if not re.match(r"^[A-Za-z0-9_.-]+$", tag):
-        return False
-    return True
+    return bool(re.match(r"^[A-Za-z0-9_.-]+$", tag))
 
 
 def is_podman() -> bool:
@@ -234,6 +232,7 @@ class Images:
             [*docker, "inspect", image_id_or_name, "--type", "image"],
             capture_output=True,
             text=True,
+            check=False,
         )
 
         # `docker inspect` can fail when Docker Desktop is in Resource Saver
@@ -257,6 +256,7 @@ class Images:
                     str(image_id_or_name),
                 ],
                 capture_output=True,
+                check=False,
             )
             if wake_result.returncode != 0:
                 raise ImageNotFound(f"Image {image_id_or_name} not found.")
@@ -265,6 +265,7 @@ class Images:
                 [*docker, "inspect", image_id_or_name, "--type", "image"],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             if inspect_result.returncode != 0:
                 raise ImageNotFound(f"Image {image_id_or_name} not found.")
@@ -443,7 +444,7 @@ class Images:
         json_dicts = get_docker_metadata(
             image_ids, is_image=True, tesseract_only=tesseract_only
         )
-        for _, json_dict in json_dicts.items():
+        for json_dict in json_dicts.values():
             image = Image.from_dict(json_dict)
             images.append(image)
 
@@ -710,7 +711,7 @@ class Container:
         except subprocess.CalledProcessError as ex:
             if "docker" in ex.stderr:
                 raise APIError(f"Cannot remove container {self.id}: {ex}") from ex
-            raise ex
+            raise
 
 
 # The following `singledispatch` functions allow dispatch between different `ServedTesseract`
@@ -1007,7 +1008,7 @@ class Containers:
         # Filter list to  exclude empty strings.
         container_ids = [container_id for container_id in container_ids if container_id]
         json_dicts = get_docker_metadata(container_ids, tesseract_only=tesseract_only)
-        for _, json_dict in json_dicts.items():
+        for json_dict in json_dicts.values():
             container = Container.from_dict(json_dict)
             containers.append(container)
 
@@ -1181,8 +1182,6 @@ class Networks:
 class DockerException(Exception):
     """Base class for Docker CLI exceptions."""
 
-    pass
-
 
 class BuildError(DockerException):
     """Raised when a build fails."""
@@ -1218,19 +1217,13 @@ class ContainerError(DockerException):
 class APIError(DockerException):
     """Raised when a Docker API error occurs."""
 
-    pass
-
 
 class NotFound(DockerException):
     """Raised when a Docker resource is not found."""
 
-    pass
-
 
 class ImageNotFound(NotFound):
     """Raised when an image is not found."""
-
-    pass
 
 
 class CLIDockerClient:
@@ -1361,7 +1354,7 @@ def build_docker_image(
         build_args["secrets"] = secrets
 
     if inject_ssh:
-        ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
+        ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True, check=False)
         if ssh_keys.returncode != 0 or not ssh_keys.stdout:
             raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
 

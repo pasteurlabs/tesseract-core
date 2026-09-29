@@ -4,9 +4,9 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.ensemble import RandomForestRegressor
+from torch import nn
 from torch.utils.data import DataLoader
 
 from .metrics import ModelMetrics, compute_metrics

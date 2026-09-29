@@ -98,9 +98,11 @@ def test_output_to_bytes_json_binref_lz4(output_data):
 
 
 def test_output_to_bytes_unsupported_format(output_data):
-    with pytest.raises(ValueError, match="Unsupported format invalid"):
-        with suppress_type_checks():
-            output_to_bytes(output_data, "invalid")  # type: ignore
+    with (
+        pytest.raises(ValueError, match="Unsupported format invalid"),
+        suppress_type_checks(),
+    ):
+        output_to_bytes(output_data, "invalid")  # type: ignore
 
 
 def test_output_to_bytes_empty_dict():
