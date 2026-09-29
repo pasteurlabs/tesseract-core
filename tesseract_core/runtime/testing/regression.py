@@ -206,15 +206,9 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
 
 
 def _coerce_arraylike(value: Any) -> Any:
-    """Materialize a non-ndarray array-like leaf into a NumPy array.
+    """Convert lazy array-likes (e.g. a ``BinrefArray``) to NumPy arrays.
 
-    Output-schema leaves are usually plain ``np.ndarray`` after a Python-mode
-    ``model_dump()``, but a custom field type may keep a lazy representation
-    (e.g. a binref reference exposing ``__array__``). Coercing such leaves here
-    lets them be compared by shape, dtype and value against an ordinary array
-    template without special-casing each type.
-    Values that are not array-like (scalars, strings, containers) pass through
-    unchanged.
+    Other values, including scalars and containers, are returned unchanged.
     """
     if isinstance(value, np.ndarray):
         return value
@@ -248,8 +242,6 @@ def _validate_tree_structure(
         mismatch messages. Both may be non-empty when some subtrees match and
         others don't.
     """
-    # Materialize lazy array leaves so a custom output type (e.g. a
-    # binref reference) compares like a plain array against the template.
     tree = _coerce_arraylike(tree)
     template = _coerce_arraylike(template)
 

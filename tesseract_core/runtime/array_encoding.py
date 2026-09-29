@@ -288,7 +288,7 @@ def _fast_tobytes(arr: ArrayLike) -> bytes:
     return np.ascontiguousarray(arr).data
 
 
-def _dump_binref_arraydict(
+def dump_binref_arraydict(
     arr: ArrayLike,
     base_dir: Path | str,
     subdir: Path | str | None,
@@ -390,7 +390,7 @@ def _read_binref_array(
     return out
 
 
-def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
+def load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(
         r"^(?P<path>.+?)(\:(?P<offset>\d+)(\:(?P<compressed_size>\d+))?)?$",
@@ -632,7 +632,7 @@ def _coerce_shape_dtype(
     return arr
 
 
-def _check_uncast_shape_dtype(
+def check_shape_dtype_no_cast(
     shape: tuple[int, ...],
     dtype_name: str,
     expected_shape: ShapeType,
@@ -641,10 +641,9 @@ def _check_uncast_shape_dtype(
 ) -> None:
     """Check array metadata against the expected shape and dtype, without casting.
 
-    For arrays that are validated from metadata alone and passed through
-    unchanged (GPU arrays, on-disk binref references). Mirrors the checks in
-    :func:`_coerce_shape_dtype`, but never broadcasts or casts;
-    ``no_cast_reason`` explains why in the dtype-mismatch error.
+    Used for arrays that are passed through unchanged (GPU arrays, on-disk binref
+    references). Mirrors :func:`_coerce_shape_dtype` but never broadcasts or
+    casts. ``no_cast_reason`` is included in the dtype-mismatch error.
     """
     # Shape: Ellipsis means "no check"; otherwise each dim must match unless the
     # expected dim is None (a polymorphic wildcard).
@@ -723,8 +722,10 @@ def validate_python_or_gpu_array(
     memory (exposing ``__cuda_array_interface__`` or DLPack on a CUDA device) are
     validated but returned unchanged, so they can later be encoded via CUDA IPC
     without a host copy; coercing them to NumPy here would force a device-to-host
-    transfer (or fail, since CuPy refuses implicit conversion). Everything else
-    is coerced to a NumPy array via :func:`python_to_array`.
+    transfer (or fail, since CuPy refuses implicit conversion). A
+    :class:`~tesseract_core.runtime.experimental.BinrefArray` is likewise
+    validated from its metadata and returned unchanged. Everything else is
+    coerced to a NumPy array via :func:`python_to_array`.
     """
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
     from tesseract_core.runtime.experimental.binref_passthrough import (
@@ -762,7 +763,7 @@ def decode_array(
             subdir = context.get("binref_dir", None)
             if subdir is not None:
                 base_dir = join_paths(base_dir, subdir)
-            data = _load_binref_arraydict(val.model_dump(), base_dir)
+            data = load_binref_arraydict(val.model_dump(), base_dir)
 
         elif val.data.encoding == "cuda_ipc":
             from tesseract_core.runtime.device_transport import get_transport
@@ -817,10 +818,9 @@ def encode_array(
     on-device and on-host arrays. In Python mode there is nothing to serialize,
     so arrays pass through as-is.
 
-    An :class:`Array` field may also hold a
-    :class:`~tesseract_core.runtime.experimental.BinrefArray` -- an on-disk
-    buffer forwarded verbatim for binref output, or loaded and re-encoded for any
-    other host encoding.
+    A :class:`~tesseract_core.runtime.experimental.BinrefArray` passes through
+    Python mode as-is, is forwarded verbatim for binref output, and is loaded and
+    re-encoded for any other host encoding.
     """
     from tesseract_core.runtime.config import get_config
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
@@ -833,8 +833,6 @@ def encode_array(
     array_encoding = context.get("array_encoding", "json")
     device_transport = context.get("device_transport")
 
-    # A binref reference passes through Python mode untouched, is forwarded
-    # verbatim for binref output, and is loaded for any other host encoding.
     if isinstance(arr, BinrefArray):
         if not info.mode_is_json():
             return arr
@@ -875,7 +873,7 @@ def encode_array(
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)
-        data, new_binref_uuid = _dump_binref_arraydict(
+        data, new_binref_uuid = dump_binref_arraydict(
             arr,
             base_dir=base_dir,
             subdir=subdir,

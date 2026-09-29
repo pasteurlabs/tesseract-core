@@ -12,6 +12,7 @@ Structure:
 - Section 3: Public API tests via regress_test_case (separate functions, with error assertions)
 - Section 4: TestSpec validation tests
 - Section 5: Unit tests for _validate_tree_structure internals
+- Section 6: Array-like leaf coercion (custom output types)
 """
 
 import numpy as np

@@ -9,10 +9,9 @@ from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.experimental import BinrefArray, BinrefWriter
 from tesseract_core.runtime.schema_types import is_differentiable
 
-# Serializing a BinrefArray to a non-binref encoding reads it into memory and
-# warns (see test_non_binref_output_warns). Most tests here exercise that path
-# only to check the resulting values, so silence the expected warning module-wide;
-# the dedicated test re-asserts it explicitly via pytest.warns.
+# Serializing a BinrefArray to a non-binref encoding warns. Most tests here only
+# check the resulting values, so the warning is silenced module-wide and
+# asserted separately in test_non_binref_output_warns.
 pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning")
 
 
@@ -52,7 +51,7 @@ def test_write_writes_a_buffer(tmp_path):
 
 
 def test_from_file_references_external_buffer(tmp_path):
-    # Stand in for compiled code writing the buffer itself, no tesseract API.
+    # Simulate compiled code writing the buffer directly.
     arr = np.arange(4, dtype=np.float64)
     (tmp_path / "ext.bin").write_bytes(arr.tobytes())
 
@@ -210,7 +209,7 @@ def test_output_matches_builtin_array_encoding(tmp_path):
 
 
 def test_differentiable_array_accepts_ref(tmp_path):
-    """The headline: Differentiable[Array[...]] composes with a binref ref."""
+    """Differentiable[Array[...]] fields accept a BinrefArray."""
 
     class DiffModel(BaseModel):
         grad: Differentiable[Array[(4,), Float64]]

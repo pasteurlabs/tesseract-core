@@ -2,20 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Return on-disk arrays through ordinary ``Array`` fields without reading them back.
 
-Some Tesseracts write arrays to disk in binref format *during* ``apply`` -- for
-example a solver that streams results to disk to keep peak memory bounded. To
-return such a buffer without reading it back into memory, hand a
-:class:`BinrefArray` to an ordinary :class:`~tesseract_core.runtime.Array` field:
-the field forwards the on-disk buffer verbatim when the client negotiates
-``json+binref`` output, and loads + re-encodes it for any other format. Because
-the field is a plain ``Array``, ``Differentiable[Array[...]]`` composes with this
-out of the box.
+A Tesseract that writes arrays to disk in binref format during ``apply``, for
+example to keep a solver's peak memory bounded, can return them by assigning a
+:class:`BinrefArray` to an ordinary :class:`~tesseract_core.runtime.Array` field.
+When the client negotiates ``json+binref`` output, the field forwards the on-disk
+buffer verbatim. For any other format it loads the buffer and encodes it like a
+normal array. Because the field is a plain ``Array``, this also works with
+``Differentiable[Array[...]]``.
 
-For a single array, :meth:`BinrefArray.write` (write a NumPy array) or
-:meth:`BinrefArray.from_file` (reference a buffer some other code wrote) is all
-you need. :class:`BinrefWriter` covers the case where a Tesseract emits *many*
-small arrays and you want them packed into a few shared, rotating buffers rather
-than one file each::
+Use :meth:`BinrefArray.write` or :meth:`BinrefArray.from_file` for single arrays,
+and :class:`BinrefWriter` to pack many small arrays into a few shared buffers::
 
     from tesseract_core.runtime import Array, Float64
     from tesseract_core.runtime.experimental import BinrefWriter
@@ -47,9 +43,9 @@ from tesseract_core.runtime.array_encoding import (
     ArrayDict,
     ArrayLike,
     ShapeType,
-    _check_uncast_shape_dtype,
-    _dump_binref_arraydict,
-    _load_binref_arraydict,
+    check_shape_dtype_no_cast,
+    dump_binref_arraydict,
+    load_binref_arraydict,
 )
 from tesseract_core.runtime.config import get_config
 
@@ -57,40 +53,25 @@ from tesseract_core.runtime.config import get_config
 class BinrefArray:
     """An array whose data lives on disk in binref format, referenced by path.
 
-    Hand one to an ordinary :class:`~tesseract_core.runtime.Array` field in
-    place of a NumPy array and the field forwards it verbatim when the client
-    negotiates ``json+binref`` output -- so a buffer written to disk during
-    ``apply`` reaches the client
-    without ever being read back into memory. For any other negotiated format
-    (``json``, ``base64``) the buffer is loaded once and encoded like a normal
-    array. This mirrors how the ``Array`` type already passes GPU arrays through
-    validation untouched and materializes them only when needed (see
-    :func:`~tesseract_core.runtime.array_encoding.validate_python_or_gpu_array`
-    and :func:`~tesseract_core.runtime.array_encoding.encode_array`).
+    Construct one with :meth:`write` (write a NumPy array to disk) or
+    :meth:`from_file` (reference a buffer that other code, such as a compiled
+    solver, already wrote). The plain constructor raises.
 
-    Construct one via a named constructor (the plain constructor raises):
-
-    * :meth:`write` -- write a NumPy array to disk and reference it.
-    * :meth:`from_file` -- reference a buffer some other code already wrote (e.g.
-      a compiled solver).
-
-    Example (compiled code wrote ``mesh.bin`` itself)::
+    Example::
 
         def apply(inputs):
             run_solver(out="mesh.bin")  # writes into the output directory
             arr = BinrefArray.from_file("mesh.bin", shape=(1000, 1000), dtype="float64")
             return OutputSchema(result=arr)
 
-    The buffer path is resolved by the client against the served
-    ``output_path``, so it must be relative to that directory (a bare filename is
-    resolved as ``output_path / filename``) or an absolute path / URL the
-    decoder can reach. The data must be C-contiguous, row-major and match the
-    declared ``shape`` and ``dtype``; a mismatch is caught when the field is
-    validated.
+    The client resolves the buffer path against the served ``output_path``, so it
+    must be relative to that directory or an absolute path / URL the client can
+    reach. The bytes are forwarded unchecked. They must be C-contiguous, row-major,
+    and consistent with the declared ``shape`` and ``dtype``.
 
-    Deliberately a plain class (not a dataclass / ``BaseModel``) so Pydantic
-    treats it as an opaque leaf and does not flatten it during the Python-mode
-    ``model_dump()`` the runtime performs before serialization.
+    This is a plain class rather than a dataclass or ``BaseModel`` so that the
+    runtime's Python-mode ``model_dump()`` treats it as an opaque leaf instead of
+    flattening it.
     """
 
     __slots__ = ("_arraydict",)
@@ -162,17 +143,15 @@ class BinrefArray:
         output_dir: str | Path | None = None,
         compression: str | None = None,
     ) -> BinrefArray:
-        """Write ``arr`` to its own binref buffer on disk and reference it.
+        """Write ``arr`` to a new binref buffer on disk and reference it.
 
-        The buffer uses the same on-disk layout as the built-in binref encoder,
-        so the result is indistinguishable from a normally-encoded array. Each
-        call writes an independent file; to pack many arrays into a few shared,
-        rotating buffers use :class:`BinrefWriter`.
+        Each call writes a separate file. Use :class:`BinrefWriter` to pack many
+        arrays into a few shared buffers.
 
         Args:
             arr: The array to write. Coerced to a contiguous NumPy array.
             output_dir: Directory to write into. Defaults to the configured
-                ``output_path`` (see class docs on path resolution).
+                ``output_path``.
             compression: Optional compression to apply (currently only ``"lz4"``).
         """
         return BinrefWriter(output_dir, compression=compression).write(arr)
@@ -206,18 +185,14 @@ class BinrefArray:
     def load(self, context: dict[str, Any] | None = None) -> np.ndarray:
         """Read the referenced buffer into a NumPy array.
 
-        This is the one operation that actually touches the buffer bytes; the
-        rest of the reference stays lazy. Paths are resolved against the
-        ``base_dir`` in ``context`` if given, else the configured
-        ``output_path``.
+        Relative paths are resolved against ``context["base_dir"]`` if given,
+        else the configured ``output_path``.
         """
         base_dir = (context or {}).get("base_dir", get_config().output_path)
-        return _load_binref_arraydict(self._arraydict, base_dir)
+        return load_binref_arraydict(self._arraydict, base_dir)
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
-        # Lets NumPy (and any array-like consumer) materialize the reference on
-        # demand via ``np.asarray(ref)``. Loading always produces a fresh array,
-        # so ``copy`` needs no handling beyond being accepted.
+        # Loading always produces a fresh array, so ``copy`` can be ignored.
         arr = self.load()
         return arr.astype(dtype, copy=False) if dtype is not None else arr
 
@@ -231,15 +206,12 @@ class BinrefArray:
 def validate_binref_array(
     val: BinrefArray, expected_shape: ShapeType, expected_dtype: str | None
 ) -> BinrefArray:
-    """Validate a :class:`BinrefArray`'s shape/dtype without reading the buffer.
+    """Validate a :class:`BinrefArray`'s declared shape/dtype without loading it.
 
-    Returns the reference unchanged so it can later be forwarded verbatim (see
-    :func:`~tesseract_core.runtime.array_encoding.encode_array`). Only the
-    reference's declared ``shape``/``dtype`` are inspected -- no file is opened.
-    Never casts: a cast would require reading and rewriting the buffer,
-    defeating the point of a passthrough.
+    Returns the reference unchanged. It never casts, because casting would mean
+    reading and rewriting the buffer.
     """
-    _check_uncast_shape_dtype(
+    check_shape_dtype_no_cast(
         val.shape,
         val.dtype,
         expected_shape,
@@ -252,19 +224,13 @@ def validate_binref_array(
 def load_for_inline_encoding(
     val: BinrefArray, array_encoding: str, context: dict[str, Any]
 ) -> np.ndarray:
-    """Load a :class:`BinrefArray` so it can be serialized inline.
-
-    Any encoding other than binref must inline the data, so the on-disk buffer
-    has to be read into memory -- the exact cost a ``BinrefArray`` exists to
-    avoid. Warn loudly (the values are still correct) so this is not a silent
-    memory blow-up.
-    """
+    """Load a :class:`BinrefArray` for a non-binref encoding, with a warning."""
     nbytes = int(np.prod(val.shape)) * np.dtype(val.dtype).itemsize
     warnings.warn(
         f"A BinrefArray ({nbytes / 1024**2:.1f} MiB) is being read into "
-        f"memory to satisfy a '{array_encoding}' response; the on-disk buffer "
-        "cannot be forwarded for this encoding. Request 'json+binref' output "
-        "to stream it from disk without loading it.",
+        f"memory because a '{array_encoding}' response cannot reference the "
+        "on-disk buffer. Request 'json+binref' output to forward it without "
+        "loading it.",
         RuntimeWarning,
         stacklevel=3,
     )
@@ -275,14 +241,9 @@ class BinrefWriter:
     """Write many arrays into shared, rotating binref buffers.
 
     Each :meth:`write` appends to the current ``.bin`` file and returns a
-    :class:`BinrefArray` referencing the array's slice of it, rolling over to a
-    fresh file once the current one exceeds ``max_file_size``. This packs many
-    small arrays into a few files -- the same layout the runtime's own binref
-    serializer produces -- instead of the one-file-per-array behaviour of
-    :meth:`BinrefArray.write`.
-
-    The writer keeps only the current buffer's identifier between calls and holds
-    no array data, so there is nothing to flush or close.
+    :class:`BinrefArray` pointing at the array's slice of it. Once the file
+    exceeds ``max_file_size``, the next write starts a new one. Data is written
+    immediately, so there is nothing to flush or close.
 
     Args:
         output_dir: Directory to write buffers into. Defaults to the Tesseract's
@@ -312,10 +273,9 @@ class BinrefWriter:
         if output_dir is None:
             output_dir = get_config().output_path
         arr = np.ascontiguousarray(arr)
-        # subdir=None -> a path relative to output_dir, which the client resolves
-        # as output_path / <path>. _dump_binref_arraydict appends to the current
-        # buffer and hands back the (possibly rotated) uuid to reuse next time.
-        arraydict, self._current_uuid = _dump_binref_arraydict(
+        # subdir=None yields a path relative to output_dir, which the client
+        # resolves against output_path.
+        arraydict, self._current_uuid = dump_binref_arraydict(
             arr,
             base_dir=output_dir,
             subdir=None,

@@ -44,7 +44,7 @@ import pybase64
 from tesseract_core.runtime.array_encoding import (
     ArrayDict,
     ShapeType,
-    _check_uncast_shape_dtype,
+    check_shape_dtype_no_cast,
 )
 from tesseract_core.runtime.cuda import api as cuda_api
 from tesseract_core.runtime.cuda import dlpack
@@ -588,12 +588,11 @@ def validate_cuda_array(
     Returns the object unchanged so it can later be encoded via CUDA IPC (see
     :func:`tesseract_core.runtime.array_encoding.encode_array`). Only the array's
     metadata (from ``__cuda_array_interface__`` or DLPack) is inspected -- no
-    device-to-host copy or kernel launch occurs. Mirrors the shape/dtype checks
-    in :func:`tesseract_core.runtime.array_encoding._coerce_shape_dtype`, but
-    never casts (a cast would need a device copy the caller did not ask for).
+    device-to-host copy or kernel launch occurs. Never casts, because a cast
+    would need a device copy the caller did not ask for.
     """
     meta = _read_cuda_array_meta(val)
-    _check_uncast_shape_dtype(
+    check_shape_dtype_no_cast(
         meta.shape,
         meta.dtype.name,
         expected_shape,
