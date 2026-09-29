@@ -12,9 +12,13 @@
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 from tesseract_core import __version__
+
+# Make the blog and forum helpers next to this file importable
+sys.path.insert(0, os.path.dirname(__file__))
 
 # Set the TESSERACT_API_PATH environment variable to the dummy Tesseract API
 # This will be used to instantiate the Tesseract runtime so we can generate api docs
@@ -228,58 +232,76 @@ def _emit_config_schema(app) -> None:
     )
 
 
-def _collect_blog_posts() -> list[dict]:
-    """Collect metadata from all blog posts for the blog index."""
-    import logging
-    from datetime import datetime
+# Every blog post links to a forum topic as its comment thread. The workflow in
+# .github/workflows/forum_topics.yml creates the topic when a post lands on main,
+# unless the post names an existing one with `forum_topic: <topic ID>` in its
+# frontmatter.
+#
+# The docs build and the workflow start together on merge, so the build waits
+# this long for new topics before failing.
+FORUM_TOPIC_TIMEOUT_SECONDS = 90
+FORUM_TOPIC_POLL_SECONDS = 5
 
-    import yaml
+_forum_topic_urls: dict[str, str] = {}
+
+
+def _resolve_forum_topics(_app) -> None:
+    """Look up the forum topic of every blog post, failing the build if one is missing.
+
+    Only runs for the production build (Read the Docs "latest"), so local builds
+    and PR previews neither depend on the forum nor render the links. Set
+    FORUM_TOPICS_OPTIONAL=1 to downgrade missing topics to a warning.
+    """
+    import logging
+    import time
+
+    from blog_posts import collect_blog_posts
+    from forum_topics import FORUM_URL, blog_external_id, find_topic
+
+    if os.environ.get("READTHEDOCS_VERSION") != "latest":
+        return
 
     logger = logging.getLogger("sphinx.ext.blog")
 
-    here = Path(__file__).parent
-    blog_dir = here / "blog"
+    pending = {}
+    for post in collect_blog_posts():
+        if post["forum_topic"]:
+            _forum_topic_urls[post["file"]] = f"{FORUM_URL}/t/{post['forum_topic']}"
+        else:
+            pending[post["file"]] = blog_external_id(post["file"])
 
-    posts = []
-    for md_file in sorted(blog_dir.glob("*.md")):
-        if md_file.name == "index.md":
-            continue
-        text = md_file.read_text()
-        if not text.startswith("---"):
-            logger.warning(
-                "blog post %s has no YAML frontmatter, skipping", md_file.name
-            )
-            continue
-        end = text.index("---", 3)
-        fm = yaml.safe_load(text[3:end])
-        blog_date = fm.get("blog_date")
-        if not blog_date:
-            logger.warning(
-                "blog post %s missing 'blog_date' in frontmatter, skipping",
-                md_file.name,
-            )
-            continue
-        title = fm.get("blog_title")
-        if not title:
-            logger.warning(
-                "blog post %s missing 'blog_title' in frontmatter, skipping",
-                md_file.name,
-            )
-            continue
-        date = datetime.strptime(str(blog_date), "%Y-%m-%d")
-        posts.append(
-            {
-                "file": md_file.stem,
-                "title": title,
-                "date": date.strftime("%b %d, %Y").replace(" 0", " "),
-                "author": fm.get("blog_author", ""),
-                "description": fm.get("blog_description", ""),
-                "_sort_key": (date, md_file.name),
-            }
+    errors = {}
+    deadline = time.monotonic() + FORUM_TOPIC_TIMEOUT_SECONDS
+    while True:
+        for post_file, external_id in list(pending.items()):
+            try:
+                url = find_topic(external_id)
+            except (OSError, ValueError) as e:
+                errors[post_file] = e
+                continue
+            if url:
+                _forum_topic_urls[post_file] = url
+                del pending[post_file]
+        if not pending or time.monotonic() >= deadline:
+            break
+        time.sleep(FORUM_TOPIC_POLL_SECONDS)
+
+    if pending:
+        details = "\n".join(
+            f"  {post_file}: "
+            + (str(errors[post_file]) if post_file in errors else "not found")
+            for post_file in pending
         )
-
-    posts.sort(key=lambda p: p["_sort_key"], reverse=True)
-    return posts
+        message = (
+            f"No forum topic found after {FORUM_TOPIC_TIMEOUT_SECONDS}s for these blog "
+            f"posts:\n{details}\nCheck the 'Create forum topics for blog posts' "
+            "workflow run for this commit, or set FORUM_TOPICS_OPTIONAL=1 in the "
+            "Read the Docs environment to build without the links."
+        )
+        if os.environ.get("FORUM_TOPICS_OPTIONAL"):
+            logger.warning(message)
+        else:
+            raise RuntimeError(message)
 
 
 def _inject_page_context(app, pagename, templatename, context, doctree):
@@ -303,7 +325,9 @@ def _inject_page_context(app, pagename, templatename, context, doctree):
         return
 
     if pagename == "blog/index":
-        posts = _collect_blog_posts()
+        from blog_posts import collect_blog_posts
+
+        posts = collect_blog_posts()
         context["blog_posts"] = [
             {
                 "url": app.builder.get_relative_uri(pagename, "blog/" + p["file"]),
@@ -316,6 +340,7 @@ def _inject_page_context(app, pagename, templatename, context, doctree):
         ]
         return "blog_index.html"
 
+    context["forum_topic_url"] = _forum_topic_urls.get(pagename.removeprefix("blog/"))
     return "blog_post.html"
 
 
@@ -342,6 +367,8 @@ def setup(app) -> None:
     app.connect("builder-inited", zip_examples_folder)
     # Emit the tesseract_config.yaml JSON Schema into the output root
     app.connect("build-finished", lambda app, exc: exc or _emit_config_schema(app))
+    # Look up the forum topic of each blog post
+    app.connect("builder-inited", _resolve_forum_topics)
     # Inject blog post listing into blog index page context
     app.connect("html-page-context", _inject_page_context)
 

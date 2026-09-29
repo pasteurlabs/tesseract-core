@@ -379,7 +379,7 @@ code required.
 
 :::{div} section-intro
 Wrap your solver or model as a Tesseract, or compose existing ones into a new pipeline.
-Show us what you built, or help improve the project.
+[Show us what you built](https://si-tesseract.discourse.group/c/showcase/11), or help improve the project.
 :::
 
 :::{div} landing-cta

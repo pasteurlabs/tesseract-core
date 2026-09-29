@@ -6,6 +6,7 @@ blog_date: "2026-01-20"
 blog_author: "@dionhaefner, @samalipio"
 blog_title: "Announcing the winners of the Tesseract Hackathon"
 blog_description: "The inaugural Tesseract Hackathon concluded with impressive entries from global researchers and engineers."
+forum_topic: 114
 ---
 
 # Announcing the winners of the Tesseract Hackathon

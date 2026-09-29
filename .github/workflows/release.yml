@@ -174,6 +174,9 @@ jobs:
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
           # Strip leading / trailing whitespace
           custom_notes=$(echo "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
+          # The forum topic for this release quotes the custom notes
+          printf "%s\n" "$custom_notes" > /tmp/custom_notes.md
+          echo "custom_notes_file=/tmp/custom_notes.md" >> $GITHUB_OUTPUT
 
           # Create the release notes file
           touch /tmp/notes.md
@@ -187,6 +190,18 @@ jobs:
           echo -e "\n**Full diff**: https://github.com/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
 
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
+
+      # Every release gets a forum topic as its comment thread. This runs before
+      # the release is created so that a release never goes out without one.
+      - name: Create forum topic
+        env:
+          DISCOURSE_API_KEY: ${{ secrets.DISCOURSE_API_KEY }}
+          DISCOURSE_CATEGORY_ID: ${{ vars.DISCOURSE_RELEASE_CATEGORY_ID }}
+        run: |
+          topic_url=$(python docs/forum_topics.py release \
+            "${{ steps.get_version.outputs.new_version }}" \
+            "${{ steps.release_notes.outputs.custom_notes_file }}")
+          echo -e "\n**Discuss this release** on the [Tesseract Forum]($topic_url)." >> "${{ steps.release_notes.outputs.release_note_file }}"
 
       - name: Create new release
         run: |

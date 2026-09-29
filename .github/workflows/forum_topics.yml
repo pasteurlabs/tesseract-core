@@ -1,0 +1,35 @@
+name: Create forum topics for blog posts
+
+# Creates the forum topic for each new blog post, which the production docs
+# build requires (see docs/conf.py). Run it manually to backfill.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/blog/*.md"
+  workflow_dispatch:
+
+jobs:
+  blog-topics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Create missing topics
+        env:
+          DISCOURSE_API_KEY: ${{ secrets.DISCOURSE_API_KEY }}
+          DISCOURSE_CATEGORY_ID: ${{ vars.DISCOURSE_BLOG_CATEGORY_ID }}
+        run: python docs/forum_topics.py blog

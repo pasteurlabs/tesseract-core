@@ -30,6 +30,9 @@
 
 <div class="blog-footer">
 <hr>
+{% if forum_topic_url %}
+<p><strong><a href="{{ forum_topic_url }}">Discuss this post on the Tesseract Forum</a></strong></p>
+{% endif %}
 <p><em>Tesseract is a free, open-source framework for differentiable scientific computing.</em><br>
 <em><a href="https://tesseract.pasteurlabs.ai">Docs</a> &middot; <a href="https://tesseract.pasteurlabs.ai/content/demo/demo.html">Demos</a> &middot; <a href="https://github.com/pasteurlabs/tesseract-core">GitHub</a></em></p>
 </div>
