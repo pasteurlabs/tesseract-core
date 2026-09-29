@@ -99,10 +99,10 @@ state = SimpleNamespace()
 state.print_user_error_tracebacks = False
 
 # Create a list of possible commands based on the ones in api_parse (kebab-cased)
-POSSIBLE_CMDS = set(
+POSSIBLE_CMDS = {
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
-)
+}
 POSSIBLE_CMDS.update(
     {
         "health",
@@ -130,6 +130,7 @@ AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 
 LOGLEVELS = ("debug", "info", "warning", "error", "critical")
 OUTPUT_FORMATS = ("json", "json+base64", "json+binref")
+LIST_FORMATS = ("table", "json")
 
 
 def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
@@ -208,8 +209,10 @@ def main_callback(
         get_config()
     except PydanticValidationError as err:
         message = [
-            "Error while parsing Tesseract configuration. "
-            "Please check your environment variables.",
+            (
+                "Error while parsing Tesseract configuration. "
+                "Please check your environment variables."
+            ),
             "Errors found:",
         ]
         for error in err.errors():
@@ -726,11 +729,27 @@ def serve(
     typer.echo(json_info, nl=False)
 
 
+ListFormatChoices = make_choice_enum("ListFormat", LIST_FORMATS)
+
+
 @app.command("list")
 @engine.needs_docker
-def list_tesseract_images() -> None:
-    """Display all Tesseract images."""
-    _display_tesseract_image_meta()
+def list_tesseract_images(
+    output_format: Annotated[
+        ListFormatChoices,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format to use. table uses rich formatting, json is machine-readable. ",
+        ),
+    ] = "table",
+) -> None:
+    """Display all Tesseract container images."""
+    images = _get_tesseract_image_meta()
+    if _enum_to_val(output_format) == "json":
+        typer.echo(json.dumps(images))
+    else:
+        _display_tesseract_image_meta(images)
 
 
 @app.command("ps")
@@ -740,21 +759,36 @@ def list_tesseract_containers() -> None:
     _display_tesseract_containers_meta()
 
 
-def _display_tesseract_image_meta() -> None:
-    """Display Tesseract image metadata."""
-    table = RichTable("ID", "Tags", "Name", "Version", "Description")
-    images = docker_client.images.list()
-    for image in images:
+def _get_tesseract_image_meta() -> list[dict]:
+    """Collect Tesseract image metadata, unabridged and free of display formatting."""
+    images = []
+    for image in docker_client.images.list():
         tesseract_vals = _get_tesseract_env_vals(image)
         if tesseract_vals:
-            table.add_row(
-                # Checksum Type + First 12 Chars of ID
-                image.id[:19],
-                str(image.tags),
-                tesseract_vals["TESSERACT_NAME"],
-                tesseract_vals.get("TESSERACT_VERSION", ""),
-                tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\n", " "),
+            images.append(
+                {
+                    "id": image.id,
+                    "name": tesseract_vals["TESSERACT_NAME"],
+                    "tags": list(image.tags),
+                    "version": tesseract_vals.get("TESSERACT_VERSION", ""),
+                    "description": tesseract_vals.get("TESSERACT_DESCRIPTION", ""),
+                }
             )
+    return images
+
+
+def _display_tesseract_image_meta(images: list[dict]) -> None:
+    """Display Tesseract image metadata."""
+    table = RichTable("ID", "Tags", "Name", "Version", "Description")
+    for image in images:
+        table.add_row(
+            # Checksum Type + First 12 Chars of ID
+            image["id"][:19],
+            str(image["tags"]),
+            image["name"],
+            image["version"],
+            image["description"].replace("\\n", " ").replace("\n", " "),
+        )
     RichConsole().print(table)
 
 
@@ -783,7 +817,7 @@ def _get_tesseract_env_vals(
 ) -> dict:
     """Convert Tesseract environment variables from list to dictionary."""
     env_vals = [s for s in docker_asset.attrs["Config"]["Env"] if "TESSERACT_" in s]
-    return {item.split("=")[0]: item.split("=")[1] for item in env_vals}
+    return dict(item.split("=", maxsplit=1) for item in env_vals)
 
 
 def _get_tesseract_network_meta(container: Container) -> dict:
@@ -941,9 +975,10 @@ def _extract_cli_config(
     """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
     cli_config = test_spec.get("cli_config", {})
 
-    if input_path := cli_config.get("input_path"):
-        if not Path(input_path).is_absolute():
-            input_path = str(base_dir / input_path)
+    if (input_path := cli_config.get("input_path")) and not Path(
+        input_path
+    ).is_absolute():
+        input_path = str(base_dir / input_path)
 
     from tesseract_core.sdk.engine import _split_volume_spec
 
@@ -1310,7 +1345,7 @@ def entrypoint() -> NoReturn:
     except UserError as e:
         if state.print_user_error_tracebacks:
             # Do not print the exception here since it's part of the traceback
-            logger.error("UserError occurred, traceback:", exc_info=True)
+            logger.exception("UserError occurred, traceback:")
         else:
             # Prints only the error message without traceback
             logger.error(str(e), exc_info=False)

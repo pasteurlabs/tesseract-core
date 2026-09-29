@@ -160,7 +160,8 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     tesseract_requirements = "./cowsay-6.1-py3-none-any.whl"
 
     subprocess.run(
-        ["pip", "download", "cowsay==6.1", "-d", str(dummy_tesseract_package)]
+        ["pip", "download", "cowsay==6.1", "-d", str(dummy_tesseract_package)],
+        check=True,
     )
     with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
@@ -375,13 +376,17 @@ def test_build_env_and_host_credential_with_secret(
     # (covers both the netrc and git-credentials files, which live only in the
     # build stage).
     inspect = subprocess.run(
-        [*docker_executable, "inspect", image_tag], capture_output=True, text=True
+        [*docker_executable, "inspect", image_tag],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert secret_value not in inspect.stdout
     history = subprocess.run(
         [*docker_executable, "history", "--no-trunc", image_tag],
         capture_output=True,
         text=True,
+        check=True,
     )
     assert secret_value not in history.stdout
     # The credentials must also not survive into the final image filesystem.
@@ -398,6 +403,7 @@ def test_build_env_and_host_credential_with_secret(
         ],
         capture_output=True,
         text=True,
+        check=True,
     )
     assert secret_value not in grep.stdout
 
@@ -414,7 +420,33 @@ def test_metadata_label(built_image_name, docker_executable):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0
     label_data = json.loads(result.stdout.strip())
     assert label_data == {"tags": ["ml", "physics"], "nested": {"key": "value"}}
+
+
+def test_list_json_output(cli_runner, built_image_name, docker_executable):
+    """Test that `tesseract list --format json` returns unabridged image metadata."""
+    result = cli_runner.invoke(app, ["list", "--format", "json"])
+    assert result.exit_code == 0, result.stderr
+
+    images = json.loads(result.stdout)
+    [image] = [i for i in images if built_image_name in i["tags"]]
+    repo = built_image_name.split(":")[0]
+    image_id = subprocess.run(
+        [*docker_executable, "inspect", "--format", "{{.Id}}", built_image_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    # Podman orders the tags the other way round than Docker.
+    assert sorted(image.pop("tags")) == sorted([f"{repo}:1.2.3", f"{repo}:latest"])
+    assert image == {
+        "id": image_id,
+        # Podman namespaces tags with `localhost/`, TESSERACT_NAME stays bare.
+        "name": repo.split("/")[-1],
+        "version": "1.2.3",
+        "description": "Simple tesseract that adds two vectors.\\n",
+    }

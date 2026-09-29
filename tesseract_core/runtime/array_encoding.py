@@ -682,17 +682,19 @@ def validate_binref_array(
     shape = val.shape
     dtype_name = val.dtype
 
-    if expected_shape is not Ellipsis:
-        if len(shape) != len(expected_shape) or any(
+    if expected_shape is not Ellipsis and (
+        len(shape) != len(expected_shape)
+        or any(
             exp is not None and got != exp
             for got, exp in zip(shape, expected_shape, strict=False)
-        ):
-            raise PydanticCustomError(
-                "array_shape_mismatch",
-                "Binref array shape {actual_shape} is incompatible with expected "
-                "shape {expected_shape}",
-                {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
-            )
+        )
+    ):
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Binref array shape {actual_shape} is incompatible with expected "
+            "shape {expected_shape}",
+            {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
+        )
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if dtype_name not in allowed_dtypes:
@@ -764,6 +766,46 @@ def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
         raise _out_of_range(arr, dtype, example.item()) from None
 
 
+def resolve_dtype(
+    actual_dtype: str,
+    expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the dtype a value takes on, without touching the value itself.
+
+    The behavior can be controlled via the ``context`` dict:
+    - ``strict_types`` (bool): When True, reject dtypes that don't match the
+      expected dtype exactly (no same-kind casting).
+    """
+    if expected_dtype is None:
+        return actual_dtype
+
+    strict_types = (context or {}).get("strict_types", False)
+
+    if strict_types:
+        if actual_dtype != expected_dtype:
+            raise PydanticCustomError(
+                "array_dtype_mismatch",
+                "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
+                "(strict_types=True, no casting)",
+                {
+                    "actual_dtype": actual_dtype,
+                    "expected_dtype": expected_dtype,
+                },
+            )
+    elif not _castable(actual_dtype, expected_dtype):
+        raise PydanticCustomError(
+            "array_dtype_mismatch",
+            "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
+            {
+                "actual_dtype": actual_dtype,
+                "expected_dtype": expected_dtype,
+            },
+        )
+
+    return expected_dtype
+
+
 def _coerce_shape_dtype(
     arr: ArrayLike,
     expected_shape: ShapeType,
@@ -788,7 +830,6 @@ def _coerce_shape_dtype(
         context = {}
 
     strict_shapes = context.get("strict_shapes", False)
-    strict_types = context.get("strict_types", False)
 
     if expected_shape is Ellipsis:
         # No shape check
@@ -835,27 +876,9 @@ def _coerce_shape_dtype(
         ) from None
 
     if expected_dtype is not None:
-        if strict_types:
-            if str(arr.dtype) != expected_dtype:
-                raise PydanticCustomError(
-                    "array_dtype_mismatch",
-                    "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
-                    "(strict_types=True, no casting)",
-                    {
-                        "actual_dtype": str(arr.dtype),
-                        "expected_dtype": expected_dtype,
-                    },
-                )
-        elif not _castable(arr.dtype, expected_dtype):
-            raise PydanticCustomError(
-                "array_dtype_mismatch",
-                "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
-                {
-                    "actual_dtype": str(arr.dtype),
-                    "expected_dtype": expected_dtype,
-                },
-            )
-        arr = _astype_checked(arr, expected_dtype)
+        arr = _astype_checked(
+            arr, resolve_dtype(str(arr.dtype), expected_dtype, context)
+        )
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
@@ -911,11 +934,11 @@ def validate_python_or_gpu_array(
     """Validate a Python array-like input, keeping GPU arrays on-device.
 
     Used as the "load from a Python object" validator. Objects that live in GPU
-    memory (exposing ``__cuda_array_interface__``) are validated but returned
-    unchanged, so they can later be encoded via CUDA IPC without a host copy;
-    coercing them to NumPy here would force a device-to-host transfer (or fail,
-    since CuPy refuses implicit conversion). Everything else is coerced to a
-    NumPy array via :func:`python_to_array`.
+    memory (exposing ``__cuda_array_interface__`` or DLPack on a CUDA device) are
+    validated but returned unchanged, so they can later be encoded via CUDA IPC
+    without a host copy; coercing them to NumPy here would force a device-to-host
+    transfer (or fail, since CuPy refuses implicit conversion). Everything else
+    is coerced to a NumPy array via :func:`python_to_array`.
     """
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
@@ -925,7 +948,7 @@ def validate_python_or_gpu_array(
     if isinstance(val, BinrefArray):
         return validate_binref_array(val, expected_shape, expected_dtype)
 
-    if cuda_ipc.has_cuda_array_interface(val):
+    if cuda_ipc.is_gpu_array(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
@@ -1043,7 +1066,7 @@ def encode_array(
         )
         arr = _load_ref(arr, context)
 
-    is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
+    is_gpu_array = cuda_ipc.is_gpu_array(arr)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate

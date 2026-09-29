@@ -79,9 +79,11 @@ def test_apply_with_error(built_image_name):
     # pass two inputs with different shapes, which raises a validation error
     inputs = {"a": [1, 2, 3], "b": [3, 4], "s": 1}
 
-    with Tesseract.from_image(built_image_name) as vecadd:
-        with pytest.raises(ValidationError) as excinfo:
-            vecadd.apply(inputs)
+    with (
+        Tesseract.from_image(built_image_name) as vecadd,
+        pytest.raises(ValidationError) as excinfo,
+    ):
+        vecadd.apply(inputs)
 
     assert "a and b must have the same shape" in str(excinfo.value)
 
@@ -250,10 +252,10 @@ def test_signature_consistency():
 
     assert set(from_image_sig.keys()) == set(serve_sig.keys())
 
-    for key in from_image_sig:
-        assert from_image_sig[key].default == serve_sig[key].default, (
+    for key, from_image_param in from_image_sig.items():
+        assert from_image_param.default == serve_sig[key].default, (
             f"Default value mismatch for parameter '{key}': "
-            f"{from_image_sig[key].default} != {serve_sig[key].default}"
+            f"{from_image_param.default} != {serve_sig[key].default}"
         )
 
 
@@ -301,29 +303,27 @@ def test_apply_with_shmem_binref_pool(built_image_name):
         tempfile.TemporaryDirectory(
             prefix="tess_shmem_pool_out_", dir=shm_dir
         ) as output_dir,
-    ):
-        with Tesseract.from_image(
+        Tesseract.from_image(
             built_image_name,
             input_path=input_dir,
             output_path=output_dir,
             output_format="json+binref",
             experimental_binref_pool=True,
-        ) as vecadd:
+        ) as vecadd,
+    ):
+        out = vecadd.apply(inputs)
+        assert set(out.keys()) == {"result"}
+        np.testing.assert_array_equal(out["result"], expected)
+
+        # The pool's warm slot files live under the shared-memory input
+        # dir for the client's lifetime (checked in/out between requests,
+        # not deleted per-request like the fresh-file fallback).
+        pool_files = list(Path(input_dir).glob("pool_*.bin"))
+        assert len(pool_files) > 0, "Expected pooled binref input files under /dev/shm"
+
+        # Run more requests than the pool's default max_slots (4) to
+        # exercise both the warm-slot-hit path and the exhausted-pool
+        # fallback-to-fresh-file path, and check every result is correct.
+        for _ in range(8):
             out = vecadd.apply(inputs)
-            assert set(out.keys()) == {"result"}
             np.testing.assert_array_equal(out["result"], expected)
-
-            # The pool's warm slot files live under the shared-memory input
-            # dir for the client's lifetime (checked in/out between requests,
-            # not deleted per-request like the fresh-file fallback).
-            pool_files = list(Path(input_dir).glob("pool_*.bin"))
-            assert len(pool_files) > 0, (
-                "Expected pooled binref input files under /dev/shm"
-            )
-
-            # Run more requests than the pool's default max_slots (4) to
-            # exercise both the warm-slot-hit path and the exhausted-pool
-            # fallback-to-fresh-file path, and check every result is correct.
-            for _ in range(8):
-                out = vecadd.apply(inputs)
-                np.testing.assert_array_equal(out["result"], expected)

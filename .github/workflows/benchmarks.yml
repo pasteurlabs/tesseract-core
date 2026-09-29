@@ -28,6 +28,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -41,7 +42,7 @@ jobs:
         run: cp production.uv.lock uv.lock
 
       - name: Install package
-        run: uv sync --extra dev --frozen
+        run: uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
 
       - name: Run benchmarks on current commit
         run: |
@@ -60,7 +61,7 @@ jobs:
         working-directory: baseline
         run: |
           cp production.uv.lock uv.lock 2>/dev/null || true
-          uv sync --extra dev --frozen
+          uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
 
       - name: Use PR benchmark scripts for baseline
         if: github.event_name == 'pull_request'

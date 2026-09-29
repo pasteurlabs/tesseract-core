@@ -293,7 +293,7 @@ class MMAOptimizer:
     ) -> jax.typing.ArrayLike:
         """Calculate next parameters values."""
         if iteration < 1:
-            raise Exception("The MMA problem expects an iteration count >= 1.")
+            raise ValueError("The MMA problem expects an iteration count >= 1.")
 
         # The MMA problem works best with an objective scaled around [1, 100]
         if iteration == 1:

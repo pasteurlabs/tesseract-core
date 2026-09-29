@@ -148,6 +148,11 @@ class HostCredential(BaseModel):
         return value
 
 
+# Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
+# ``pylock.prod.toml``.
+_PYLOCK_NAME_RE = re.compile(r"^pylock(\.[^.]+)?\.toml$")
+
+
 class PipRequirements(BaseModel):
     """Configuration options for Python environments built via uv."""
 
@@ -161,9 +166,43 @@ class PipRequirements(BaseModel):
             "When unset, the system Python from the base image is used."
         ),
     )
-    _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
+    requirements_file: StrictStr = Field(
+        "tesseract_requirements.txt",
+        description=(
+            "Name of the dependency file (a bare filename in the Tesseract source "
+            "directory) to install from. Defaults to a flat "
+            "``tesseract_requirements.txt``. A PEP 751 lockfile "
+            "(``pylock.toml`` or a ``pylock.*.toml`` variant) is also accepted, in "
+            "which case dependencies are installed with pinned versions and hashes "
+            "and no build-time resolution. Export one from a ``uv.lock`` with "
+            "``uv export --format pylock.toml``."
+        ),
+    )
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
     model_config: ConfigDict = ConfigDict(extra="forbid")
+
+    @field_validator("requirements_file")
+    @classmethod
+    def _bare_filename(cls, value: str) -> str:
+        # The file is copied into the build stage by basename (Dockerfile COPYs it
+        # to `./`), so a path with directory components would silently install from
+        # the wrong place. Require a bare filename living in the source directory.
+        if value != Path(value).name or not value:
+            raise ValueError(
+                f"requirements_file must be a bare filename in the Tesseract source "
+                f"directory, not a path (got {value!r})."
+            )
+        return value
+
+    @property
+    def _filename(self) -> str:
+        return self.requirements_file
+
+    @property
+    def is_pylock(self) -> bool:
+        """Whether the requirements file is a PEP 751 lockfile, per its name."""
+        name = Path(self.requirements_file).name
+        return _PYLOCK_NAME_RE.match(name) is not None
 
 
 class CondaRequirements(BaseModel):
@@ -257,6 +296,14 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         if isinstance(self.requirements, PipRequirements):
             return self.requirements.python_version
         return None
+
+    @property
+    def uses_base_image_python(self) -> bool:
+        """Whether /python-env uses the base image's Python instead of bundling its own."""
+        return (
+            isinstance(self.requirements, PipRequirements)
+            and self.requirements.python_version is None
+        )
 
     @model_validator(mode="after")
     def _validate_python_version_provider(self):
@@ -366,8 +413,6 @@ def generate_config_schema() -> dict:
 
 class ValidationError(Exception):
     """Raised when inputs needed to build a tesseract are invalid."""
-
-    pass
 
 
 def _get_func_argnames(func: ast.FunctionDef) -> tuple[str, ...]:
@@ -480,8 +525,14 @@ def get_config(src_dir: Path) -> TesseractConfig:
     if not config_file.exists():
         raise FileNotFoundError(f"No file found at {config_file}")
 
-    with open(config_file) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as err:
+        raise ValidationError(f"Invalid YAML in {config_file}: {err}") from err
+
+    if not isinstance(config, dict):
+        raise ValidationError(f"{config_file} must contain a YAML mapping.")
 
     try:
         return TesseractConfig(**config)

@@ -22,6 +22,7 @@ from tesseract_core.runtime.schema_types import (
     Int8,
     Int32,
     Int64,
+    ShapeDType,
     UInt8,
     is_differentiable,
 )
@@ -32,6 +33,13 @@ class MyModel(BaseModel):
     array_float: Differentiable[Array[(None, 3), Float64]]
     array_bool: Array[..., Bool]
     scalar_int: Differentiable[Int32]
+
+
+AbstractInt64 = ShapeDType[(2, 3), "int64"]
+
+
+class MyAbstractModel(BaseModel):
+    array_int: AbstractInt64
 
 
 arr_int = np.array([[1, 2, 3], [4, 5, 6]])
@@ -538,6 +546,18 @@ def test_dtype_casting():
     ):
         MyModel.model_validate(json_payload)
 
+    # Case 9: abstract aval with a castable dtype (should work fine)
+    aval = MyAbstractModel.model_validate(
+        {"array_int": {"shape": [2, 3], "dtype": "int32"}}
+    )
+    assert aval.array_int.dtype == "int64"
+
+    # Case 10: abstract aval with an incompatible dtype (should raise)
+    with pytest.raises(ValidationError, match="cannot be safely cast"):
+        MyAbstractModel.model_validate(
+            {"array_int": {"shape": [2, 3], "dtype": "float32"}}
+        )
+
 
 def test_narrowing_casts_must_preserve_values():
     class Narrow(BaseModel):
@@ -657,6 +677,13 @@ def test_strict_types():
     json_payload["array_int"]["dtype"] = "int32"
     with pytest.raises(ValidationError, match="strict_types=True, no casting"):
         MyModel.model_validate(json_payload, context={"strict_types": True})
+
+    # Also rejects abstract avals, which carry no data
+    with pytest.raises(ValidationError, match="strict_types=True, no casting"):
+        MyAbstractModel.model_validate(
+            {"array_int": {"shape": [2, 3], "dtype": "int32"}},
+            context={"strict_types": True},
+        )
 
     # Exact dtypes pass
     model = MyModel.model_validate(

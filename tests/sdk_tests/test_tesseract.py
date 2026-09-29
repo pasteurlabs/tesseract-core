@@ -1,3 +1,4 @@
+import functools
 import gc
 import os
 import subprocess
@@ -120,6 +121,118 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     assert endpoints == all_endpoints
 
 
+def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
+    dummy_tesseract_module, tmp_path
+):
+    """Check that a second in-process Tesseract stays isolated from a prior one.
+
+    Each instance's configuration must be independent, the same way it
+    already is for from_image (#672). Construction must also leave the
+    process-global config exactly as it found it, since a Tesseract's own
+    config lives in its client's captured snapshot, not in global state.
+    """
+    from tesseract_core.runtime.config import snapshot_config
+
+    outer_snapshot = snapshot_config()
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    first = Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        output_format="json",
+    )
+    first_config = first._client._config_snapshot[0]
+    assert Path(first_config.output_path) == first_output
+    assert first_config.output_format == "json"
+
+    # A fresh instance that requests neither option must not see the first
+    # instance's explicit overrides leaking into its runtime config.
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    second_config = second._client._config_snapshot[0]
+    assert Path(second_config.output_path) != first_output
+    assert second_config.output_format == "json+base64"  # from_tesseract_api's default
+
+    # Neither construction should have left a mark on the process-global
+    # config that anything outside these two instances could observe.
+    assert snapshot_config() == outer_snapshot
+
+
+def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_built(
+    dummy_tesseract_module, tmp_path, mocker
+):
+    """A call on an earlier Tesseract runs under its own config, not the global one.
+
+    Simulates a second instance's config being globally active (e.g. because
+    it is mid-call) while the first instance's apply() runs. profiling is the
+    config value run_tesseract() reads via get_config(), so it shows directly
+    whether the wrong config leaks in.
+    """
+    from tesseract_core.runtime.config import override_config
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    first = Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        runtime_config={"profiling": True},
+    )
+
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert second._client._config_snapshot[0].profiling is False
+    assert Path(second._client._config_snapshot[0].output_path) != first_output
+
+    # While second's own snapshot is (hypothetically) the active global
+    # config, e.g. because second.apply() is itself mid-call right now.
+    with override_config(second._client._config_snapshot):
+        profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+        result = first.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+        assert list(result["result"]) == [1.0, 2.0]
+
+        # first's own profiling=True setting reached the Profiler, not the
+        # profiling=False that's globally active for second's sake.
+        assert profiler_spy.call_args.kwargs["enabled"] is True
+
+        # The run went to first's own output dir, not second's.
+        run_dirs = list(first_output.glob("run_*"))
+        assert len(run_dirs) == 1
+
+
+def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
+    dummy_tesseract_module, mocker
+):
+    """A config edit made inside an endpoint carries over to later calls.
+
+    This mirrors the containerized case, where the runtime config is a live
+    process global for the lifetime of the container.
+    """
+    from tesseract_core.runtime.config import get_config, update_config
+
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert tess._client._config_snapshot[0].profiling is False
+
+    original_apply = tess._client._endpoints["apply"]
+
+    @functools.wraps(original_apply)
+    def apply_that_enables_profiling(payload):
+        update_config(profiling=True)
+        return original_apply(payload)
+
+    tess._client._endpoints["apply"] = apply_that_enables_profiling
+
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert tess._client._config_snapshot[0].profiling is True
+
+    # A subsequent call runs under the edited config: the profiler is enabled.
+    tess._client._endpoints["apply"] = original_apply
+    profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert profiler_spy.call_args.kwargs["enabled"] is True
+
+    # The edit stayed contained to this instance's snapshot, not the global.
+    assert get_config().profiling is False
+
+
 def test_rejects_imported_module(dummy_tesseract_module):
     """A module cannot be handed to another process, so say so clearly.
 
@@ -198,7 +311,7 @@ def test_container_info_raises_for_non_image_tesseract():
 
 
 def test_container_info_unavailable(dummy_api_path):
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     with pytest.raises(RuntimeError, match="from_image"):
         tess.container_info()
 
@@ -221,7 +334,7 @@ def test_garbage_collection_reaps_process(dummy_api_path):
     """A forgotten Tesseract must not leave an orphaned process behind."""
     import gc
 
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     tess.serve()
     # Hold the process, not the Tesseract, so it can still be collected.
     process = tess._serve_context.process
@@ -247,7 +360,9 @@ def test_del_tesseract_purges_auto_tempdir(mock_serving):
 
 def test_auto_created_scratch_dirs_are_purged(dummy_api_path):
     """What we made, we clean up -- unlike directories the caller passed in."""
-    tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
+    tess = Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, output_format="json+binref"
+    )
     scratch = [
         Path(tess._spawn_config["input_path"]),
         Path(tess._spawn_config["output_path"]),
@@ -281,6 +396,7 @@ def test_given_scratch_dirs_are_left_alone(dummy_api_path, tmp_path):
 
     tess = Tesseract.from_source(
         dummy_api_path,
+        python_executable=sys.executable,
         input_path=given_in,
         output_path=given_out,
         output_format="json+binref",
@@ -386,10 +502,40 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     assert mock_serving["container"].removals == [True]
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
-    with pytest.raises(RuntimeError):
-        with t:
-            with t:
-                pass
+    with pytest.raises(RuntimeError), t, t:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({}, ()),
+        ({"gpu_transport": "none"}, ()),
+        ({"gpu_transport": "cuda_ipc"}, ("cuda_ipc",)),
+        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, ("cuda_ipc",)),
+    ],
+)
+def test_supported_gpu_transports_served(mock_serving, mock_clients, kwargs, expected):
+    t = Tesseract.from_image("sometesseract:0.2.3", **kwargs)
+
+    # The transport is a property of the client, which only exists once served
+    with pytest.raises(RuntimeError, match="context manager"):
+        _ = t.supported_gpu_transports
+
+    with t:
+        assert t.supported_gpu_transports == expected
+
+
+def test_supported_gpu_transports_unserved(dummy_tesseract_module):
+    # A remote Tesseract is reached without any device transport configured
+    assert Tesseract.from_url("localhost").supported_gpu_transports == ()
+
+    # In-process Tesseracts share memory with the caller, so there is nothing to
+    # transport -- even when a GPU transport is configured.
+    local = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert local.supported_gpu_transports == ()
 
 
 @pytest.mark.parametrize(
@@ -625,6 +771,94 @@ def test_decode_array_lz4(encoding, tmp_path):
     }
     decoded = _decode_array(encoded, output_path=output_path)
     np.testing.assert_array_equal(decoded, arr, strict=True)
+
+
+def _binref_encoded(bufferpath):
+    """Build a json+binref encoded-array dict pointing at ``bufferpath``."""
+    return {
+        "shape": (2,),
+        "dtype": "float64",
+        "data": {"buffer": f"{bufferpath}:0", "encoding": "binref"},
+    }
+
+
+def test_decode_array_binref_rejects_path_escape(tmp_path):
+    """A binref reference from the server must not escape output_path.
+
+    Each vector below is a distinct way to try to break out of output_path,
+    including absolute paths, ``..`` traversal, a prefix-sibling directory, and
+    symlinks pointing outside.
+    """
+    output_path = tmp_path / "output_dir"
+    output_path.mkdir()
+
+    # Secrets living outside the sandbox.
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"\x00" * 16)
+    outside_dir = tmp_path / "etc"
+    outside_dir.mkdir()
+    (outside_dir / "passwd").write_bytes(b"\x00" * 16)
+
+    # A sibling dir whose name shares output_dir's prefix -- a naive
+    # ``str.startswith`` containment check would wrongly allow this.
+    sibling = tmp_path / "output_dir_evil"
+    sibling.mkdir()
+    (sibling / "x.bin").write_bytes(b"\x00" * 16)
+
+    # Symlinks that live inside the sandbox but point outside it. resolve()
+    # must follow them so the guard sees the real out-of-sandbox target.
+    os.symlink(outside_dir, output_path / "link_to_dir")
+    os.symlink(secret, output_path / "link_to_file")
+
+    escape_vectors = [
+        str(secret),  # absolute path
+        str(outside_dir / "passwd"),  # absolute, /etc/passwd style
+        "../secret.bin",  # single ..
+        "../../../../../../etc/passwd",  # deep ..
+        "subdir/../../secret.bin",  # .. that nets outside
+        "..",  # parent of the sandbox
+        "../output_dir_evil/x.bin",  # prefix-sibling trick
+        "link_to_dir/passwd",  # traverse a symlinked dir to outside
+        "link_to_file",  # a symlink file pointing outside
+    ]
+
+    for bufferpath in escape_vectors:
+        encoded = _binref_encoded(bufferpath)
+        with pytest.raises(ValueError, match="escapes output_path"):
+            _decode_array(encoded, output_path=output_path)
+
+
+def test_decode_array_binref_rejects_missing_output_path():
+    """A json+binref response cannot be decoded without a sandbox to confine it."""
+    encoded = _binref_encoded("/etc/passwd")
+    with pytest.raises(ValueError, match="output_path must be set"):
+        _decode_array(encoded, output_path=None)
+
+
+def test_decode_array_binref_allows_legitimate_paths(tmp_path):
+    """Containment must not break legitimate in-directory reads.
+
+    A ``..`` that resolves back inside output_path, and an output_path reached
+    via a symlink, are both safe and must still decode.
+    """
+    real_output = tmp_path / "real_output"
+    real_output.mkdir()
+    payload = np.array([1.0, 2.0], dtype="float64")
+    (real_output / "data.bin").write_bytes(payload.tobytes())
+
+    # Plain in-sandbox read.
+    decoded = _decode_array(_binref_encoded("data.bin"), output_path=real_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+    # A .. that resolves back inside the sandbox.
+    decoded = _decode_array(_binref_encoded("sub/../data.bin"), output_path=real_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+    # output_path itself reached via a symlink must still work.
+    linked_output = tmp_path / "linked_output"
+    os.symlink(real_output, linked_output)
+    decoded = _decode_array(_binref_encoded("data.bin"), output_path=linked_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
 
 
 def test_binref_pool_checkout_reuses_slot(tmp_path):
@@ -938,8 +1172,6 @@ def test_tree_map():
 
 class _ForeignDtype:
     """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
-
-    pass
 
 
 class _ForeignTensor:

@@ -70,7 +70,8 @@ class TestSpec(BaseModel):
             return v
 
         if not isinstance(v, str):
-            raise ValueError(
+            # Pydantic validator: only ValueError/AssertionError become a ValidationError.
+            raise ValueError(  # noqa: TRY004
                 f"expected_exception must be a string or exception type, got {type(v).__name__}"
             )
 
@@ -195,7 +196,8 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
 
     # Verify it's actually an exception class
     if not (isinstance(exc_class, type) and issubclass(exc_class, Exception)):
-        raise ValueError(
+        # Public error type; switching to TypeError would break callers catching ValueError.
+        raise ValueError(  # noqa: TRY004
             f"'{exception_name}' is not a valid exception class. "
             f"Found type: {type(exc_class).__name__}"
         )
@@ -255,9 +257,11 @@ def _validate_tree_structure(
         return (
             {},
             [
-                f"Type mismatch at {'.'.join(path)}:\n"
-                f"  Expected: {type(template).__name__}, "
-                f"  Obtained: {type(tree).__name__}"
+                (
+                    f"Type mismatch at {'.'.join(path)}:\n"
+                    f"  Expected: {type(template).__name__}, "
+                    f"  Obtained: {type(tree).__name__}"
+                )
             ],
         )
 
@@ -320,9 +324,11 @@ def _validate_tree_structure(
             return (
                 {},
                 [
-                    f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
-                    f"  Expected: {len(template)}\n"
-                    f"  Obtained: {len(tree)}"
+                    (
+                        f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
+                        f"  Expected: {len(template)}\n"
+                        f"  Obtained: {len(tree)}"
+                    )
                 ],
             )
 
@@ -460,12 +466,10 @@ def _compare_leaf_values(
     threshold: int,
 ) -> str | None:
     """Compare a single leaf pair and return a discrepancy message, or None if matching."""
-    is_inexact_numeric = False
-    if isinstance(expected_val, float):
-        is_inexact_numeric = True
-    elif isinstance(expected_val, (np.number, np.ndarray)):
-        if np.issubdtype(expected_val.dtype, np.inexact):
-            is_inexact_numeric = True
+    is_inexact_numeric = isinstance(expected_val, float) or (
+        isinstance(expected_val, (np.number, np.ndarray))
+        and np.issubdtype(expected_val.dtype, np.inexact)
+    )
 
     if isinstance(expected_val, np.ndarray) and expected_val.ndim == 0:
         expected_val = expected_val[()]
@@ -629,7 +633,7 @@ def regress_test_case(
             ),
             endpoint=test_spec.endpoint,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - user endpoint code; reported as a test result
         if expected_exception is _NoException:
             return TestOutputSchema(
                 status="error",
@@ -660,7 +664,7 @@ def regress_test_case(
         return TestOutputSchema(
             status="passed", message="", endpoint=test_spec.endpoint
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - user endpoint code; reported as a test result
         if expected_exception is _NoException:
             return TestOutputSchema(
                 status="error",

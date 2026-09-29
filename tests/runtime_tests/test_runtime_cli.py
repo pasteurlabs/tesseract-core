@@ -476,6 +476,7 @@ def test_stdout_redirect_cli():
     result = subprocess.run(
         [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
         capture_output=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == b""
@@ -513,7 +514,9 @@ def test_stdout_redirect_subprocess(tmpdir, target):
 
     # Use subprocess since pytest messes with stdout/stderr
     result = subprocess.run(
-        [sys.executable, "-W", "ignore", testscript_path], capture_output=True
+        [sys.executable, "-W", "ignore", testscript_path],
+        capture_output=True,
+        check=False,
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
     stdout = result.stdout.replace(b"\r\n", b"\n")
@@ -880,6 +883,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
         capture_output=True,
         text=True,
         env={**os.environ, "TESSERACT_API_PATH": str(tesseract_api_file)},
+        check=False,
     )
     assert result.returncode == 0, f"CLI failed: {result.stderr}"
     output = json.loads(result.stdout)

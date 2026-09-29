@@ -8,7 +8,11 @@ from textwrap import dedent
 import pytest
 import yaml
 
-from tesseract_core.sdk.api_parse import ValidationError, validate_tesseract_api
+from tesseract_core.sdk.api_parse import (
+    ValidationError,
+    get_config,
+    validate_tesseract_api,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -294,6 +298,39 @@ def test_schema_parent_class_is_checked(
             validate_tesseract_api(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "filename,is_pylock",
+    [
+        # Default flat requirements file.
+        ("tesseract_requirements.txt", False),
+        # PEP 751 lockfiles: the canonical name and single-segment named variants.
+        ("pylock.toml", True),
+        ("pylock.prod.toml", True),
+        # A bare .toml that is not a lockfile per PEP 751 naming.
+        ("constraints.toml", False),
+        # Not PEP 751 names: two segments, empty segment, wrong suffix position.
+        ("pylock.dev.extra.toml", False),
+        ("pylock..toml", False),
+        ("pylock.toml.bak", False),
+    ],
+)
+def test_requirements_file_pylock_detection(filename, is_pylock):
+    """The lockfile format is inferred from the PEP 751 filename, nothing else."""
+    from tesseract_core.sdk.api_parse import PipRequirements
+
+    req = PipRequirements(provider="uv-pip", requirements_file=filename)
+    assert req.is_pylock is is_pylock
+    assert req._filename == filename
+
+
+def test_requirements_file_rejects_path():
+    """requirements_file must be a bare filename, since the build COPYs it by basename."""
+    from tesseract_core.sdk.api_parse import PipRequirements
+
+    with pytest.raises(ValueError, match="bare filename"):
+        PipRequirements(provider="uv-pip", requirements_file="locks/pylock.toml")
+
+
 def test_generated_config_schema_is_wellformed():
     from tesseract_core.sdk.api_parse import CONFIG_SCHEMA_URL, generate_config_schema
 
@@ -367,3 +404,11 @@ def test_schemastore_fixtures_match_generated_schema(tmp_path):
     # The negative fixture must be rejected by the schema.
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(yaml.safe_load(negative), schema)
+
+
+@pytest.mark.parametrize("content", ["name: [unclosed\n", "", "- a list\n"])
+def test_get_config_reports_bad_files_as_validation_errors(tmp_path, content):
+    (tmp_path / "tesseract_config.yaml").write_text(content)
+
+    with pytest.raises(ValidationError, match=r"tesseract_config\.yaml"):
+        get_config(tmp_path)

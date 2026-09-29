@@ -101,7 +101,7 @@ If you're using a Mac, your system uses the ARM64 processor architecture, while 
        - gcc
    ```
 
-   Other options include using conda (`venv_backend: conda`) or pinning to a version that has ARM64 support. Alternatively, build for x86_64 as described above.
+   Other options include using conda (`build_config.requirements.provider: conda`) or pinning to a version that has ARM64 support. Alternatively, build for x86_64 as described above.
 
 To verify the architecture of a built Tesseract image: `docker inspect --format='{{.Architecture}}' my_tesseract:latest`
 

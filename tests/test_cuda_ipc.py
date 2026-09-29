@@ -8,10 +8,11 @@ Run on a GPU machine with ``pytest tests/test_cuda_ipc.py``.
 
 Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
-is framework-agnostic on *both* sides: encode works with any object that
-implements ``__cuda_array_interface__`` (CuPy, PyTorch, JAX, Numba), and decode
-returns a framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that
-exposes ``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
+is framework-agnostic on *both* sides: encode reads an array's metadata from
+``__cuda_array_interface__`` (CuPy, PyTorch, Numba) or from DLPack on a CUDA
+device (JAX, which does not implement CAI), and decode returns a
+framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that exposes
+``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
 
 Note on process model
 ---------------------
@@ -23,6 +24,7 @@ opened the handle, otherwise a pooled allocator may recycle and overwrite the
 memory -- the harness below enforces that with an explicit handshake.
 """
 
+import contextlib
 import multiprocessing
 import queue as queue_mod
 import sys
@@ -37,21 +39,21 @@ try:
     import cupy
 
     _CUDA_AVAILABLE = cupy.cuda.runtime.getDeviceCount() > 0
-except Exception:
+except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _CUDA_AVAILABLE = False
 
 try:
     import torch as _torch
 
     _TORCH_AVAILABLE = _torch.cuda.is_available()
-except Exception:
+except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _TORCH_AVAILABLE = False
 
 try:
     import jax as _jax
 
     _JAX_AVAILABLE = any(d.platform == "gpu" for d in _jax.devices())
-except Exception:
+except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _JAX_AVAILABLE = False
 
 # Every test in this module drives real CUDA IPC and therefore needs a physical
@@ -118,12 +120,10 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
         to_consumer.put(payloads)
         from_consumer.get(timeout=_TIMEOUT)
         del arrays
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
-        try:
+        with contextlib.suppress(OSError, ValueError):
             to_consumer.put(("PRODUCER_ERROR", traceback.format_exc()))
-        except Exception:
-            pass
         sys.exit(2)
 
 
@@ -167,14 +167,12 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             )
 
         result_q.put(("OK", results))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         result_q.put(("CONSUMER_ERROR", traceback.format_exc()))
     finally:
-        try:
+        with contextlib.suppress(OSError, ValueError):
             from_consumer.put("done")
-        except Exception:
-            pass
 
 
 def run_cross_process(build_fn_name, *args):
@@ -523,7 +521,7 @@ def _ring1_server(req_q, resp_q):
                 del tmp
             out = cupy.arange(1024, dtype=cupy.float32) + (i + 1) * 100.0
             resp_q.put((i, dump_cuda_ipc_arraydict(out)))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         resp_q.put(("SERVER_ERROR", traceback.format_exc()))
 
@@ -557,7 +555,7 @@ def _ring1_client(req_q, resp_q, result_q, n):
             for j, a in kept
         )
         result_q.put(("OK", all_ok))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         result_q.put(("CLIENT_ERROR", traceback.format_exc()))
 
@@ -743,14 +741,12 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
         cupy_absent = "cupy" not in sys.modules
 
         result_q.put(("OK", (host_ok, torch_ok, cupy_absent)))
-    except Exception:
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         result_q.put(("CONSUMER_ERROR", traceback.format_exc()))
     finally:
-        try:
+        with contextlib.suppress(OSError, ValueError):
             from_consumer.put("done")
-        except Exception:
-            pass
 
 
 @requires_cuda
@@ -841,8 +837,10 @@ def apply(inputs: InputSchema) -> OutputSchema:
 # ── Test 6: served HTTP round-trip over the cuda_ipc transport ──────────
 
 
+# apply() builds its GPU leaf via _to_device, injected per framework by the
+# parametrization below. CuPy and PyTorch expose ``__cuda_array_interface__``,
+# JAX only DLPack, so the three cover both metadata sources the transport reads.
 _MIXED_API_CODE = """
-import cupy as cp
 import numpy as np
 from pydantic import BaseModel
 from tesseract_core.runtime import Array, Float32
@@ -856,21 +854,38 @@ class OutputSchema(BaseModel):
     gpu: Array[(None,), Float32]
     cpu: Array[(None,), Float32]
 
+def _to_device(x):
+{to_device}
+
 def apply(inputs: InputSchema) -> OutputSchema:
     x = np.asarray(inputs.x)
-    return OutputSchema(gpu=cp.asarray(x * 2.0), cpu=x + 1.0)
+    return OutputSchema(gpu=_to_device(x * 2.0), cpu=x + 1.0)
 """
 
+_TO_DEVICE = {
+    "cupy": "    import cupy as cp\n    return cp.asarray(x)",
+    "torch": "    import torch\n    return torch.as_tensor(x, device='cuda')",
+    "jax": "    import jax.numpy as jnp\n    return jnp.asarray(x)",
+}
 
-@requires_cuda
-def test_tesseract_api_cuda_ipc_mixed_http(free_port, serve_in_subprocess):
+
+@pytest.mark.parametrize(
+    "framework",
+    [
+        pytest.param("cupy", marks=requires_cuda),
+        pytest.param("torch", marks=[requires_cuda, requires_torch_cuda]),
+        pytest.param("jax", marks=[requires_cuda, requires_jax_cuda]),
+    ],
+)
+def test_tesseract_api_cuda_ipc_mixed_http(framework, free_port, serve_in_subprocess):
     """A served endpoint returns a GPU and a CPU array in one response.
 
     The server makes ``cuda_ipc`` available via its config. The client selects it
     per request through the ``Accept`` header, so the response encodes the device
     array as a cuda_ipc handle and the host array as base64. This exercises the
-    mixed CPU/GPU path end to end over real HTTP. The client decodes the handle
-    from a separate process, as CUDA IPC requires (see the module docstring).
+    mixed CPU/GPU path end to end over real HTTP, once per GPU array framework
+    (CuPy, PyTorch, JAX). The client decodes the handle from a separate process,
+    as CUDA IPC requires (see the module docstring).
     """
     import pybase64
     import requests
@@ -879,7 +894,7 @@ def test_tesseract_api_cuda_ipc_mixed_http(free_port, serve_in_subprocess):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         api_path = Path(tmpdir) / "tesseract_api.py"
-        api_path.write_text(_MIXED_API_CODE)
+        api_path.write_text(_MIXED_API_CODE.format(to_device=_TO_DEVICE[framework]))
 
         server_env = {
             "TESSERACT_OUTPUT_FORMAT": "json+base64",

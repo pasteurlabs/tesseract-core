@@ -210,7 +210,7 @@ def jac_sdf_wrt_params(
     )
 
     for chain in range(n_chains):
-        for vertex in range(0, n_edges_per_chain + 1):
+        for vertex in range(n_edges_per_chain + 1):
             # we only care about the y coordinate
             i = 1
             params_eps = params.copy()
