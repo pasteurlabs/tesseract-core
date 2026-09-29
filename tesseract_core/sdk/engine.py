@@ -607,7 +607,7 @@ def init_api(
 
     template_vars = {
         "version": tesseract_version,
-        "timestamp": datetime.datetime.now().isoformat(),
+        "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "name": tesseract_name,
     }
 
@@ -743,7 +743,7 @@ def build_tesseract(
 
     if build_dir is None:
         build_dir = Path(tempfile.mkdtemp(prefix=f"tesseract_build_{source_basename}"))
-        keep_build_dir = True if generate_only else False
+        keep_build_dir = bool(generate_only)
     else:
         build_dir = Path(build_dir)
         build_dir.mkdir(exist_ok=True)
@@ -817,9 +817,7 @@ def teardown(
     """
     if tear_all:
         # Identify all Tesseract containers to tear down
-        container_ids = set(
-            container.id for container in docker_client.containers.list()
-        )
+        container_ids = {container.id for container in docker_client.containers.list()}
         if not container_ids:
             logger.info("No Tesseract containers to teardown")
             return

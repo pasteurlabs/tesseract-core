@@ -493,7 +493,7 @@ def test_multiple_workers(tmpdir, free_port, serve_in_subprocess):
 
         # Check that not all pids are the same
         # (i.e. the requests were handled by different workers)
-        pids = set(response.json()["pid"] for response in responses)
+        pids = {response.json()["pid"] for response in responses}
         assert len(pids) > 1, "All requests were handled by the same worker"
 
 
