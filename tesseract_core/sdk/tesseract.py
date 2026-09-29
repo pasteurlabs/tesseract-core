@@ -1011,8 +1011,8 @@ def _encode_array(
     if hasattr(arr, "__cuda_array_interface__"):
         if encoding == "cuda_ipc":
             return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
-        # Only reach for the runtime when the flag is set, so a base SDK install
-        # can still host-copy GPU arrays.
+        # Import the runtime only when the flag is set, so a base SDK install
+        # without it can still host-copy GPU arrays.
         if os.environ.get("TESSERACT_FORBID_DEVICE_HOST_COPY"):
             _import_cuda_ipc().check_device_host_copy(
                 f"a {type(arr).__name__} GPU array"

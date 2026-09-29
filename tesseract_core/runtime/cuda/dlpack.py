@@ -1,16 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""DLPack ABI: hand an owned device buffer to Torch/JAX/CuPy zero-copy.
+"""Hand owned CUDA device buffers to Torch/JAX/CuPy as DLPack capsules.
 
-This module mirrors just enough of the DLPack C ABI to export a device buffer
-as a ``"dltensor"`` PyCapsule, plus the capsule handshake and lifetime
-bookkeeping. It is used by :class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray`
-to expose its buffer via ``__dlpack__`` without depending on any GPU framework.
-
-All ctypes and the CPython capsule API stay here. The public surface is two
-functions -- :func:`make_dlpack_capsule` and :func:`drop_unconsumed_bundle` --
-and the buffer is always freed through
+Mirrors just enough of the DLPack C ABI to wrap a device buffer in a
+``"dltensor"`` PyCapsule without depending on any GPU framework.
+:class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray` implements
+``__dlpack__`` with :func:`make_dlpack_capsule` and
+:func:`drop_unconsumed_bundle`. All ctypes and CPython capsule calls stay in
+this module, and the buffer is always freed through
 :func:`tesseract_core.runtime.cuda.api.free`.
 """
 

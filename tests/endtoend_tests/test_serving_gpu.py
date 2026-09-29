@@ -86,9 +86,7 @@ def gpu_image_name(
 def _forbid_host_copy_env() -> dict[str, str]:
     """Container env that makes implicit device-to-host copies raise.
 
-    Containers don't inherit the test process environment (where the conftest
-    fixture sets this), so it is forwarded explicitly. A fresh dict per call,
-    since serving updates the dict it is given in place.
+    Returns a fresh dict because serving mutates the ``environment`` it is given.
     """
     return {"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"}
 

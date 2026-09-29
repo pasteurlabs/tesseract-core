@@ -19,10 +19,10 @@ The JSON schema for this encoding (``CudaIpcArrayData``) lives alongside the
 other array-data models in :mod:`array_encoding`; the public entry points used
 by :mod:`array_encoding` are:
 
-* :func:`has_cuda_array_interface` / :func:`cuda_array_to_host` -- host-copy
-  helpers for non-IPC encodings of GPU arrays (both implicit device-to-host
-  paths can be turned into errors for testing via
-  ``TESSERACT_FORBID_DEVICE_HOST_COPY``; see :func:`check_device_host_copy`),
+* :func:`has_cuda_array_interface` -- detect a GPU leaf,
+* :func:`cuda_array_to_host` -- host-copy helper for non-IPC encodings of GPU
+  arrays,
+* :func:`check_device_host_copy` -- testing guard against implicit host copies,
 * :func:`validate_cuda_array` -- shape/dtype validation without a device copy,
 * :func:`dump_cuda_ipc_arraydict` / :func:`load_cuda_ipc_arraydict` -- the
   encode/decode pair,
@@ -65,27 +65,25 @@ __all__ = [
 def has_cuda_array_interface(obj: Any) -> bool:
     """Check if an object exposes the __cuda_array_interface__ protocol.
 
-    This protocol is supported by PyTorch, CuPy, JAX, Numba, and any
-    CUDA-aware Python library. It indicates the object holds data in
+    This protocol is supported by PyTorch, CuPy, JAX, Numba, and most
+    CUDA-aware Python libraries. It indicates the object holds data in
     GPU device memory.
     """
     return hasattr(obj, "__cuda_array_interface__")
 
 
-# Set to a truthy value to make implicit device-to-host copies raise instead of
-# silently round-tripping GPU data through host memory. A testing aid: it turns
-# "this path should be zero-copy" into an assertion that holds across process
-# and container boundaries (the SDK checks the same variable).
 FORBID_DEVICE_HOST_COPY_ENV = "TESSERACT_FORBID_DEVICE_HOST_COPY"
 
 
 def check_device_host_copy(what: str) -> None:
-    """Raise if implicit device-to-host copies are forbidden via the environment.
+    """Raise if implicit device-to-host copies are forbidden.
 
-    Called on every path where the runtime would otherwise copy a GPU array to
-    the host without being asked to (a GPU output serialized without a device
-    transport, or ``np.asarray`` on a decoded device array). Explicit copies
-    such as :meth:`IpcDeviceArray.copy_to_host` are never blocked.
+    Setting ``TESSERACT_FORBID_DEVICE_HOST_COPY`` to ``1`` or ``true`` makes
+    silent host copies of GPU data fail loudly, so tests can assert that a path
+    stays on-device. Subprocess servers inherit the variable, and the SDK client
+    checks it too. The guarded paths are GPU arrays serialized without a device
+    transport and ``np.asarray`` on an :class:`IpcDeviceArray`. Explicit copies
+    via :meth:`IpcDeviceArray.copy_to_host` are never blocked.
     """
     if os.environ.get(FORBID_DEVICE_HOST_COPY_ENV, "").lower() in {"1", "true"}:
         raise RuntimeError(
@@ -95,15 +93,13 @@ def check_device_host_copy(what: str) -> None:
 
 
 def cuda_array_to_host(arr: Any) -> np.ndarray:
-    """Copy a GPU array to a host NumPy array (explicit device-to-host copy).
+    """Copy a GPU array to a host NumPy array.
 
-    Used for non-IPC encodings, where the bytes must reach the host. Handles
-    CuPy (``.get()``) and PyTorch (``.cpu().numpy()``) explicitly, then falls
-    back to ``np.asarray`` for any other framework whose arrays support
-    ``__array__`` (e.g. JAX, which fetches to host on conversion).
-
-    Raises if ``TESSERACT_FORBID_DEVICE_HOST_COPY`` is set (see
-    :func:`check_device_host_copy`).
+    Used for non-IPC encodings, where the bytes must reach the host, and so
+    subject to :func:`check_device_host_copy`. Handles CuPy (``.get()``) and
+    PyTorch (``.cpu().numpy()``) explicitly, then falls back to ``np.asarray``
+    for any other framework whose arrays support ``__array__`` (e.g. JAX, which
+    fetches to host on conversion).
     """
     check_device_host_copy(f"a {type(arr).__name__} GPU array")
     get = getattr(arr, "get", None)
@@ -142,14 +138,9 @@ class _CudaArrayInfo(NamedTuple):
     def is_c_contiguous(self) -> bool:
         """Whether the array's memory is row-major contiguous.
 
-        cuda_ipc transfers a flat, contiguous byte range: encode copies (or
-        hands off) ``prod(shape) * itemsize`` consecutive bytes and decode
-        rebuilds a contiguous array from shape/dtype alone (the payload carries
-        no strides). A non-contiguous source would therefore be silently
-        misread, so callers must reject it.
-
-        Explicit strides are still contiguous iff they equal the row-major
-        strides implied by shape and itemsize.
+        cuda_ipc moves ``nbytes`` consecutive bytes and the decoder rebuilds the
+        array from shape and dtype alone, so callers must reject non-contiguous
+        sources, which would otherwise be silently misread.
         """
         if self.strides is None:
             return True
@@ -163,12 +154,10 @@ class _CudaArrayInfo(NamedTuple):
 
 
 def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
-    """Read a CUDA array's metadata from ``__cuda_array_interface__`` (v2+).
+    """Read a CUDA array's metadata from ``__cuda_array_interface__``.
 
-    Works with PyTorch tensors, CuPy arrays, JAX arrays, Numba device arrays,
-    etc. The protocol carries no device field, so the ordinal comes from the
-    framework's own attribute (CuPy ``.device.id``, PyTorch ``.device.index``),
-    defaulting to 0.
+    The protocol carries no device ordinal, so it is read from the framework's
+    ``.device`` attribute and defaults to 0.
     """
     iface = arr.__cuda_array_interface__
     shape = tuple(iface["shape"])
@@ -279,8 +268,8 @@ def _pin_cuda_ipc_staging_buffer(device_ptr: int) -> None:
 def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     """Dump a CUDA array to a JSON dict with a CUDA IPC handle.
 
-    Works with any object that implements __cuda_array_interface__:
-    PyTorch tensors, CuPy arrays, JAX DeviceArrays, etc.
+    Works with any object that implements ``__cuda_array_interface__``, such
+    as CuPy arrays, PyTorch tensors, and single-device JAX arrays.
 
     The IPC handle allows another process on the same host (with --ipc=host)
     to access the GPU memory directly without any CPU round-trip.
@@ -401,9 +390,8 @@ class IpcDeviceArray:
     * ``__dlpack__`` / ``__dlpack_device__`` let Torch and JAX adopt it,
 
     both zero-copy. ``.copy_to_host()`` / ``np.asarray(...)`` materialise a host
-    NumPy copy so it can be inspected without any GPU framework installed. The
-    implicit ``np.asarray`` route raises if ``TESSERACT_FORBID_DEVICE_HOST_COPY``
-    is set (see :func:`check_device_host_copy`); ``.copy_to_host()`` never does.
+    NumPy copy so it can be inspected without any GPU framework installed. Only
+    ``np.asarray`` is subject to :func:`check_device_host_copy`.
 
     Ownership of the device buffer is released exactly once: either a
     :func:`weakref.finalize` callback frees it (see
@@ -558,9 +546,9 @@ def validate_cuda_array(
     """Validate a GPU array's shape/dtype without pulling it off the device.
 
     Returns the object unchanged so it can later be encoded via CUDA IPC (see
-    :func:`tesseract_core.runtime.array_encoding.encode_array`). Only the
-    ``__cuda_array_interface__`` metadata is inspected -- no device-to-host copy
-    or kernel launch occurs. Mirrors the shape/dtype checks in
+    :func:`tesseract_core.runtime.array_encoding.encode_array`). It reads only
+    the ``__cuda_array_interface__`` metadata, so no device-to-host copy or
+    kernel launch occurs. Mirrors the shape/dtype checks in
     :func:`tesseract_core.runtime.array_encoding._coerce_shape_dtype`, but never
     casts (a cast would need a device copy the caller did not ask for).
     """

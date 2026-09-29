@@ -615,13 +615,9 @@ def test_cuda_array_to_host_branches(allow_device_host_copy):
 
 
 def test_forbid_device_host_copy_blocks_implicit_copies(mocked_cuda):
-    """With TESSERACT_FORBID_DEVICE_HOST_COPY set, implicit host copies raise.
+    """Implicit host copies raise in the runtime and SDK, explicit ones don't.
 
-    Covers every implicit device-to-host path: a GPU output serialized without a
-    device transport (runtime), a GPU input encoded without one (SDK), and
-    ``np.asarray`` on a decoded device array. An explicit ``copy_to_host`` still
-    works. The flag is set for all tests by the ``forbid_device_host_copy``
-    autouse fixture.
+    The flag is set by the autouse ``forbid_device_host_copy`` fixture.
     """
     from tesseract_core.sdk.tesseract import _encode_array
 
