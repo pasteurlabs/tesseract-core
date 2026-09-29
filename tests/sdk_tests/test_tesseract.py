@@ -18,10 +18,7 @@ from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
-    Base64,
-    Binref,
     HTTPClient,
-    Raw,
     _decode_array,
     _encode_array,
     _encode_payload,
@@ -1252,18 +1249,16 @@ def test_tree_map_with_foreign_tensor():
     np.testing.assert_array_equal(decoded, [4.0, 5.0])
 
 
-def test_encode_payload_mixed_binref_and_base64(tmp_path):
-    """_encode_payload encodes mixed payload with Binref, Base64, and Raw leaves."""
-    arr_a = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-    arr_b = np.array([4.0, 5.0], dtype=np.float64)
-    arr_c = np.array([6, 7], dtype=np.int32)
-    payload = {"a": Binref(arr_a), "b": Base64(arr_b), "c": Raw(arr_c)}
+def test_encode_payload_binref(tmp_path):
+    """_encode_payload writes binref files and unlinks them on context exit."""
+    arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    payload = {"a": arr}
 
     bin_file = None
-    with _encode_payload(payload, input_path=tmp_path) as encoded:
+    with _encode_payload(
+        payload, output_format="json+binref", input_path=tmp_path
+    ) as encoded:
         assert encoded["a"]["data"]["encoding"] == "binref"
-        assert encoded["b"]["data"]["encoding"] == "base64"
-        assert encoded["c"]["data"]["encoding"] == "raw"
         bin_name = encoded["a"]["data"]["buffer"].split(":")[0]
         bin_file = tmp_path / bin_name
         assert bin_file.exists()
@@ -1275,12 +1270,14 @@ def test_encode_payload_mixed_binref_and_base64(tmp_path):
 def test_encode_payload_cleanup_on_exception(tmp_path):
     """_encode_payload unlinks created binref files even if an exception occurs."""
     arr = np.array([1.0, 2.0], dtype=np.float32)
-    payload = {"a": Binref(arr)}
+    payload = {"a": arr}
     bin_file = None
 
     with (
         pytest.raises(RuntimeError, match="simulated failure"),
-        _encode_payload(payload, input_path=tmp_path) as encoded,
+        _encode_payload(
+            payload, output_format="json+binref", input_path=tmp_path
+        ) as encoded,
     ):
         bin_name = encoded["a"]["data"]["buffer"].split(":")[0]
         bin_file = tmp_path / bin_name
@@ -1300,7 +1297,7 @@ def test_encode_payload_with_pool(tmp_path):
 
     try:
         with _encode_payload(
-            payload, binref_pool=pool, input_encoding="binref"
+            payload, binref_pool=pool, output_format="json+binref"
         ) as encoded:
             assert encoded["x"]["data"]["encoding"] == "binref"
             assert len(pool._free) == 0  # slot checked out
@@ -1309,35 +1306,14 @@ def test_encode_payload_with_pool(tmp_path):
         pool.close()
 
 
-def test_encode_payload_input_encoding_override(tmp_path):
-    """_encode_payload respects input_encoding even when output_format is json+base64."""
-    arr = np.array([1.0, 2.0], dtype=np.float32)
-    payload = {"x": arr}
-
-    with _encode_payload(
-        payload,
+def test_http_client_binref_payload(tmp_path):
+    """HTTPClient transmits payloads with binref encoding when output_format is json+binref."""
+    client = HTTPClient(
+        "http://localhost:8000",
+        output_format="json+binref",
         input_path=tmp_path,
-        output_format="json+base64",
-        input_encoding="binref",
-    ) as encoded:
-        assert encoded["x"]["data"]["encoding"] == "binref"
-
-
-def test_encode_payload_binref_missing_input_path_raises():
-    """_encode_payload raises ValueError when Binref is used without input_path."""
+    )
     arr = np.array([1.0, 2.0], dtype=np.float32)
-    with (
-        pytest.raises(ValueError, match="input_path is required"),
-        _encode_payload({"x": Binref(arr)}),
-    ):
-        pass
-
-
-def test_http_client_mixed_payload(tmp_path):
-    """HTTPClient transmits payloads mixing binref and base64 arrays."""
-    client = HTTPClient("http://localhost:8000", input_path=tmp_path)
-    arr_a = np.array([1.0, 2.0], dtype=np.float32)
-    arr_b = np.array([3.0, 4.0], dtype=np.float32)
 
     mock_resp = Mock(spec=requests.Response)
     mock_resp.ok = True
@@ -1345,14 +1321,15 @@ def test_http_client_mixed_payload(tmp_path):
     mock_resp.content = b'{"result": "ok"}'
     client._session.request = Mock(return_value=mock_resp)
 
-    payload = {"disk": Binref(arr_a), "inline": arr_b}
+    payload = {"disk": arr}
     res = client._request("apply", method="POST", payload=payload)
     assert res == {"result": "ok"}
 
-    # Verify the transmitted JSON body contains both encodings
     sent_body = orjson.loads(client._session.request.call_args[1]["data"])
     assert sent_body["disk"]["data"]["encoding"] == "binref"
-    assert sent_body["inline"]["data"]["encoding"] == "base64"
+    bin_name = sent_body["disk"]["data"]["buffer"].split(":")[0]
+    # Verify file was cleaned up after request
+    assert not (tmp_path / bin_name).exists()
 
 
 def test_test_endpoint_success_local(dummy_tesseract_package):

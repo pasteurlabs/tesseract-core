@@ -774,34 +774,6 @@ def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
     assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
 
 
-def test_encode_payload_triple_mixed_gpu_binref_base64(mocked_cuda, tmp_path):
-    """The SDK client supports a triple-mixed payload (cuda_ipc, binref, base64)."""
-    from tesseract_core.sdk.tesseract import Base64, Binref, _encode_payload
-
-    payload = {
-        "gpu": FakeCudaArray((3,), "<f4"),
-        "disk": Binref(np.arange(3, dtype=np.float32)),
-        "inline": Base64(np.arange(3, dtype=np.int64)),
-    }
-
-    bin_file = None
-    with _encode_payload(
-        payload,
-        gpu_transport="cuda_ipc",
-        input_path=tmp_path,
-    ) as encoded:
-        assert encoded["gpu"]["data"]["encoding"] == "cuda_ipc"
-        assert encoded["disk"]["data"]["encoding"] == "binref"
-        assert encoded["inline"]["data"]["encoding"] == "base64"
-        bin_name = encoded["disk"]["data"]["buffer"].split(":")[0]
-        bin_file = tmp_path / bin_name
-        assert bin_file.exists()
-        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
-
-    assert not bin_file.exists()
-    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
-
-
 def test_cuda_array_to_host_branches():
     """cuda_array_to_host handles CuPy-, torch-, __array__-like, and rejects others."""
 

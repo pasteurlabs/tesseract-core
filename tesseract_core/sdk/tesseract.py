@@ -48,65 +48,21 @@ if TYPE_CHECKING:
 
 # Output serialization formats; single SDK-side definition lives in engine.
 OutputFormat: TypeAlias = engine.OutputFormat
-InputEncoding: TypeAlias = Literal["base64", "binref", "raw"]
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
-
-
-class Binref:
-    """Explicitly marks an array to be encoded as a binref file in request payloads."""
-
-    def __init__(self, array: Any) -> None:
-        self.array = array
-
-    def __array__(
-        self, dtype: np.dtype | None = None, copy: bool | None = None
-    ) -> np.ndarray:
-        if hasattr(self.array, "__array__"):
-            return self.array.__array__(dtype=dtype, copy=copy)
-        return np.asanyarray(self.array, dtype=dtype)
-
-
-class Base64:
-    """Explicitly marks an array to be encoded as base64 in request payloads."""
-
-    def __init__(self, array: Any) -> None:
-        self.array = array
-
-    def __array__(
-        self, dtype: np.dtype | None = None, copy: bool | None = None
-    ) -> np.ndarray:
-        if hasattr(self.array, "__array__"):
-            return self.array.__array__(dtype=dtype, copy=copy)
-        return np.asanyarray(self.array, dtype=dtype)
-
-
-class Raw:
-    """Explicitly marks an array to be encoded as a raw JSON list in request payloads."""
-
-    def __init__(self, array: Any) -> None:
-        self.array = array
-
-    def __array__(
-        self, dtype: np.dtype | None = None, copy: bool | None = None
-    ) -> np.ndarray:
-        if hasattr(self.array, "__array__"):
-            return self.array.__array__(dtype=dtype, copy=copy)
-        return np.asanyarray(self.array, dtype=dtype)
 
 
 def _scratch_dirs(
     input_path: str | Path | None,
     output_path: str | Path | None,
     output_format: str,
-    input_encoding: str | None = None,
 ) -> tuple[Path | None, Path, list[Path]]:
     """Work out the directories a served Tesseract reads and writes through.
 
     An output directory always exists, which is what lets `stream_logs` work
-    without the caller naming one, and `json+binref` (or binref input encoding)
-    additionally needs somewhere to put its inputs.
+    without the caller naming one, and `json+binref` additionally needs somewhere
+    to put its inputs.
 
     Returns:
         The input directory (None unless binref needs one), the output directory,
@@ -117,7 +73,7 @@ def _scratch_dirs(
 
     if input_path is not None:
         resolved_input = Path(input_path).resolve()
-    elif output_format == "json+binref" or input_encoding == "binref":
+    elif output_format == "json+binref":
         resolved_input = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
         created.append(resolved_input)
     else:
@@ -193,11 +149,6 @@ class Tesseract:
         url: str,
         server_output_path: str | Path | None = None,
         timeout: float | tuple[float, float] | None = None,
-        input_path: str | Path | None = None,
-        output_format: OutputFormat = "json+base64",
-        input_encoding: Literal["base64", "binref", "raw"] | None = None,
-        gpu_transport: str = "none",
-        experimental_binref_pool: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a URL.
 
@@ -215,26 +166,12 @@ class Tesseract:
                 ``None`` (the default) disables timeouts. See the `requests documentation
                 <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
                 for details.
-            input_path: Input directory path for binref files.
-            output_format: Output format used by the server.
-            input_encoding: Encoding format for input arrays.
-            gpu_transport: GPU transport mechanism to use.
-            experimental_binref_pool: Whether to enable pooled binref buffers.
 
         Returns:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj._client = HTTPClient(
-            url,
-            output_path=server_output_path,
-            output_format=output_format,
-            timeout=timeout,
-            input_path=input_path,
-            experimental_binref_pool=experimental_binref_pool,
-            gpu_transport=gpu_transport,
-            input_encoding=input_encoding,
-        )
+        obj._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
         return obj
 
     @classmethod
@@ -255,7 +192,6 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: OutputFormat = "json+base64",
-        input_encoding: Literal["base64", "binref", "raw"] | None = None,
         gpu_transport: str | None = None,
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
@@ -296,8 +232,6 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            input_encoding: Format to use for input arrays. When not specified, defaults to binref
-                if output_format is json+binref and input_path is set, else base64.
             gpu_transport: How GPU arrays leave the process, independently of ``output_format``
                 (which governs CPU arrays). ``none`` copies GPU arrays to the host and
                 serializes them like any CPU array; ``cuda_ipc`` exports them by reference
@@ -344,7 +278,7 @@ class Tesseract:
         if volumes is None:
             volumes = []
         input_path, output_path, auto_dirs = _scratch_dirs(
-            input_path, output_path, output_format, input_encoding=input_encoding
+            input_path, output_path, output_format
         )
 
         obj._stream_logs = stream_logs
@@ -357,7 +291,6 @@ class Tesseract:
                 "inside a VM, so bind mounts cross the VM boundary."
             )
         obj._binref_pool_enabled = experimental_binref_pool
-        obj._input_encoding = input_encoding
         # Purge auto-created tempdirs when the object is garbage collected.
         # User-supplied paths are left untouched.
         for scratch in auto_dirs:
@@ -502,7 +435,6 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
-        input_encoding: Literal["base64", "binref", "raw"] | None = None,
         gpu_transport: str | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -538,8 +470,6 @@ class Tesseract:
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
-            input_encoding: Format to use for input arrays. When not specified, defaults to binref
-                if output_format is json+binref and input_path is set, else base64.
             gpu_transport: How GPU arrays leave the process, independently of
                 ``output_format`` (which governs CPU arrays). ``none`` copies GPU arrays
                 to the host and serializes them like any CPU array; ``cuda_ipc`` exports
@@ -581,13 +511,11 @@ class Tesseract:
                 "it decodes outputs as read-only memory maps, which needs POSIX."
             )
         obj._binref_pool_enabled = experimental_binref_pool
-        obj._input_encoding = input_encoding
         auto_dirs, obj._spawn_config = _subprocess_spawn_config(
             tesseract_api,
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
-            input_encoding=input_encoding,
             gpu_transport=gpu_transport,
             runtime_config=runtime_config,
             python_executable=python_executable,
@@ -678,7 +606,6 @@ class Tesseract:
             input_path=Path(input_path) if input_path else None,
             experimental_binref_pool=self._binref_pool_enabled,
             gpu_transport=gpu_transport,
-            input_encoding=self._input_encoding,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -978,7 +905,6 @@ def _subprocess_spawn_config(
     runtime_config: dict[str, Any] | None,
     python_executable: str | Path | None,
     startup_timeout: float,
-    input_encoding: Literal["base64", "binref", "raw"] | None = None,
 ) -> tuple[list[Path], dict[str, Any]]:
     """Validate arguments for a dedicated-process Tesseract and build its config.
 
@@ -1000,7 +926,7 @@ def _subprocess_spawn_config(
         raise RuntimeError(f"Tesseract API path {tesseract_api_path} is not a file.")
 
     resolved_input_path, resolved_output_path, auto_dirs = _scratch_dirs(
-        input_path, output_path, output_format, input_encoding=input_encoding
+        input_path, output_path, output_format
     )
 
     # Debug mode gives full tracebacks from the child and enables the `test`
@@ -1154,10 +1080,9 @@ def _encode_array(
 def _encode_payload(
     payload: dict | None,
     gpu_transport: str = "none",
+    output_format: OutputFormat = "json+base64",
     input_path: PathLike | None = None,
     binref_pool: BinrefWritePool | None = None,
-    input_encoding: Literal["base64", "binref", "raw"] | None = None,
-    output_format: OutputFormat | None = None,
 ) -> Iterator[dict | None]:
     """Encode a request payload's arrays, managing device-export and binref-file lifetimes.
 
@@ -1165,12 +1090,9 @@ def _encode_payload(
     ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
     reference (keeping the data on-device), which pins each exported allocation
     in a process-global registry on the runtime side. Host arrays (and GPU
-    arrays when ``gpu_transport`` is ``none``) are encoded using ``input_encoding``
-    (falling back to ``binref`` when ``output_format == "json+binref"`` and
-    ``input_path`` is set, else ``base64``).
-
-    Individual array leaves can also explicitly request their encoding using
-    wrappers (:class:`Binref`, :class:`Base64`, :class:`Raw`).
+    arrays when ``gpu_transport`` is ``none``) are encoded according to
+    ``output_format`` (``binref`` files when ``output_format == "json+binref"``
+    and ``input_path`` is set, else ``base64``).
 
     Resources (pinned GPU memory allocations and temporary binref files/slots) are
     released on context exit, by which point the caller has read the full response.
@@ -1184,53 +1106,23 @@ def _encode_payload(
     exported = False
 
     resolved_input_path = Path(input_path) if input_path is not None else None
-
-    if input_encoding is not None:
-        default_host_encoding = input_encoding
-    elif output_format == "json+binref" and resolved_input_path is not None:
-        default_host_encoding = "binref"
-    else:
-        default_host_encoding = "base64"
-
-    def _is_leaf(x: Any) -> bool:
-        return (
-            isinstance(x, (Binref, Base64, Raw))
-            or hasattr(x, "__array__")
-            or _is_gpu_array(x)
-        )
+    use_binref = output_format == "json+binref" and (
+        resolved_input_path is not None or binref_pool is not None
+    )
 
     def _encode_leaf(x: Any) -> dict:
         nonlocal exported
 
-        target_encoding = None
-        arr = x
-        if isinstance(x, Binref):
-            target_encoding = "binref"
-            arr = x.array
-        elif isinstance(x, Base64):
-            target_encoding = "base64"
-            arr = x.array
-        elif isinstance(x, Raw):
-            target_encoding = "raw"
-            arr = x.array
+        if _is_gpu_array(x) and gpu_transport != "none":
+            if gpu_transport == "cuda_ipc":
+                exported = True
+                return _encode_array(x, encoding="cuda_ipc")
+            return _encode_array(x, encoding=gpu_transport)
 
-        if target_encoding is None:
-            if _is_gpu_array(arr) and gpu_transport != "none":
-                target_encoding = gpu_transport
-            else:
-                target_encoding = default_host_encoding
-
-        if target_encoding == "cuda_ipc" and _is_gpu_array(arr):
-            exported = True
-            return _encode_array(arr, encoding="cuda_ipc")
-
-        if target_encoding == "binref":
-            if resolved_input_path is None and binref_pool is None:
-                raise ValueError(
-                    "input_path is required when an array is encoded as 'binref'."
-                )
+        # Host array (or GPU array when gpu_transport is "none")
+        if use_binref:
             return _encode_array(
-                arr,
+                x,
                 encoding="binref",
                 input_dir=resolved_input_path,
                 written_files=binref_input_files,
@@ -1238,7 +1130,10 @@ def _encode_payload(
                 checked_out_slots=checked_out_slots,
             )
 
-        return _encode_array(arr, encoding=target_encoding)
+        return _encode_array(x, encoding="base64")
+
+    def _is_leaf(x: Any) -> bool:
+        return hasattr(x, "__array__") or _is_gpu_array(x)
 
     try:
         encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
@@ -1406,7 +1301,6 @@ class HTTPClient:
     _input_path: Path | None = None
     _binref_pool: BinrefWritePool | None = None
     _gpu_transport: str = "none"
-    _input_encoding: Literal["base64", "binref", "raw"] | None = None
 
     def __init__(
         self,
@@ -1417,13 +1311,11 @@ class HTTPClient:
         input_path: str | Path | None = None,
         experimental_binref_pool: bool = False,
         gpu_transport: str = "none",
-        input_encoding: Literal["base64", "binref", "raw"] | None = None,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
         self._output_format = output_format
         self._gpu_transport = gpu_transport
-        self._input_encoding = input_encoding
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._session = requests.Session()
@@ -1504,10 +1396,9 @@ class HTTPClient:
         with _encode_payload(
             payload,
             gpu_transport=self._gpu_transport,
+            output_format=self._output_format,
             input_path=self._input_path,
             binref_pool=self._binref_pool,
-            input_encoding=self._input_encoding,
-            output_format=self._output_format,
         ) as encoded_payload:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
         return self._decode_response(response, endpoint)
