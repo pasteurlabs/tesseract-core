@@ -14,7 +14,7 @@ directions without depending on any GPU framework:
   foreign producer's device pointer, shape, and dtype, used by the encode path to
   route a CAI-less array (e.g. JAX) over a CUDA transport.
 
-All ctypes and the CPython capsule API stay here; an exported buffer is released
+All ctypes and the CPython capsule API stay here. An exported buffer is released
 through the caller's release callback, or freed with
 :func:`tesseract_core.runtime.cuda.api.free` if there is none.
 """
@@ -132,10 +132,10 @@ def make_dlpack_capsule(
 ) -> tuple[Any, int]:
     """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
 
-    Returns ``(capsule, token)``. The buffer is released exactly once, by the
-    deleter, whether the capsule is consumed by a framework or dropped
-    un-consumed via :func:`drop_unconsumed_bundle`. ``release`` is called to
-    release it; by default the buffer is freed.
+    Returns ``(capsule, token)``. The deleter releases the buffer exactly once,
+    whether the capsule is consumed by a framework or dropped un-consumed via
+    :func:`drop_unconsumed_bundle`. It calls ``release`` if given and frees the
+    buffer otherwise.
     """
     global _NEXT_TOKEN
     token = _NEXT_TOKEN
@@ -176,12 +176,12 @@ def make_dlpack_capsule(
 
 
 def drop_unconsumed_bundle(token: int) -> None:
-    """Free a bundle's buffer iff its capsule was never consumed.
+    """Release a bundle's buffer iff its capsule was never consumed.
 
     Called from the :class:`IpcDeviceArray` finalizer. If the capsule is still
     named ``"dltensor"`` no framework adopted it, so we invoke the deleter to
-    free the buffer. If it was renamed to ``"used_dltensor"`` a consumer owns it
-    and will (or already did) free it via the deleter, so we leave it alone.
+    release the buffer. If it was renamed to ``"used_dltensor"`` a consumer owns
+    it and will (or already did) release it via the deleter, so we leave it alone.
     """
     bundle = _BUNDLES.get(token)
     if bundle is None:
@@ -189,7 +189,7 @@ def drop_unconsumed_bundle(token: int) -> None:
     _managed, _shape_arr, c_deleter, capsule = bundle
     still_dltensor = bool(_pythonapi.PyCapsule_IsValid(capsule, b"dltensor"))
     if still_dltensor:
-        # Nobody adopted it -> free now (the deleter pops the registry entry).
+        # Nobody adopted it -> release now (the deleter pops the registry entry).
         c_deleter(0)
 
 

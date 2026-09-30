@@ -321,7 +321,7 @@ def _build_pending_write():
     _reject_first_ipc_handle()
     t = torch.zeros(1 << 20, device="cuda:0")
     side = torch.cuda.Stream()
-    # The first launch on a new stream can block; get it out of the way.
+    # The first launch on a new stream can block, so get it out of the way.
     with torch.cuda.stream(side):
         torch.ones(1, device="cuda:0").sum()
     side.synchronize()
@@ -632,7 +632,7 @@ def _reuse_while_read_client(req_q, resp_q, result_q):
             return torch.from_dlpack(load_cuda_ipc_arraydict(encoded))
 
         side = torch.cuda.Stream()
-        # The first launch on a new stream can block; get it out of the way.
+        # The first launch on a new stream can block, so get it out of the way.
         with torch.cuda.stream(side):
             torch.ones(1, device="cuda").sum()
         side.synchronize()

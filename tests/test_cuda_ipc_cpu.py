@@ -367,7 +367,7 @@ def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
 
 
 def test_staging_pool_makes_room_for_a_new_size(mocked_cuda, monkeypatch):
-    """A buffer of a new size evicts idle buffers of other sizes instead of being freed."""
+    """Releasing a buffer of a new size evicts idle buffers of other sizes to make room."""
     monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 64)
     mocked_cuda.reject_foreign_ipc = True
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))

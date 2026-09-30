@@ -7,7 +7,11 @@ from collections.abc import Hashable
 
 import numpy as np
 
-from tesseract_core.runtime.jax_recipes import _cache_key
+from tesseract_core.runtime.jax_recipes import _cache_key_and_device_leaves
+
+
+def _cache_key(tree):
+    return _cache_key_and_device_leaves(tree)[0]
 
 
 class TestCacheKey:
@@ -317,10 +321,10 @@ class TestCacheWithDeviceArrays:
         jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
         a = {"x": jnp.array([1.0, 2.0])}
         b = {"x": jnp.array([1.0, 3.0])}
-        assert jax_recipes._cache_key(a) == jax_recipes._cache_key(b)
-        assert jax_recipes._cache_key(a) != jax_recipes._cache_key(
-            {"x": jnp.array([1.0, 2.0, 3.0])}
-        )
+        assert _cache_key(a) == _cache_key(b)
+        assert _cache_key(a) != _cache_key({"x": jnp.array([1.0, 2.0, 3.0])})
+        (device_leaf,) = jax_recipes._cache_key_and_device_leaves(a)[1]
+        assert device_leaf is a["x"]
 
     def test_lookup_compares_contents(self, monkeypatch):
         import jax.numpy as jnp
@@ -329,12 +333,10 @@ class TestCacheWithDeviceArrays:
         jax_recipes._set_jax_vjp_cache_size(1)
         try:
             x = {"x": jnp.array([0.0, 1.0, jnp.nan])}
-            jax_recipes._jax_vjp_cache.put(
-                jax_recipes._cache_key(x),
-                ("vjp", "template", jax_recipes._device_leaves(x)),
-            )
+            vjp_func = lambda ct: ct
+            jax_recipes._cache_store(x, vjp_func, "template")
             same = {"x": jnp.array([0.0, 1.0, jnp.nan])}
-            assert jax_recipes._cache_lookup(same) == ("vjp", "template")
+            assert jax_recipes._cache_lookup(same) == (vjp_func, "template")
             # Comparison is bitwise like the host path, so -0.0 is a new input.
             assert (
                 jax_recipes._cache_lookup({"x": jnp.array([-0.0, 1.0, jnp.nan])})
