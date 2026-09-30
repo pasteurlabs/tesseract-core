@@ -62,15 +62,15 @@ Prediction of hydrological variables is important for water resource management,
 
 _Inverse design & shape optimization_ | Author: Rafael Pastrana | [Explore Normax](https://github.com/arpastrana/normax)
 
-**What it is:** Shape and member-size optimization of lightweight structures, with a Eurocode 3 building code check inside the optimization loop.
+**What it is:** Optimizing both the shape of a lightweight steel structure and the diameters of its tubes, with a Eurocode 3 building code check inside the optimization loop.
 
-**Why we love it:** Making the building code differentiable lets form finding, structural analysis, and compliance share one gradient, which uses 29–67% less material than sizing members on a fixed geometry.
+**Why we love it:** Making the building code differentiable allows form finding, structural analysis, and compliance to be optimized together, which uses 29–67% less material than resizing the tubes of a structure whose shape stays fixed.
 
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation comparing three gridshell optimization runs, with the end-to-end run reaching the lightest design.">
   <source src="../../_static/blog/2026-09-30-tesseract-hackathon-winners/normax.mp4" type="video/mp4">
 </video>
-<figcaption>Three ways to optimize a gridshell: sections only, heights and sections, and the full pipeline end to end. The end-to-end run finds the lightest design.</figcaption>
+<figcaption>Three ways to optimize a gridshell: tube diameters only, node heights and diameters, and the full pipeline end to end. The end-to-end run finds the lightest design.</figcaption>
 </figure>
 
 ### Track 2: Coldplate
