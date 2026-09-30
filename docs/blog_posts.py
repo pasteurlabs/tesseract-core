@@ -5,7 +5,7 @@
 
 import functools
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 BLOG_DIR = Path(__file__).parent / "blog"
@@ -44,7 +44,9 @@ def collect_blog_posts() -> list[dict]:
                 md_file.name,
             )
             continue
-        date = datetime.strptime(str(blog_date), "%Y-%m-%d")
+        date = datetime.strptime(str(blog_date), "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
         posts.append(
             {
                 "file": md_file.stem,

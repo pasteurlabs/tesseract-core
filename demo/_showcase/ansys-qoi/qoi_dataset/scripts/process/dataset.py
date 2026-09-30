@@ -201,7 +201,7 @@ class CADDataset(Dataset):
             files: List of .npz data files
             config_path: Path to YAML configuration file
         """
-        self.files = sorted(list(files))
+        self.files = sorted(files)
         self.cfg = self._load_config(config_path)
 
     def _load_config(self, config_path: Path) -> dict:

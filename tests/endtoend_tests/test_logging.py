@@ -201,6 +201,7 @@ def test_logging_tesseract_run(logging_test_image, tmpdir):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
     assert "Hello from tesseract_api.py!" in run_res.stderr
@@ -238,6 +239,7 @@ def test_validation_error_not_duplicated(logging_test_image, tmpdir):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode != 0
 
@@ -264,6 +266,7 @@ def test_logging_tesseract_serve(
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert serve_res.returncode == 0, serve_res.stderr
     assert serve_res.stdout
@@ -305,6 +308,7 @@ def test_logging_with_mlflow(logging_with_mlflow_test_image, tmpdir):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
     assert run_res.stderr.count("DUMMY_STDERR_OUTPUT") == 1, run_res.stderr
@@ -338,6 +342,7 @@ def test_mpa_file_backend(tmpdir, mpa_test_image):
         run_cmd,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
 
@@ -407,6 +412,7 @@ def test_mpa_mlflow_backend(mlflow_server, mpa_test_image):
         run_cmd,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
 
@@ -818,6 +824,7 @@ assert result["message"] == "done"
         [sys.executable, "-c", test_script],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -864,7 +871,8 @@ print("TEST_COMPLETED_SUCCESSFULLY", file=sys.__stderr__)
         [sys.executable, "-c", test_script],
         capture_output=True,
         text=True,
-        timeout=30,  # Should complete quickly; timeout catches infinite loops
+        timeout=30,  # Should complete quickly; timeout catches infinite loops,
+        check=False,
     )
 
     assert result.returncode == 0, f"Script failed: {result.stderr}"

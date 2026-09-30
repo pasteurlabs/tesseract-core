@@ -195,6 +195,7 @@ def test_tesseractreference_endtoend(
                 unit_tesseracts_parent_dir / "tesseractreference/tesseract_api.py"
             ),
         },
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     output_data = json.loads(result.stdout)
@@ -227,6 +228,7 @@ def test_tesseractreference_endtoend(
                 unit_tesseracts_parent_dir / "tesseractreference/tesseract_api.py"
             ),
         },
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     output_data = json.loads(result.stdout)
@@ -244,7 +246,7 @@ def test_tesseractreference_image_does_not_leak_containers(
 
     ta = TypeAdapter(TesseractReference)
 
-    containers_before = set(c.id for c in docker_client.containers.list())
+    containers_before = {c.id for c in docker_client.containers.list()}
 
     ref = ta.validate_python({"type": "image", "ref": built_image_name})
     result = ref.apply({"a": [1.0, 2.0], "b": [3.0, 4.0]})
@@ -253,6 +255,6 @@ def test_tesseractreference_image_does_not_leak_containers(
     del ref
     gc.collect()
 
-    containers_after = set(c.id for c in docker_client.containers.list())
+    containers_after = {c.id for c in docker_client.containers.list()}
     leaked = containers_after - containers_before
     assert len(leaked) == 0, f"Leaked {len(leaked)} container(s)"

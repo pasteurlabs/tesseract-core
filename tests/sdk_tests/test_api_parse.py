@@ -8,7 +8,11 @@ from textwrap import dedent
 import pytest
 import yaml
 
-from tesseract_core.sdk.api_parse import ValidationError, validate_tesseract_api
+from tesseract_core.sdk.api_parse import (
+    ValidationError,
+    get_config,
+    validate_tesseract_api,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -400,3 +404,11 @@ def test_schemastore_fixtures_match_generated_schema(tmp_path):
     # The negative fixture must be rejected by the schema.
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(yaml.safe_load(negative), schema)
+
+
+@pytest.mark.parametrize("content", ["name: [unclosed\n", "", "- a list\n"])
+def test_get_config_reports_bad_files_as_validation_errors(tmp_path, content):
+    (tmp_path / "tesseract_config.yaml").write_text(content)
+
+    with pytest.raises(ValidationError, match=r"tesseract_config\.yaml"):
+        get_config(tmp_path)
