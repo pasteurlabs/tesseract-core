@@ -378,6 +378,9 @@ linkcheck_ignore = [
 # fragments), so linkcheck's static anchor check yields false negatives.
 linkcheck_anchors_ignore_for_url = [
     r"https://www\.ecmwf\.int/.*",
+    # GitHub prefixes rendered-markdown heading ids with "user-content-" and
+    # resolves the unprefixed fragment in JavaScript.
+    r"https://github\.com/.*",
 ]
 
 # Some CDNs (e.g. Netlify, which fronts pasteurlabs.ai) throttle bursts of
