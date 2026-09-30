@@ -56,7 +56,9 @@ def _error_string(code: int) -> str:
         msg = _get_cudart().cudaGetErrorString(code)
         if msg:
             return msg.decode()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
+        # Only used to decorate an error that is already being raised; failing
+        # to look up its description must not replace it.
         pass
     return f"error code {code}"
 

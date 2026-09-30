@@ -32,7 +32,7 @@ class ExperimentTracker:
         self.experiment_type = experiment_type
 
         # Create timestamped experiment directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
         if experiment_name:
             dir_name = f"experiment_{experiment_type}_{experiment_name}_{timestamp}"
         else:
@@ -57,7 +57,7 @@ class ExperimentTracker:
             "experiment_name": experiment_name,
             "timestamp": timestamp,
             "run_dir": str(self.run_dir),
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now().astimezone().isoformat(),
         }
 
         self.training_history = []

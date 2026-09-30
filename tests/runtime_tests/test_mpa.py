@@ -41,7 +41,6 @@ class Always200Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         """Suppress log messages."""
-        pass
 
 
 @pytest.fixture(scope="module")
@@ -109,7 +108,7 @@ def test_concurrent_runs_do_not_clobber_stdio(tmp_path):
                 run_dir = tmp_path / f"runner-{runner}-run-{index}"
                 with start_run(base_dir=str(run_dir)):
                     pass
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 -- surface any thread failure below
             failures.append(exc)
 
     try:
@@ -258,7 +257,7 @@ def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
     kwargs_str = repr(kwargs)
 
     # Mock the mlflow module to avoid actual MLflow calls
-    mocked_start_run = mocker.patch("tesseract_core.runtime.mpa.mlflow.start_run")
+    mocked_start_run = mocker.patch("mlflow.start_run")
 
     update_config(
         mlflow_tracking_uri=dummy_mlflow_server, mlflow_run_extra_args=kwargs_str

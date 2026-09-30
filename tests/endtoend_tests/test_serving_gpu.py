@@ -35,7 +35,7 @@ try:
     import cupy
 
     _CUDA_AVAILABLE = cupy.cuda.runtime.getDeviceCount() > 0
-except Exception:
+except Exception:  # noqa: BLE001 -- CuPy/CUDA probe; failure modes vary by host
     _CUDA_AVAILABLE = False
 
 requires_cuda = pytest.mark.skipif(

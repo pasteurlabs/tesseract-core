@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Annotated, Optional
+from typing import Annotated
 
 import numpy as np
 import pytest
@@ -600,7 +600,7 @@ def test_untyped_container_schema_generation():
 def test_recursive_model():
     class RecursiveModel(BaseModel):
         foo: int
-        bar: Optional["RecursiveModel"] | None
+        bar: "RecursiveModel | None"
 
     valid_data = {"foo": 1, "bar": {"foo": 2, "bar": {"foo": 3, "bar": None}}}
 
