@@ -285,7 +285,7 @@ def get_array_model(
 
 def _fast_tobytes(arr: ArrayLike) -> bytes:
     """Convert a NumPy array to bytes without copying if possible."""
-    return np.ascontiguousarray(arr).data
+    return np.ascontiguousarray(arr, dtype=arr.dtype.newbyteorder("=")).data
 
 
 def _dump_binref_arraydict(
