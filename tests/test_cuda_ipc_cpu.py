@@ -774,6 +774,17 @@ def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
     assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
 
 
+def test_encode_array_cuda_ipc_missing_context_raises(mocked_cuda):
+    """_encode_array with encoding='cuda_ipc' on a GPU array requires EncodingContext."""
+    from tesseract_core.sdk.tesseract import _encode_array
+
+    gpu_arr = FakeCudaArray((3,), "<f4")
+    with pytest.raises(
+        ValueError, match="EncodingContext is required when encoding is 'cuda_ipc'"
+    ):
+        _encode_array(gpu_arr, encoding="cuda_ipc")
+
+
 def test_encode_payload_mixed_gpu_and_binref_cleanup_on_exception(
     mocked_cuda, tmp_path
 ):

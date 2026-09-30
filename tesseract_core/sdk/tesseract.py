@@ -1028,7 +1028,7 @@ def _is_gpu_array(arr: Any) -> bool:
     return device_type == _DLDEVICE_CUDA
 
 
-@dataclass(eq=False)
+@dataclass
 class EncodingContext:
     """Request-scoped context tracking state and resources during input array encoding."""
 
@@ -1038,68 +1038,59 @@ class EncodingContext:
     checked_out_slots: list[BinrefSlot] = field(default_factory=list)
     exported_cuda_ipc: bool = False
 
-    def encode_binref(self, arr: Any) -> dict:
-        """Encode an array as binref, tracking written files or pool slots."""
-        if self.binref_pool is not None:
-            return encode_array_binref_pooled(
-                arr, self.binref_pool, self.checked_out_slots, self.written_files
-            )
-        if self.input_dir is not None:
-            return encode_array_binref(arr, self.input_dir, self.written_files)
-        raise ValueError(
-            "EncodingContext.input_dir or binref_pool is required when encoding is 'binref'"
+
+def _encode_binref(arr: Any, ctx: EncodingContext) -> dict:
+    """Encode an array as binref, tracking written files or pool slots in ``ctx``."""
+    if ctx.binref_pool is not None:
+        return encode_array_binref_pooled(
+            arr, ctx.binref_pool, ctx.checked_out_slots, ctx.written_files
         )
+    if ctx.input_dir is not None:
+        return encode_array_binref(arr, ctx.input_dir, ctx.written_files)
+    raise ValueError(
+        "EncodingContext.input_dir or binref_pool is required when encoding is 'binref'"
+    )
 
-    def close(self) -> None:
-        """Release resources held during encoding with resilient partial failure handling."""
-        errors: list[BaseException] = []
 
-        try:
-            for f in self.written_files:
-                try:
-                    f.unlink(missing_ok=True)
-                except Exception as ex:
-                    errors.append(ex)
-            self.written_files.clear()
-        finally:
+def _close_encoding_context(ctx: EncodingContext) -> None:
+    """Release resources held in ``ctx`` during encoding with resilient partial failure handling."""
+    errors: list[BaseException] = []
+
+    try:
+        for f in ctx.written_files:
             try:
-                if self.binref_pool is not None:
-                    for slot in self.checked_out_slots:
-                        try:
-                            self.binref_pool.checkin(slot)
-                        except Exception as ex:
-                            errors.append(ex)
-                    self.checked_out_slots.clear()
-            finally:
-                if self.exported_cuda_ipc:
+                f.unlink(missing_ok=True)
+            except Exception as ex:
+                errors.append(ex)
+        ctx.written_files.clear()
+    finally:
+        try:
+            if ctx.binref_pool is not None:
+                for slot in ctx.checked_out_slots:
                     try:
-                        _import_cuda_ipc().release_pinned_ipc_exports()
+                        ctx.binref_pool.checkin(slot)
                     except Exception as ex:
                         errors.append(ex)
-                    self.exported_cuda_ipc = False
+                ctx.checked_out_slots.clear()
+        finally:
+            if ctx.exported_cuda_ipc:
+                try:
+                    _import_cuda_ipc().release_pinned_ipc_exports()
+                except Exception as ex:
+                    errors.append(ex)
+                ctx.exported_cuda_ipc = False
 
-        if errors:
-            if len(errors) == 1:
-                raise errors[0]
-            exception_group_cls = getattr(builtins, "ExceptionGroup", None)
-            if exception_group_cls is not None:
-                raise exception_group_cls(
-                    "Errors occurred during EncodingContext cleanup", errors
-                )
-            raise RuntimeError(
-                f"Multiple errors occurred during EncodingContext cleanup: {errors}"
+    if errors:
+        if len(errors) == 1:
+            raise errors[0]
+        exception_group_cls = getattr(builtins, "ExceptionGroup", None)
+        if exception_group_cls is not None:
+            raise exception_group_cls(
+                "Errors occurred during EncodingContext cleanup", errors
             )
-
-    def __enter__(self) -> EncodingContext:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        self.close()
+        raise RuntimeError(
+            f"Multiple errors occurred during EncodingContext cleanup: {errors}"
+        )
 
 
 def _encode_array(
@@ -1110,21 +1101,22 @@ def _encode_array(
     """Encode an array into an arraydict representation.
 
     When ``encoding='cuda_ipc'``, GPU arrays are exported by handle via CUDA IPC,
-    keeping the data on-device. Supplying an :class:`EncodingContext` tracks the
-    exported allocation so its pinned memory is released on context exit.
+    keeping the data on-device. An :class:`EncodingContext` is required to track
+    the exported allocation so its pinned memory is released on context exit.
 
     When ``encoding='binref'``, an :class:`EncodingContext` is required to write
     the buffer to the input directory or write pool and track the file/slot lifetime.
     """
     if encoding == "cuda_ipc" and _is_gpu_array(arr):
-        if ctx is not None:
-            ctx.exported_cuda_ipc = True
+        if ctx is None:
+            raise ValueError("EncodingContext is required when encoding is 'cuda_ipc'")
+        ctx.exported_cuda_ipc = True
         return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
 
     if encoding == "binref":
         if ctx is None:
             raise ValueError("EncodingContext is required when encoding is 'binref'")
-        return ctx.encode_binref(arr)
+        return _encode_binref(arr, ctx)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -1194,9 +1186,11 @@ def _encode_payload(
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or _is_gpu_array(x)
 
-    with ctx:
+    try:
         encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
         yield encoded_payload
+    finally:
+        _close_encoding_context(ctx)
 
 
 def _decode_array(

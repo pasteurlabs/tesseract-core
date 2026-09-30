@@ -21,6 +21,7 @@ from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     EncodingContext,
     HTTPClient,
+    _close_encoding_context,
     _decode_array,
     _encode_array,
     _encode_payload,
@@ -717,7 +718,7 @@ def test_encode_array_binref(tmp_path):
 
     decoded = _decode_array(encoded, output_path=tmp_path)
     np.testing.assert_array_equal(decoded, a, strict=True)
-    ctx.close()
+    _close_encoding_context(ctx)
     assert not ctx.written_files
 
 
@@ -1370,7 +1371,7 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
     )
 
     with pytest.raises(OSError, match="permission denied"):
-        ctx.close()
+        _close_encoding_context(ctx)
 
     assert not f2.exists()
     mock_pool.checkin.assert_called_once_with(mock_slot)
@@ -1379,7 +1380,7 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
 
 
 def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
-    """EncodingContext.close accumulates multiple errors across phases."""
+    """_close_encoding_context accumulates multiple errors across phases."""
     from tesseract_core.sdk.binref import BinrefSlot
 
     f1 = tmp_path / "f1.bin"
@@ -1415,11 +1416,11 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
     exception_group_cls = getattr(builtins, "ExceptionGroup", None)
     if exception_group_cls is not None:
         with pytest.raises(exception_group_cls) as exc_info:
-            ctx.close()
+            _close_encoding_context(ctx)
         assert len(exc_info.value.exceptions) == 2
     else:
         with pytest.raises(RuntimeError, match="Multiple errors occurred"):
-            ctx.close()
+            _close_encoding_context(ctx)
 
     mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
     assert ctx.exported_cuda_ipc is False
