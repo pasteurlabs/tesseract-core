@@ -36,7 +36,7 @@ import numpy as np
 
 def _fast_tobytes(arr: np.ndarray) -> memoryview:
     """Convert a numpy array to bytes without copying if possible."""
-    return np.ascontiguousarray(arr).data
+    return np.ascontiguousarray(arr, dtype=arr.dtype.newbyteorder("=")).data
 
 
 def encode_array_binref(arr: Any, input_dir: Path, written_files: list[Path]) -> dict:

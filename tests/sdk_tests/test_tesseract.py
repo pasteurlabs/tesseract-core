@@ -748,6 +748,12 @@ def test_decode_array_various_dtypes(dtype):
     assert decoded.dtype == original.dtype
 
 
+def test_encode_array_non_native_byte_order():
+    original = np.array([1.0, 2.0, 3.0], dtype=">f8")
+    decoded = _decode_array(_encode_array(original, encoding="base64"))
+    np.testing.assert_array_equal(decoded, original)
+
+
 @pytest.mark.parametrize("encoding", ["binref", "base64"])
 def test_decode_array_lz4(encoding, tmp_path):
     from tesseract_core.runtime.array_encoding import _compress
