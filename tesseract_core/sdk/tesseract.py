@@ -1060,7 +1060,7 @@ def _close_encoding_context(ctx: EncodingContext) -> None:
         for f in ctx.written_files:
             try:
                 f.unlink(missing_ok=True)
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - collected and re-raised below
                 errors.append(ex)
         ctx.written_files.clear()
     finally:
@@ -1069,14 +1069,14 @@ def _close_encoding_context(ctx: EncodingContext) -> None:
                 for slot in ctx.checked_out_slots:
                     try:
                         ctx.binref_pool.checkin(slot)
-                    except Exception as ex:
+                    except Exception as ex:  # noqa: BLE001 - collected and re-raised below
                         errors.append(ex)
                 ctx.checked_out_slots.clear()
         finally:
             if ctx.exported_cuda_ipc:
                 try:
                     _import_cuda_ipc().release_pinned_ipc_exports()
-                except Exception as ex:
+                except Exception as ex:  # noqa: BLE001 - collected and re-raised below
                     errors.append(ex)
                 ctx.exported_cuda_ipc = False
 
