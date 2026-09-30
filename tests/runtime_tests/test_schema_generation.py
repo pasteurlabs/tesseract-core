@@ -165,6 +165,7 @@ def test_abstract_eval_schema_array_defaults():
     class Model(BaseModel):
         x: Differentiable[Array[(None,), Float32]]
         y: Array[(2,), Float64] = [1, 2]
+        z: Array[(2,), Float64] = None
         sub: Sub
 
     AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
@@ -175,6 +176,7 @@ def test_abstract_eval_schema_array_defaults():
     assert inputs.model_dump() == {
         "x": {"shape": (3,), "dtype": "float32"},
         "y": {"shape": (2,), "dtype": "float64"},
+        "z": None,
         "sub": {"s": {"shape": (), "dtype": "float32"}},
     }
 
