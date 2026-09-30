@@ -1,3 +1,4 @@
+import builtins
 import functools
 import gc
 import os
@@ -18,6 +19,7 @@ from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
+    EncodingContext,
     HTTPClient,
     _decode_array,
     _encode_array,
@@ -703,29 +705,39 @@ def test_encode_array(encoding, expected_data):
 def test_encode_array_binref(tmp_path):
     """_encode_array with encoding='binref' writes file and decodes properly."""
     a = np.array([1.0, 2.0, 3.0], dtype="float32")
-    written = []
-    encoded = _encode_array(
-        a, encoding="binref", input_dir=tmp_path, written_files=written
-    )
+    ctx = EncodingContext(input_dir=tmp_path)
+    encoded = _encode_array(a, encoding="binref", ctx=ctx)
 
     assert encoded["shape"] == (3,)
     assert encoded["dtype"] == "float32"
     assert encoded["data"]["encoding"] == "binref"
-    assert len(written) == 1
-    assert written[0].exists()
+    assert len(ctx.written_files) == 1
+    assert ctx.written_files[0].exists()
     assert encoded["data"]["buffer"].endswith(":0")
 
     decoded = _decode_array(encoded, output_path=tmp_path)
     np.testing.assert_array_equal(decoded, a, strict=True)
+    ctx.close()
+    assert not ctx.written_files
+
+
+def test_encode_array_binref_missing_context_raises():
+    """_encode_array with encoding='binref' without ctx raises ValueError."""
+    a = np.array([1.0, 2.0, 3.0], dtype="float32")
+    with pytest.raises(
+        ValueError, match="EncodingContext is required when encoding is 'binref'"
+    ):
+        _encode_array(a, encoding="binref")
 
 
 def test_encode_array_binref_missing_input_dir_raises():
-    """_encode_array with encoding='binref' without input_dir raises ValueError."""
+    """_encode_array with encoding='binref' without input_dir or pool raises ValueError."""
     a = np.array([1.0, 2.0, 3.0], dtype="float32")
+    ctx = EncodingContext()
     with pytest.raises(
-        ValueError, match="input_dir is required when encoding is 'binref'"
+        ValueError, match=r"EncodingContext\.input_dir or binref_pool is required"
     ):
-        _encode_array(a, encoding="binref")
+        _encode_array(a, encoding="binref", ctx=ctx)
 
 
 @pytest.mark.parametrize(
@@ -1300,6 +1312,117 @@ def test_encode_payload_with_pool(tmp_path):
         assert len(pool._free) == 1  # slot returned to pool
     finally:
         pool.close()
+
+
+def test_encode_payload_cleanup_on_exception_with_pool(tmp_path):
+    """_encode_payload returns pool slots even if an exception occurs."""
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=2)
+    arr = np.array([10.0, 20.0], dtype=np.float32)
+    payload = {"x": arr}
+
+    try:
+        with (
+            pytest.raises(RuntimeError, match="simulated pool failure"),
+            _encode_payload(payload, binref_pool=pool, output_format="json+binref"),
+        ):
+            assert len(pool._free) == 0  # slot checked out
+            raise RuntimeError("simulated pool failure")
+        assert len(pool._free) == 1  # slot returned to pool despite error
+    finally:
+        pool.close()
+
+
+def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
+    """EncodingContext.close resiliently cleans up all phases even if one fails."""
+    from tesseract_core.sdk.binref import BinrefSlot
+
+    f1 = tmp_path / "f1.bin"
+    f2 = tmp_path / "f2.bin"
+    f1.touch()
+    f2.touch()
+
+    mock_pool = MagicMock()
+    mock_slot = MagicMock(spec=BinrefSlot)
+
+    mock_cuda_mod = MagicMock()
+    monkeypatch.setattr(
+        "tesseract_core.sdk.tesseract._import_cuda_ipc",
+        lambda: mock_cuda_mod,
+    )
+
+    orig_unlink = Path.unlink
+
+    def failing_unlink(path_self, *args, **kwargs):
+        if path_self == f1:
+            raise OSError("permission denied")
+        return orig_unlink(path_self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+
+    ctx = EncodingContext(
+        input_dir=tmp_path,
+        binref_pool=mock_pool,
+        written_files=[f1, f2],
+        checked_out_slots=[mock_slot],
+        exported_cuda_ipc=True,
+    )
+
+    with pytest.raises(OSError, match="permission denied"):
+        ctx.close()
+
+    assert not f2.exists()
+    mock_pool.checkin.assert_called_once_with(mock_slot)
+    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
+    assert ctx.exported_cuda_ipc is False
+
+
+def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
+    """EncodingContext.close accumulates multiple errors across phases."""
+    from tesseract_core.sdk.binref import BinrefSlot
+
+    f1 = tmp_path / "f1.bin"
+    f1.touch()
+
+    mock_pool = MagicMock()
+    mock_pool.checkin.side_effect = RuntimeError("pool checkin failed")
+    mock_slot = MagicMock(spec=BinrefSlot)
+
+    orig_unlink = Path.unlink
+
+    def failing_unlink(path_self, *args, **kwargs):
+        if path_self == f1:
+            raise OSError("unlink failed")
+        return orig_unlink(path_self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+
+    mock_cuda_mod = MagicMock()
+    monkeypatch.setattr(
+        "tesseract_core.sdk.tesseract._import_cuda_ipc",
+        lambda: mock_cuda_mod,
+    )
+
+    ctx = EncodingContext(
+        input_dir=tmp_path,
+        binref_pool=mock_pool,
+        written_files=[f1],
+        checked_out_slots=[mock_slot],
+        exported_cuda_ipc=True,
+    )
+
+    exception_group_cls = getattr(builtins, "ExceptionGroup", None)
+    if exception_group_cls is not None:
+        with pytest.raises(exception_group_cls) as exc_info:
+            ctx.close()
+        assert len(exc_info.value.exceptions) == 2
+    else:
+        with pytest.raises(RuntimeError, match="Multiple errors occurred"):
+            ctx.close()
+
+    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
+    assert ctx.exported_cuda_ipc is False
 
 
 def test_http_client_binref_payload(tmp_path):

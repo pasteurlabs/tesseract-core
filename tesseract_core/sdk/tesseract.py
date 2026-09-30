@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import builtins
 import shutil
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import uuid
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
@@ -1026,35 +1028,103 @@ def _is_gpu_array(arr: Any) -> bool:
     return device_type == _DLDEVICE_CUDA
 
 
+@dataclass(eq=False)
+class EncodingContext:
+    """Request-scoped context tracking state and resources during input array encoding."""
+
+    input_dir: Path | None = None
+    binref_pool: BinrefWritePool | None = None
+    written_files: list[Path] = field(default_factory=list)
+    checked_out_slots: list[BinrefSlot] = field(default_factory=list)
+    exported_cuda_ipc: bool = False
+
+    def encode_binref(self, arr: Any) -> dict:
+        """Encode an array as binref, tracking written files or pool slots."""
+        if self.binref_pool is not None:
+            return encode_array_binref_pooled(
+                arr, self.binref_pool, self.checked_out_slots, self.written_files
+            )
+        if self.input_dir is not None:
+            return encode_array_binref(arr, self.input_dir, self.written_files)
+        raise ValueError(
+            "EncodingContext.input_dir or binref_pool is required when encoding is 'binref'"
+        )
+
+    def close(self) -> None:
+        """Release resources held during encoding with resilient partial failure handling."""
+        errors: list[BaseException] = []
+
+        try:
+            for f in self.written_files:
+                try:
+                    f.unlink(missing_ok=True)
+                except Exception as ex:
+                    errors.append(ex)
+            self.written_files.clear()
+        finally:
+            try:
+                if self.binref_pool is not None:
+                    for slot in self.checked_out_slots:
+                        try:
+                            self.binref_pool.checkin(slot)
+                        except Exception as ex:
+                            errors.append(ex)
+                    self.checked_out_slots.clear()
+            finally:
+                if self.exported_cuda_ipc:
+                    try:
+                        _import_cuda_ipc().release_pinned_ipc_exports()
+                    except Exception as ex:
+                        errors.append(ex)
+                    self.exported_cuda_ipc = False
+
+        if errors:
+            if len(errors) == 1:
+                raise errors[0]
+            exception_group_cls = getattr(builtins, "ExceptionGroup", None)
+            if exception_group_cls is not None:
+                raise exception_group_cls(
+                    "Errors occurred during EncodingContext cleanup", errors
+                )
+            raise RuntimeError(
+                f"Multiple errors occurred during EncodingContext cleanup: {errors}"
+            )
+
+    def __enter__(self) -> EncodingContext:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        self.close()
+
+
 def _encode_array(
     arr: Any,
     encoding: Literal["base64", "raw", "cuda_ipc", "cuda_vmm", "binref"] = "base64",
-    input_dir: PathLike | None = None,
-    written_files: list[Path] | None = None,
-    binref_pool: BinrefWritePool | None = None,
-    checked_out_slots: list[BinrefSlot] | None = None,
+    ctx: EncodingContext | None = None,
 ) -> dict:
-    # With the cuda_ipc device transport, GPU arrays are exported by reference via
-    # a CUDA IPC handle, keeping the data on-device. Any other array (or any other
-    # encoding) falls through to a host copy below, so a mixed payload (some GPU,
-    # some CPU arrays) encodes correctly either way.
+    """Encode an array into an arraydict representation.
+
+    When ``encoding='cuda_ipc'``, GPU arrays are exported by handle via CUDA IPC,
+    keeping the data on-device. Supplying an :class:`EncodingContext` tracks the
+    exported allocation so its pinned memory is released on context exit.
+
+    When ``encoding='binref'``, an :class:`EncodingContext` is required to write
+    the buffer to the input directory or write pool and track the file/slot lifetime.
+    """
     if encoding == "cuda_ipc" and _is_gpu_array(arr):
+        if ctx is not None:
+            ctx.exported_cuda_ipc = True
         return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
 
     if encoding == "binref":
-        if binref_pool is not None:
-            if checked_out_slots is None:
-                checked_out_slots = []
-            if written_files is None:
-                written_files = []
-            return encode_array_binref_pooled(
-                arr, binref_pool, checked_out_slots, written_files
-            )
-        if input_dir is not None:
-            if written_files is None:
-                written_files = []
-            return encode_array_binref(arr, Path(input_dir), written_files)
-        raise ValueError("input_dir is required when encoding is 'binref'")
+        if ctx is None:
+            raise ValueError("EncodingContext is required when encoding is 'binref'")
+        return ctx.encode_binref(arr)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -1102,51 +1172,31 @@ def _encode_payload(
         yield None
         return
 
-    binref_input_files: list[Path] = []
-    checked_out_slots: list[BinrefSlot] = []
-    exported = False
-
     resolved_input_path = Path(input_path) if input_path is not None else None
+    ctx = EncodingContext(
+        input_dir=resolved_input_path,
+        binref_pool=binref_pool,
+    )
     use_binref = output_format == "json+binref" and (
         resolved_input_path is not None or binref_pool is not None
     )
 
     def _encode_leaf(x: Any) -> dict:
-        nonlocal exported
-
         if _is_gpu_array(x) and gpu_transport != "none":
-            if gpu_transport == "cuda_ipc":
-                exported = True
-                return _encode_array(x, encoding="cuda_ipc")
-            return _encode_array(x, encoding=gpu_transport)
+            return _encode_array(x, encoding=gpu_transport, ctx=ctx)
 
         # Host array (or GPU array when gpu_transport is "none")
         if use_binref:
-            return _encode_array(
-                x,
-                encoding="binref",
-                input_dir=resolved_input_path,
-                written_files=binref_input_files,
-                binref_pool=binref_pool,
-                checked_out_slots=checked_out_slots,
-            )
+            return _encode_array(x, encoding="binref", ctx=ctx)
 
-        return _encode_array(x, encoding="base64")
+        return _encode_array(x, encoding="base64", ctx=ctx)
 
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or _is_gpu_array(x)
 
-    try:
+    with ctx:
         encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
         yield encoded_payload
-    finally:
-        for f in binref_input_files:
-            f.unlink(missing_ok=True)
-        if binref_pool is not None:
-            for slot in checked_out_slots:
-                binref_pool.checkin(slot)
-        if exported:
-            _import_cuda_ipc().release_pinned_ipc_exports()
 
 
 def _decode_array(

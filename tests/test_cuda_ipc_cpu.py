@@ -774,6 +774,38 @@ def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
     assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
 
 
+def test_encode_payload_mixed_gpu_and_binref_cleanup_on_exception(
+    mocked_cuda, tmp_path
+):
+    """Context exit releases both CUDA IPC exports and binref files even on error."""
+    from tesseract_core.sdk.tesseract import _encode_payload
+
+    payload = {
+        "gpu": FakeCudaArray((3,), "<f4"),
+        "cpu": np.arange(3, dtype=np.float32),
+    }
+
+    bin_file = None
+    with (
+        pytest.raises(RuntimeError, match="simulated failure during request"),
+        _encode_payload(
+            payload,
+            gpu_transport="cuda_ipc",
+            input_path=tmp_path,
+            output_format="json+binref",
+        ) as encoded,
+    ):
+        bin_name = encoded["cpu"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+        raise RuntimeError("simulated failure during request")
+
+    # Context exit should unlink disk files and release pinned allocations despite the error
+    assert not bin_file.exists()
+    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+
+
 def test_cuda_array_to_host_branches():
     """cuda_array_to_host handles CuPy-, torch-, __array__-like, and rejects others."""
 
