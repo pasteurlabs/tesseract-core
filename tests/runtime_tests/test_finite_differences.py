@@ -175,8 +175,9 @@ class TestExpandPathPatternOptionalFields:
             ("a.[].b", {"a": None}),
             ("a.b", {"a": None}),
             ("a.{}.b", {"a": None}),
+            ("a", {"a": None}),
         ],
-        ids=["optional_list", "optional_submodel", "optional_dict"],
+        ids=["optional_list", "optional_submodel", "optional_dict", "optional_leaf"],
     )
     def test_absent_optional_container_expands_to_nothing(self, pattern, inputs):
         assert expand_path_pattern(pattern, inputs) == []
@@ -213,6 +214,7 @@ class OptionalContainerModule(ModuleType):
     class InputSchema(BaseModel):
         x: Differentiable[Array[(3,), Float32]]
         extra: _OptionalExtra | None = None
+        shift: Differentiable[Array[(3,), Float32]] | None = None
 
     class OutputSchema(BaseModel):
         y: Differentiable[Array[(3,), Float32]]
@@ -221,6 +223,8 @@ class OptionalContainerModule(ModuleType):
         y = 2.0 * np.asarray(inputs.x, dtype=np.float32)
         if inputs.extra is not None:
             y = y + np.asarray(inputs.extra.w, dtype=np.float32)
+        if inputs.shift is not None:
+            y = y + np.asarray(inputs.shift, dtype=np.float32)
         return {"y": y}
 
     def jacobian(

@@ -58,12 +58,12 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         parts: Sequence[str], current_inputs: Any, current_path: list[str]
     ) -> list[str]:
         """Recursively expand each part separately."""
+        if current_inputs is None:
+            # An optional field (e.g. `list | None`) that was not supplied.
+            return []
+
         if not parts:
             return [".".join(current_path)]
-
-        if current_inputs is None:
-            # An optional container (e.g. `list | None`) that was not supplied.
-            return []
 
         paths = []
         part = parts[0]
