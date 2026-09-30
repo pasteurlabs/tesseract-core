@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import builtins
 import shutil
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import uuid
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
@@ -1026,15 +1028,95 @@ def _is_gpu_array(arr: Any) -> bool:
     return device_type == _DLDEVICE_CUDA
 
 
+@dataclass
+class EncodingContext:
+    """Request-scoped context tracking state and resources during input array encoding."""
+
+    input_dir: Path | None = None
+    binref_pool: BinrefWritePool | None = None
+    written_files: list[Path] = field(default_factory=list)
+    checked_out_slots: list[BinrefSlot] = field(default_factory=list)
+    exported_cuda_ipc: bool = False
+
+
+def _encode_binref(arr: Any, ctx: EncodingContext) -> dict:
+    """Encode an array as binref, tracking written files or pool slots in ``ctx``."""
+    if ctx.binref_pool is not None:
+        return encode_array_binref_pooled(
+            arr, ctx.binref_pool, ctx.checked_out_slots, ctx.written_files
+        )
+    if ctx.input_dir is not None:
+        return encode_array_binref(arr, ctx.input_dir, ctx.written_files)
+    raise ValueError(
+        "EncodingContext.input_dir or binref_pool is required when encoding is 'binref'"
+    )
+
+
+def _close_encoding_context(ctx: EncodingContext) -> None:
+    """Release resources held in ``ctx`` during encoding with resilient partial failure handling."""
+    errors: list[BaseException] = []
+
+    try:
+        for f in ctx.written_files:
+            try:
+                f.unlink(missing_ok=True)
+            except Exception as ex:  # noqa: BLE001 - collected and re-raised below
+                errors.append(ex)
+        ctx.written_files.clear()
+    finally:
+        try:
+            if ctx.binref_pool is not None:
+                for slot in ctx.checked_out_slots:
+                    try:
+                        ctx.binref_pool.checkin(slot)
+                    except Exception as ex:  # noqa: BLE001 - collected and re-raised below
+                        errors.append(ex)
+                ctx.checked_out_slots.clear()
+        finally:
+            if ctx.exported_cuda_ipc:
+                try:
+                    _import_cuda_ipc().release_pinned_ipc_exports()
+                except Exception as ex:  # noqa: BLE001 - collected and re-raised below
+                    errors.append(ex)
+                ctx.exported_cuda_ipc = False
+
+    if errors:
+        if len(errors) == 1:
+            raise errors[0]
+        exception_group_cls = getattr(builtins, "ExceptionGroup", None)
+        if exception_group_cls is not None:
+            raise exception_group_cls(
+                "Errors occurred during EncodingContext cleanup", errors
+            )
+        raise RuntimeError(
+            f"Multiple errors occurred during EncodingContext cleanup: {errors}"
+        )
+
+
 def _encode_array(
-    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+    arr: Any,
+    encoding: Literal["base64", "raw", "cuda_ipc", "cuda_vmm", "binref"] = "base64",
+    ctx: EncodingContext | None = None,
 ) -> dict:
-    # With the cuda_ipc device transport, GPU arrays are exported by reference via
-    # a CUDA IPC handle, keeping the data on-device. Any other array (or any other
-    # encoding) falls through to a host copy below, so a mixed payload (some GPU,
-    # some CPU arrays) encodes correctly either way.
+    """Encode an array into an arraydict representation.
+
+    When ``encoding='cuda_ipc'``, GPU arrays are exported by handle via CUDA IPC,
+    keeping the data on-device. An :class:`EncodingContext` is required to track
+    the exported allocation so its pinned memory is released on context exit.
+
+    When ``encoding='binref'``, an :class:`EncodingContext` is required to write
+    the buffer to the input directory or write pool and track the file/slot lifetime.
+    """
     if encoding == "cuda_ipc" and _is_gpu_array(arr):
+        if ctx is None:
+            raise ValueError("EncodingContext is required when encoding is 'cuda_ipc'")
+        ctx.exported_cuda_ipc = True
         return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+
+    if encoding == "binref":
+        if ctx is None:
+            raise ValueError("EncodingContext is required when encoding is 'binref'")
+        return _encode_binref(arr, ctx)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -1059,52 +1141,56 @@ def _encode_array(
 
 @contextmanager
 def _encode_payload(
-    payload: dict | None, gpu_transport: str = "none"
+    payload: dict | None,
+    gpu_transport: str = "none",
+    output_format: OutputFormat = "json+base64",
+    input_path: PathLike | None = None,
+    binref_pool: BinrefWritePool | None = None,
 ) -> Iterator[dict | None]:
-    """Encode a request payload's arrays, managing device-export lifetime.
+    """Encode a request payload's arrays, managing device-export and binref-file lifetimes.
 
     Yields the encoded payload (or None for an empty payload). When a
     ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
-    reference (host arrays still go base64), which pins each exported allocation
-    in a process-global registry on the runtime side. Those pins are released on
-    context exit, by which point the caller has read the full response, so the
-    server has copied the inputs out and they are provably dead. The release is
-    skipped (and the transport machinery never imported) when no GPU array was
-    actually exported.
+    reference (keeping the data on-device), which pins each exported allocation
+    in a process-global registry on the runtime side. Host arrays (and GPU
+    arrays when ``gpu_transport`` is ``none``) are encoded according to
+    ``output_format`` (``binref`` files when ``output_format == "json+binref"``
+    and ``input_path`` is set, else ``base64``).
 
-    Releasing on exit rather than at the start of the next request keeps pinned
-    GPU memory bounded to a single in-flight request.
+    Resources (pinned GPU memory allocations and temporary binref files/slots) are
+    released on context exit, by which point the caller has read the full response.
     """
     if not payload:
         yield None
         return
 
-    if gpu_transport == "none":
-        yield _tree_map(
-            _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
-        )
-        return
-
-    # A device transport is set: a leaf is any array-like on either protocol;
-    # GPU leaves are exported by handle and pin their allocation until we release
-    # below. CPU leaves fall back to base64 inside _encode_array, so a mixed
-    # payload encodes correctly.
-    exported = False
+    resolved_input_path = Path(input_path) if input_path is not None else None
+    ctx = EncodingContext(
+        input_dir=resolved_input_path,
+        binref_pool=binref_pool,
+    )
+    use_binref = output_format == "json+binref" and (
+        resolved_input_path is not None or binref_pool is not None
+    )
 
     def _encode_leaf(x: Any) -> dict:
-        nonlocal exported
-        if _is_gpu_array(x):
-            exported = True
-        return _encode_array(x, encoding=gpu_transport)
+        if _is_gpu_array(x) and gpu_transport != "none":
+            return _encode_array(x, encoding=gpu_transport, ctx=ctx)
+
+        # Host array (or GPU array when gpu_transport is "none")
+        if use_binref:
+            return _encode_array(x, encoding="binref", ctx=ctx)
+
+        return _encode_array(x, encoding="base64", ctx=ctx)
 
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or _is_gpu_array(x)
 
     try:
-        yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
+        encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
+        yield encoded_payload
     finally:
-        if exported:
-            _import_cuda_ipc().release_pinned_ipc_exports()
+        _close_encoding_context(ctx)
 
 
 def _decode_array(
@@ -1352,42 +1438,13 @@ class HTTPClient:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
 
-        if payload and self._output_format == "json+binref" and self._input_path:
-            # Pass input arrays as binref files in the mounted input directory
-            # instead of base64-in-body. The server reads them via its input
-            # path, so no array data travels over HTTP. Files (and any pooled
-            # slots) live only until the response returns, so clean them up in a
-            # finally once the server has read them.
-            binref_input_files: list[Path] = []
-            checked_out_slots: list[BinrefSlot] = []
-            if self._binref_pool is not None:
-                encode_binref = lambda x: encode_array_binref_pooled(
-                    x, self._binref_pool, checked_out_slots, binref_input_files
-                )
-            else:
-                encode_binref = lambda x: encode_array_binref(
-                    x, self._input_path, binref_input_files
-                )
-            encoded_payload = _tree_map(
-                encode_binref, payload, is_leaf=lambda x: hasattr(x, "__array__")
-            )
-            try:
-                response = self._send(
-                    url, method, orjson.dumps(encoded_payload), params
-                )
-                return self._decode_response(response, endpoint)
-            finally:
-                for f in binref_input_files:
-                    f.unlink(missing_ok=True)
-                if self._binref_pool is not None:
-                    for slot in checked_out_slots:
-                        self._binref_pool.checkin(slot)
-
-        # Non-binref path: _encode_payload handles base64 and the GPU transport,
-        # holding any exported GPU inputs alive until the response has been fully
-        # read. `requests` buffers the whole body before `_send` returns, so
-        # exiting the block afterwards releases them at the earliest safe point.
-        with _encode_payload(payload, self._gpu_transport) as encoded_payload:
+        with _encode_payload(
+            payload,
+            gpu_transport=self._gpu_transport,
+            output_format=self._output_format,
+            input_path=self._input_path,
+            binref_pool=self._binref_pool,
+        ) as encoded_payload:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
         return self._decode_response(response, endpoint)
 
