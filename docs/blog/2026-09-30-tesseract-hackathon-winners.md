@@ -16,6 +16,10 @@ In our latest hackathon, we challenged researchers and engineers around the worl
 
 Author: Benjamin Vial | [Explore PRISMO](https://github.com/benvial/prismo)
 
+**What it is:** Free-form optimization of the dopant layout in a silicon optical phase shifter.
+
+**Why we love it:** A state-of-the-art Julia semiconductor solver and a FEniCS optics solver combine into one JAX gradient, each supplying its own kind of adjoint.
+
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation of the dopant distribution in a silicon waveguide evolving during optimization.">
   <source src="../../_static/blog/2026-09-30-tesseract-hackathon-winners/prismo.mp4" type="video/mp4">
@@ -23,7 +27,7 @@ Author: Benjamin Vial | [Explore PRISMO](https://github.com/benvial/prismo)
 <figcaption>PRISMO reshaping the dopant distribution around a silicon waveguide core, iteration by iteration.</figcaption>
 </figure>
 
-The top winner of this year’s hackathon is PRISMO, which explores a different way of designing components for optical chips. It optimizes the distribution of electrical dopants in a silicon device that controls light, allowing the structure itself to evolve rather than restricting the design to a predefined geometry. Starting from a conventional design, the optimization discovers a ring-like structure that wraps around the region where light travels and produces more than five times the change in optical phase. The setup is highly non-trivial, where a state-of-the-art Julia semiconductor solver and a FEniCS optics solver combine into one JAX gradient, each supplying its own kind of adjoint.
+The top winner of this year’s hackathon is PRISMO, which explores a different way of designing components for optical chips. It optimizes the distribution of electrical dopants in a silicon device that controls light, allowing the structure itself to evolve rather than restricting the design to a predefined geometry. Starting from a conventional design, the optimization discovers a ring-like structure that wraps around the region where light travels and produces more than five times the change in optical phase.
 
 > Tesseract made this possible by letting PRISMO treat separate physics solvers as pieces of one differentiable model. The semiconductor and optical simulations are written in different languages, but Tesseract gives them a common interface for both their calculations and derivatives. JAX can then connect them and propagate gradients through the whole multiphysics simulation, without having to rewrite or tightly couple the underlying solvers.
 >
@@ -32,6 +36,10 @@ The top winner of this year’s hackathon is PRISMO, which explores a different 
 ## Second Prize: δSnowSac
 
 Author: Kamlesh Sawadekar | [Explore δSnowSac](https://github.com/kasProg/dSnowSac)
+
+**What it is:** A neural network that calibrates NOAA’s operational streamflow models, Snow-17 and SAC-SMA, so they no longer have to be tuned basin by basin.
+
+**Why we love it:** The learning signal flows back through both original Fortran models into the network, combining forward-mode derivatives across the physics with reverse-mode autograd across the network.
 
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation of simulated streamflow converging toward observed streamflow over training epochs.">
@@ -54,6 +62,10 @@ Prediction of hydrological variables is important for water resource management,
 
 _Inverse design & shape optimization_ | Author: Rafael Pastrana | [Explore Normax](https://github.com/arpastrana/normax)
 
+**What it is:** Shape and member-size optimization of lightweight structures, with a Eurocode 3 building code check inside the optimization loop.
+
+**Why we love it:** Making the building code differentiable lets form finding, structural analysis, and compliance share one gradient, which uses 29–67% less material than sizing members on a fixed geometry.
+
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation comparing three gridshell optimization runs, with the end-to-end run reaching the lightest design.">
   <source src="../../_static/blog/2026-09-30-tesseract-hackathon-winners/normax.mp4" type="video/mp4">
@@ -61,11 +73,13 @@ _Inverse design & shape optimization_ | Author: Rafael Pastrana | [Explore Norma
 <figcaption>Three ways to optimize a gridshell: sections only, heights and sections, and the full pipeline end to end. The end-to-end run finds the lightest design.</figcaption>
 </figure>
 
-What if typically “hidden” requirements like building codes could be part of the design process from the start? Normax makes a Eurocode 3 compliance check differentiable, so form finding, structural analysis, and the building code share one optimization loop. Optimizing shape and member sizes together this way uses 29–67% less material than sizing members on a fixed geometry. We’re excited to see where it goes, and how projects like it are going to empower engineers to find better solutions faster.
-
 ### Track 2: Coldplate
 
 _Multi-physics & coupled systems_ | Author: Abd Elilah Tauil | [Explore Coldplate](https://github.com/TAUIL-Abd-Elilah/coldplate)
+
+**What it is:** Topology optimization of a natural-convection cold plate, with a fluid solver and a thermal solver coupled in both directions.
+
+**Why we love it:** It differentiates the coupled equilibrium properly with the implicit function theorem, and shows that leaving the two-way coupling out of the gradient makes it catastrophically wrong, with a third of the signs flipped.
 
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation of a cold plate topology optimization showing material layout, coolant flow, and chip temperature.">
@@ -74,11 +88,13 @@ _Multi-physics & coupled systems_ | Author: Abd Elilah Tauil | [Explore Coldplat
 <figcaption>Cold plate topology optimization: material layout, temperature and coolant flow, and chip temperature per design iteration.</figcaption>
 </figure>
 
-A brilliant example of how to find an optimal coupled equilibrium through Newton-Krylov iteration when Picard iteration is unstable, Coldplate leverages both forward- and reverse-mode AD and explains why ignoring the implicit function theorem can provide misleading results. **Coldplate shows how leaving the two-way coupling between the thermal and fluid solvers out of the gradient makes it catastrophically wrong, with a third of the signs flipped**.
-
 ### Track 3: Differentiable Silicon
 
 _Hybrid ML + mechanistic models_ | Author: S M Hozaifa Hossain | [Explore Differentiable Silicon](https://github.com/hozaifa1/differentiable-silicon)
+
+**What it is:** Tuning how a ferroelectric transistor is manufactured so that a spiking neural network built from it classifies heartbeats better.
+
+**Why we love it:** The gradient reaches into the thorniest piece of software in the entire hackathon, Sentaurus TCAD (a closed-source binary with no derivatives, driven over SSH), via finite differences refined with Broyden’s method.
 
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation of transistor transfer curves and four fabrication parameters changing over Broyden steps.">
@@ -87,11 +103,13 @@ _Hybrid ML + mechanistic models_ | Author: S M Hozaifa Hossain | [Explore Differ
 <figcaption>Each accepted Broyden step moves four fabrication parameters and reshapes the device’s simulated transfer curves.</figcaption>
 </figure>
 
-Differentiable Silicon pushes a heartbeat-classification loss back through a spiking neural network and into a chip manufacturing simulator, tuning how a ferroelectric transistor is made so the hardware network classifies ECGs better. It combines a Tesseract wrapped around the thorniest piece of software in the entire hackathon (Sentaurus TCAD, a closed-source binary with no derivatives, driven over SSH on a separate machine) and an impressive gradient update mechanism with Broyden’s method.
-
 ### Track 4: OpenSees-SHM
 
 _Differentiable inference & UQ_ | Authors: Weipeng Xu, Ziyuan Xie, Dazhi Zhao, Tianju Xue | [Explore OpenSees-SHM](https://github.com/xwpken/opensees-shm-tesseract)
+
+**What it is:** Inferring where and how badly a steel structure has corroded from simulated sensor data, with uncertainty estimates.
+
+**Why we love it:** An entire OpenSees finite element program becomes a differentiable input, with gradients from OpenSees’ own sensitivity analysis, composed with a finite-difference Tesseract for the corroded cross-sections.
 
 <figure>
 <video autoplay loop muted playsinline aria-label="Animation of a truss bridge deforming under transient excitation, with candidate damage segments highlighted.">
@@ -100,11 +118,13 @@ _Differentiable inference & UQ_ | Authors: Weipeng Xu, Ziyuan Xie, Dazhi Zhao, T
 <figcaption>Bridge response under a designed transient excitation, with candidate damage segments in red.</figcaption>
 </figure>
 
-OpenSees-SHM wraps the OpenSees structural solver so that an entire finite element program (passed in as JSON) becomes a differentiable input, with gradients coming from OpenSees’ own sensitivity analysis. Paired with a finite-difference Tesseract for corroded cross-sections, it infers where and how badly a steel structure has corroded, with uncertainty estimates, from simulated sensor data.
-
 ### Track 5: Tesseract Inverse Thermography
 
 _Differentiable graphics & rendering_ | Author: Usi Adia-Nimuwa | [Explore Tesseract Inverse Thermography](https://github.com/il-miscusi/tesseract-inverse-thermography)
+
+**What it is:** Recovering hidden heat sources from a single thermal camera image.
+
+**Why we love it:** The camera itself is a differentiable renderer, so gradients run from the pixels back through a coupled Fortran/JAX/PyTorch flow–heat equilibrium, learned closure model included.
 
 ```{figure} ../static/blog/2026-09-30-tesseract-hackathon-winners/inverse-thermography.png
 :alt: Grid of heat source recoveries and image residuals for a calibrated and a mis-calibrated renderer.
@@ -112,19 +132,19 @@ _Differentiable graphics & rendering_ | Author: Usi Adia-Nimuwa | [Explore Tesse
 Heat sources recovered from the same noisy thermal image through a calibrated and a mis-calibrated renderer.
 ```
 
-The project treats a thermal camera as a differentiable renderer, so gradients run from the pixels of a single image back through a coupled Fortran/JAX/PyTorch flow–heat equilibrium to the hidden heat sources, with a learned closure model in the loop. Very neat!
-
 ## Best Engineering / Tesseract Hack: Impact-Adjoint
 
 Author: Harsh Singh ([@singhharsh1708](https://github.com/singhharsh1708)) | [Explore Impact-Adjoint](https://github.com/singhharsh1708/impact-adjoint)
 
-This category recognizes the entry that shows the deepest engagement with the Tesseract stack. Since the hackathon began, Harsh has landed nearly 30 merged pull requests across Tesseract Core, Tesseract-JAX, Tesseract-Torch, and Tesseract-Streamlit, contributions that were hard to beat in terms of demonstrated effort, technical excellence, and overall impact on the Tesseract community.
+**What it is:** Exact gradients through collisions: naive autodiff through a bouncing-ball simulation can return a gradient of exactly zero when the true one isn’t, so a Julia solver supplies the collision sensitivities instead.
 
-The project itself fixes a subtle failure of naive autodiff through collisions. Differentiating a bouncing-ball simulation step by step can return a gradient of exactly zero when the true one isn’t, so Impact-Adjoint supplies exact collision sensitivities from a Julia solver instead.
+**Why we love it:** Since the hackathon began, Harsh has landed nearly 30 merged pull requests across Tesseract Core, Tesseract-JAX, Tesseract-Torch, and Tesseract-Streamlit, the deepest engagement with the stack of any entry.
 
 ## Best Visual: Normax
 
 Track 1 winner Rafael Pastrana also took home the award for best visual in the hackathon for the [animations](https://github.com/arpastrana/normax#what-is-special-about-normax) in his project, Normax.
+
+We also want to give a shout to the [interactive walkthrough](https://julian-8897.github.io/tesseract-hybrid-closure/) of Julian Chan’s [Differentiable Hybrid Closure for 2D Turbulence](https://github.com/julian-8897/tesseract-hybrid-closure), where a PyTorch closure model corrects a JAX spectral solver.
 
 ## Honorable Mentions
 
@@ -143,3 +163,7 @@ This year’s hackathon was particularly competitive, with many more excellent p
   ```
 
   [Cadjoint](https://github.com/andrinr/cadjoint) by Andrin Rehmann is code-first CAD in the browser. Sketches, constraints, meshing and FEM simulation form one function that JAX can differentiate end to end, and a compiler turns JAX programs into WebGPU shaders so models render live.
+
+One of the most exciting threads across the hackathon was teams writing custom differentiation rules for components that are normally non-differentiable. Beyond the winners above, [Aerostealth](https://github.com/esemsc-ss2524/aerostealth) turns OpenFOAM’s adjoint solver into a differentiable component for co-designing an airfoil’s drag and radar signature, [Tesseract Physics-Guided Diffusion Design](https://github.com/xiezy964/tes-phy-guide) differentiates through Gmsh meshing inside a diffusion-based design loop, and [Vitrify](https://github.com/Marc-Dvci/Vitrify) derives an exact adjoint for a 3D FEniCSx thermomechanics solver.
+
+Finally, the most unexpected application area goes to [Harmonicut](https://github.com/zkasuran/harmonicut), which reshapes the undercut of a marimba bar to pull its overtones toward the ideal 1:4:10 tuning.
