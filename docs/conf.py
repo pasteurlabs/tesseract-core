@@ -66,6 +66,8 @@ extensions = [
     "sphinx_sitemap",
     # Redirect stubs for pages moved during the Diátaxis reorganization
     "sphinx_reredirects",
+    # Markdown builder, used to mirror blog posts to the forum (see forum_topics.py)
+    "sphinx_markdown_builder",
 ]
 
 # The docs are served with the `dirhtml` builder (clean, extension-less URLs)
@@ -233,13 +235,13 @@ def _emit_config_schema(app) -> None:
 
 
 # Every blog post links to a forum topic as its comment thread. The workflow in
-# .github/workflows/forum_topics.yml creates the topic when a post lands on main,
-# unless the post names an existing one with `forum_topic: <topic ID>` in its
-# frontmatter.
+# .github/workflows/forum_topics.yml mirrors the post to the forum when it lands
+# on main, unless the post names an existing topic with `forum_topic: <topic ID>`
+# in its frontmatter.
 #
-# The docs build and the workflow start together on merge, so the build waits
-# this long for new topics before failing.
-FORUM_TOPIC_TIMEOUT_SECONDS = 90
+# The docs build and the workflow start together on merge, and the workflow
+# builds the docs before it posts. Wait this long for new topics before failing.
+FORUM_TOPIC_TIMEOUT_SECONDS = 180
 FORUM_TOPIC_POLL_SECONDS = 5
 
 _forum_topic_urls: dict[str, str] = {}
@@ -294,7 +296,7 @@ def _resolve_forum_topics(_app) -> None:
         )
         message = (
             f"No forum topic found after {FORUM_TOPIC_TIMEOUT_SECONDS}s for these blog "
-            f"posts:\n{details}\nCheck the 'Create forum topics for blog posts' "
+            f"posts:\n{details}\nCheck the 'Mirror blog posts to the forum' "
             "workflow run for this commit, or set FORUM_TOPICS_OPTIONAL=1 in the "
             "Read the Docs environment to build without the links."
         )
@@ -359,8 +361,24 @@ def _require_dirhtml(app) -> None:
         )
 
 
+def _markdown_translator():
+    """Return the Markdown translator, extended to keep figure captions (and credits)."""
+    from sphinx_markdown_builder.contexts import SubContextParams, WrappedContext
+    from sphinx_markdown_builder.translator import MarkdownTranslator, pushing_context
+
+    class CaptionedMarkdownTranslator(MarkdownTranslator):
+        @pushing_context
+        def visit_caption(self, _node):
+            """Render a figure caption as an italic paragraph below the image."""
+            self._push_context(WrappedContext("*", params=SubContextParams(2, 2)))
+
+    return CaptionedMarkdownTranslator
+
+
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
+    # Keep figure captions when mirroring blog posts to the forum
+    app.set_translator("markdown", _markdown_translator())
     # Enforce the dirhtml builder (see _require_dirhtml for why)
     app.connect("builder-inited", _require_dirhtml)
     # We zip the examples folder here so that it can be downloaded
