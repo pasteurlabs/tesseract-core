@@ -6,6 +6,7 @@ blog_date: "2026-08-13"
 blog_author: "@samalipio"
 blog_title: "An easier way to build your first multi-Tesseract pipeline"
 blog_description: "Introducing cookiecutter-tesseract, a batteries-included starting point for building projects out of more than one Tesseract."
+forum_topic: 146
 ---
 
 # An easier way to build your first multi-Tesseract pipeline

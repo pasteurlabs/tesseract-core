@@ -1,0 +1,47 @@
+name: Mirror blog posts to the forum
+
+# Mirrors each blog post to the forum and updates the mirror when the post
+# changes. The production docs build fails without these topics (see
+# docs/conf.py). Run it manually to backfill.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/blog/*.md"
+  workflow_dispatch:
+
+jobs:
+  blog-topics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
+      - name: Install doc requirements
+        run: uv sync --extra docs --frozen
+
+      - name: Build blog posts as Markdown
+        run: uv run --no-sync sphinx-build -b markdown -q docs /tmp/markdown
+
+      - name: Mirror blog posts
+        env:
+          DISCOURSE_API_KEY: ${{ secrets.DISCOURSE_API_KEY }}
+          DISCOURSE_CATEGORY_ID: ${{ vars.DISCOURSE_BLOG_CATEGORY_ID }}
+        run: uv run --no-sync python docs/forum_topics.py blog /tmp/markdown
