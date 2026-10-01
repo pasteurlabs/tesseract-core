@@ -32,14 +32,14 @@ from __future__ import annotations
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 from uuid import uuid4
 
 import numpy as np
 
 from tesseract_core.runtime.array_encoding import (
+    ALLOWED_DTYPE_NAMES,
     MAX_BINREF_BUFFER_SIZE,
-    AllowedDtypes,
     ArrayDict,
     ArrayLike,
     ShapeType,
@@ -48,6 +48,28 @@ from tesseract_core.runtime.array_encoding import (
     load_binref_arraydict,
 )
 from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.file_interactions import is_absolute_path
+
+
+def _resolve_in_output_path(path: str | Path) -> Path:
+    """Resolve ``path`` against ``output_path`` and reject paths that leave it.
+
+    Clients refuse to read binref buffers outside the served ``output_path``, so
+    checking here surfaces the error in the Tesseract that produced the path.
+    """
+    if is_absolute_path(path):
+        raise ValueError(
+            f"Binref path {str(path)!r} must be relative to the output path, "
+            "not an absolute path or URL."
+        )
+    output_path = Path(get_config().output_path)
+    full_path = (output_path / path).resolve()
+    if not full_path.is_relative_to(output_path):
+        raise ValueError(
+            f"Binref path {str(path)!r} resolves outside the output path "
+            f"({output_path})."
+        )
+    return full_path
 
 
 class BinrefArray:
@@ -64,10 +86,9 @@ class BinrefArray:
             arr = BinrefArray.from_file("mesh.bin", shape=(1000, 1000), dtype="float64")
             return OutputSchema(result=arr)
 
-    The client resolves the buffer path against the served ``output_path``, so it
-    must be relative to that directory or an absolute path / URL the client can
-    reach. The bytes are forwarded unchecked. They must be C-contiguous, row-major,
-    and consistent with the declared ``shape`` and ``dtype``.
+    The buffer path is relative to the served ``output_path`` and must resolve
+    inside it. The bytes are forwarded unchecked, so they must be C-contiguous,
+    row-major, and consistent with the declared ``shape`` and ``dtype``.
 
     This is a plain class rather than a dataclass or ``BaseModel`` so that the
     runtime's Python-mode ``model_dump()`` treats it as an opaque leaf instead of
@@ -97,8 +118,8 @@ class BinrefArray:
         """Reference a buffer already on disk (e.g. written by compiled code).
 
         Args:
-            path: Buffer path, relative to the served ``output_path`` (or an
-                absolute path / URL).
+            path: Buffer path, relative to the served ``output_path``. The file
+                must exist inside it and be large enough to hold the array.
             shape: Shape of the array.
             dtype: NumPy dtype name (e.g. ``"float64"``).
             offset: Byte offset of the array within the file.
@@ -109,17 +130,30 @@ class BinrefArray:
         spec = str(path)
         if not spec:
             raise ValueError("BinrefArray path must be non-empty")
-        allowed_dtypes = [d.lower() for d in get_args(AllowedDtypes)]
-        if dtype not in allowed_dtypes:
+        if dtype not in ALLOWED_DTYPE_NAMES:
             raise ValueError(
                 f"BinrefArray dtype '{dtype}' is not supported; must be one of: "
-                f"{', '.join(allowed_dtypes)}"
+                f"{', '.join(ALLOWED_DTYPE_NAMES)}"
+            )
+        if compression is not None and compressed_size is None:
+            raise ValueError("compressed_size is required when compression is set")
+
+        full_path = _resolve_in_output_path(spec)
+        if not full_path.is_file():
+            raise ValueError(f"BinrefArray buffer {full_path} does not exist")
+        if compression is None:
+            num_bytes = int(np.prod(shape)) * np.dtype(dtype).itemsize
+        else:
+            num_bytes = int(compressed_size)
+        file_size = full_path.stat().st_size
+        if file_size < offset + num_bytes:
+            raise ValueError(
+                f"BinrefArray buffer {full_path} is too small: expected {num_bytes} "
+                f"bytes at offset {offset}, but the file is only {file_size} bytes."
             )
 
         data: dict[str, Any] = {"encoding": "binref"}
         if compression is not None:
-            if compressed_size is None:
-                raise ValueError("compressed_size is required when compression is set")
             data["buffer"] = f"{spec}:{int(offset)}:{int(compressed_size)}"
             data["compression"] = compression
         elif offset:
@@ -140,21 +174,18 @@ class BinrefArray:
         cls,
         arr: ArrayLike,
         *,
-        output_dir: str | Path | None = None,
         compression: str | None = None,
     ) -> BinrefArray:
         """Write ``arr`` to a new binref buffer on disk and reference it.
 
-        Each call writes a separate file. Use :class:`BinrefWriter` to pack many
-        arrays into a few shared buffers.
+        Each call writes a separate file into the configured ``output_path``. Use
+        :class:`BinrefWriter` to pack many arrays into a few shared buffers.
 
         Args:
             arr: The array to write. Coerced to a contiguous NumPy array.
-            output_dir: Directory to write into. Defaults to the configured
-                ``output_path``.
             compression: Optional compression to apply (currently only ``"lz4"``).
         """
-        return BinrefWriter(output_dir, compression=compression).write(arr)
+        return BinrefWriter(compression=compression).write(arr)
 
     @classmethod
     def _from_arraydict(cls, arraydict: ArrayDict) -> BinrefArray:
@@ -240,16 +271,12 @@ def load_for_inline_encoding(
 class BinrefWriter:
     """Write many arrays into shared, rotating binref buffers.
 
-    Each :meth:`write` appends to the current ``.bin`` file and returns a
-    :class:`BinrefArray` pointing at the array's slice of it. Once the file
-    exceeds ``max_file_size``, the next write starts a new one. Data is written
-    immediately, so there is nothing to flush or close.
+    Each :meth:`write` appends to the current ``.bin`` file in the configured
+    ``output_path`` and returns a :class:`BinrefArray` pointing at the array's
+    slice of it. Once the file exceeds ``max_file_size``, the next write starts a
+    new one. Data is written immediately, so there is nothing to flush or close.
 
     Args:
-        output_dir: Directory to write buffers into. Defaults to the Tesseract's
-            configured ``output_path``. The client resolves buffer paths relative
-            to the served ``output_path``, so leave this as the default unless
-            the files will end up under that directory.
         max_file_size: Roll over to a new buffer once the current one grows past
             this many bytes. Defaults to the runtime's binref buffer size.
         compression: Optional compression to apply (currently only ``"lz4"``).
@@ -257,27 +284,19 @@ class BinrefWriter:
 
     def __init__(
         self,
-        output_dir: str | Path | None = None,
         *,
         max_file_size: int = MAX_BINREF_BUFFER_SIZE,
         compression: str | None = None,
     ) -> None:
-        self._output_dir = output_dir
         self._max_file_size = max_file_size
         self._compression = compression
         self._current_uuid = str(uuid4())
 
     def write(self, arr: ArrayLike) -> BinrefArray:
         """Append ``arr`` to the current buffer and return a reference to it."""
-        output_dir = self._output_dir
-        if output_dir is None:
-            output_dir = get_config().output_path
-        arr = np.ascontiguousarray(arr)
-        # subdir=None yields a path relative to output_dir, which the client
-        # resolves against output_path.
         arraydict, self._current_uuid = dump_binref_arraydict(
-            arr,
-            base_dir=output_dir,
+            np.ascontiguousarray(arr),
+            base_dir=get_config().output_path,
             subdir=None,
             current_binref_uuid=self._current_uuid,
             max_file_size=self._max_file_size,

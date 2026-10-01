@@ -106,18 +106,18 @@ run_compiled_solver(out="field.bin")  # writes into the output directory
 final = BinrefArray.from_file("field.bin", shape=(size, size), dtype="float64")
 ```
 
-The buffer path is resolved against the served `--output-path`, so it must be
-relative to that directory (a bare filename works) or an absolute path.
+The buffer path must be relative to the served `--output-path` (a bare filename
+works) and must not lead outside it. `from_file` also checks that the file exists
+and holds at least `prod(shape) * dtype.itemsize` bytes past the given offset.
 
 ```{warning}
 Because the buffer is forwarded without being read, the runtime **cannot** check
-that the bytes on disk actually match what you declared. It only validates the
-`shape` and `dtype` you passed to `from_file` against the field's declared type,
-and a mismatch there raises when the output is validated. The bytes themselves are
-trusted. The data must be **C-contiguous, row-major, and exactly
-`prod(shape) * dtype.itemsize` bytes** at the given offset. Otherwise, the client
-either fails to decode the buffer or silently reinterprets it as the wrong array,
-and neither case is caught server-side. Writing the buffer with the matching NumPy
+that the bytes on disk actually match what you declared. Beyond the file size, it
+only validates the `shape` and `dtype` you passed to `from_file` against the
+field's declared type, and a mismatch there raises when the output is validated.
+The bytes themselves are trusted. The data must be **C-contiguous and
+row-major**. Otherwise, the client silently reinterprets it as the wrong array.
+Writing the buffer with the matching NumPy
 `dtype` and `np.ascontiguousarray` (or via `BinrefArray.write`) avoids this.
 ```
 

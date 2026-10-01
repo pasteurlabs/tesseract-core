@@ -876,6 +876,15 @@ def test_decode_array_binref_rejects_path_escape(tmp_path):
             _decode_array(encoded, output_path=output_path)
 
 
+def test_decode_array_binref_rejects_short_buffer(tmp_path):
+    """A buffer too short for the declared array must not be padded with garbage."""
+    (tmp_path / "data.bin").write_bytes(np.zeros(2, dtype="float64").tobytes())
+    encoded = _binref_encoded("data.bin")
+    encoded["shape"] = (4,)
+    with pytest.raises(ValueError, match="too small"):
+        _decode_array(encoded, output_path=tmp_path)
+
+
 def test_decode_array_binref_rejects_missing_output_path():
     """A json+binref response cannot be decoded without a sandbox to confine it."""
     encoded = _binref_encoded("/etc/passwd")

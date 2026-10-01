@@ -48,6 +48,7 @@ AllowedDtypes = Literal[
     "complex64",
     "complex128",
 ]
+ALLOWED_DTYPE_NAMES: tuple[str, ...] = get_args(AllowedDtypes)
 
 GPUArray: TypeAlias = Any  # Placeholder for GPU array types (e.g., CuPy, PyTorch, etc.)
 EllipsisType: TypeAlias = type(Ellipsis)
@@ -190,9 +191,7 @@ def get_array_model(
     else:
         # Only allow dtypes that can be cast to the expected dtype
         subdtypes = [
-            dtype
-            for dtype in get_args(AllowedDtypes)
-            if _castable(dtype, expected_dtype)
+            dtype for dtype in ALLOWED_DTYPE_NAMES if _castable(dtype, expected_dtype)
         ]
         dtype_type = Literal[tuple(subdtypes)]
 
@@ -386,7 +385,12 @@ def _read_binref_array(
     with open(full_path, "rb") as f:
         if offset:
             f.seek(offset)
-        f.readinto(memoryview(out).cast("B"))
+        num_read = f.readinto(memoryview(out).cast("B"))
+    if num_read < num_bytes:
+        raise ValueError(
+            f"Binref buffer {full_path} is too small: expected {num_bytes} bytes "
+            f"at offset {offset}, but only {num_read} could be read."
+        )
     return out
 
 
@@ -614,22 +618,27 @@ def _coerce_shape_dtype(
             arr, resolve_dtype(str(arr.dtype), expected_dtype, context)
         )
 
-    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
-    if arr.dtype.name not in allowed_dtypes:
-        raise PydanticCustomError(
-            "array_invalid_dtype",
-            "Array has unsupported dtype '{actual_dtype}'; must be one of: {allowed_dtypes}",
-            {
-                "actual_dtype": arr.dtype.name,
-                "allowed_dtypes": ", ".join(allowed_dtypes),
-            },
-        )
+    check_allowed_dtype(arr.dtype.name)
 
     if not out_shape:
         # Cast to a scalar type
         return arr.dtype.type(arr)
 
     return arr
+
+
+def check_allowed_dtype(dtype_name: str) -> None:
+    """Raise a validation error if ``dtype_name`` is not a supported array dtype."""
+    if dtype_name not in ALLOWED_DTYPE_NAMES:
+        raise PydanticCustomError(
+            "array_invalid_dtype",
+            "Array has unsupported dtype '{actual_dtype}'; must be one of: "
+            "{allowed_dtypes}",
+            {
+                "actual_dtype": dtype_name,
+                "allowed_dtypes": ", ".join(ALLOWED_DTYPE_NAMES),
+            },
+        )
 
 
 def check_shape_dtype_no_cast(
@@ -661,14 +670,7 @@ def check_shape_dtype_no_cast(
             {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
         )
 
-    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
-    if dtype_name not in allowed_dtypes:
-        raise PydanticCustomError(
-            "array_invalid_dtype",
-            "Array has unsupported dtype '{actual_dtype}'; must be one of: "
-            "{allowed_dtypes}",
-            {"actual_dtype": dtype_name, "allowed_dtypes": ", ".join(allowed_dtypes)},
-        )
+    check_allowed_dtype(dtype_name)
 
     if expected_dtype is not None and dtype_name != expected_dtype:
         raise PydanticCustomError(
