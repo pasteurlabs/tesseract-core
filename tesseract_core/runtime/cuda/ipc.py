@@ -36,13 +36,16 @@ maintaining their own soname list.
 """
 
 import weakref
-from typing import Any, get_args
+from typing import Any
 
 import numpy as np
 import pybase64
-from pydantic_core import PydanticCustomError
 
-from tesseract_core.runtime.array_encoding import AllowedDtypes, ArrayDict, ShapeType
+from tesseract_core.runtime.array_encoding import (
+    ArrayDict,
+    ShapeType,
+    check_shape_dtype_no_cast,
+)
 from tesseract_core.runtime.cuda import api as cuda_api
 from tesseract_core.runtime.cuda import dlpack
 from tesseract_core.runtime.device_transport import DeviceTransport
@@ -585,47 +588,17 @@ def validate_cuda_array(
     Returns the object unchanged so it can later be encoded via CUDA IPC (see
     :func:`tesseract_core.runtime.array_encoding.encode_array`). Only the array's
     metadata (from ``__cuda_array_interface__`` or DLPack) is inspected -- no
-    device-to-host copy or kernel launch occurs. Mirrors the shape/dtype checks
-    in :func:`tesseract_core.runtime.array_encoding._coerce_shape_dtype`, but
-    never casts (a cast would need a device copy the caller did not ask for).
+    device-to-host copy or kernel launch occurs. Never casts, because a cast
+    would need a device copy the caller did not ask for.
     """
     meta = _read_cuda_array_meta(val)
-    shape = meta.shape
-    dtype_name = meta.dtype.name
-
-    # Shape: Ellipsis means "no check"; otherwise each dim must match unless the
-    # expected dim is None (a polymorphic wildcard).
-    if expected_shape is not Ellipsis and (
-        len(shape) != len(expected_shape)
-        or any(
-            exp is not None and got != exp
-            for got, exp in zip(shape, expected_shape, strict=False)
-        )
-    ):
-        raise PydanticCustomError(
-            "array_shape_mismatch",
-            "Array shape {actual_shape} is incompatible with expected "
-            "shape {expected_shape}",
-            {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
-        )
-
-    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
-    if dtype_name not in allowed_dtypes:
-        raise PydanticCustomError(
-            "array_invalid_dtype",
-            "Array has unsupported dtype '{actual_dtype}'; must be one of: "
-            "{allowed_dtypes}",
-            {"actual_dtype": dtype_name, "allowed_dtypes": ", ".join(allowed_dtypes)},
-        )
-
-    if expected_dtype is not None and dtype_name != expected_dtype:
-        raise PydanticCustomError(
-            "array_dtype_mismatch",
-            "GPU array dtype '{actual_dtype}' does not match expected dtype "
-            "'{expected_dtype}' (cuda_ipc does not cast on device)",
-            {"actual_dtype": dtype_name, "expected_dtype": expected_dtype},
-        )
-
+    check_shape_dtype_no_cast(
+        meta.shape,
+        meta.dtype.name,
+        expected_shape,
+        expected_dtype,
+        no_cast_reason="cuda_ipc does not cast on device",
+    )
     return val
 
 
