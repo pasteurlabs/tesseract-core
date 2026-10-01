@@ -593,13 +593,22 @@ def test_ring1_serial_reuse():
 @requires_cuda
 def test_sdk_encode_structure():
     """The SDK ``_encode_array`` cuda_ipc path yields the expected dict shape."""
-    from tesseract_core.sdk.tesseract import _encode_array
+    from tesseract_core.sdk.tesseract import (
+        EncodingContext,
+        _close_encoding_context,
+        _encode_array,
+    )
 
     arr = cupy.random.randn(32, 64).astype(cupy.float64)
-    encoded = _encode_array(arr, encoding="cuda_ipc")
-    assert encoded["data"]["encoding"] == "cuda_ipc"
-    assert encoded["shape"] == [32, 64]
-    assert encoded["dtype"] == "float64"
+    ctx = EncodingContext()
+    try:
+        encoded = _encode_array(arr, encoding="cuda_ipc", ctx=ctx)
+        assert encoded["data"]["encoding"] == "cuda_ipc"
+        assert encoded["shape"] == [32, 64]
+        assert encoded["dtype"] == "float64"
+        assert ctx.exported_cuda_ipc is True
+    finally:
+        _close_encoding_context(ctx)
 
 
 # ── Test 4: framework interop (encode a torch tensor; decode CuPy-free) ──
