@@ -48,7 +48,7 @@ from tesseract_core.runtime.array_encoding import (
     load_binref_arraydict,
 )
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.file_interactions import is_absolute_path
+from tesseract_core.runtime.file_interactions import is_url
 
 
 def _resolve_in_output_path(path: str | Path) -> Path:
@@ -57,7 +57,9 @@ def _resolve_in_output_path(path: str | Path) -> Path:
     Clients refuse to read binref buffers outside the served ``output_path``, so
     checking here surfaces the error in the Tesseract that produced the path.
     """
-    if is_absolute_path(path):
+    # A drive or root makes the path absolute for our purposes, including
+    # Windows paths like "/etc" that are rooted but not ``is_absolute()``.
+    if is_url(path) or Path(path).anchor:
         raise ValueError(
             f"Binref path {str(path)!r} must be relative to the output path, "
             "not an absolute path or URL."
