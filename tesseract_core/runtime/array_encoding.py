@@ -740,7 +740,7 @@ def encode_array(
     info: Any,
     expected_shape: ShapeType,
     expected_dtype: str | None,
-) -> ArrayDict | ArrayLike:
+) -> ArrayDict | ArrayLike | GPUArray:
     """Encode a NumPy or GPU array for serialization.
 
     An output encoding is two orthogonal choices carried in the context (see

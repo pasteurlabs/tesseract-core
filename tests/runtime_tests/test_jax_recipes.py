@@ -7,7 +7,11 @@ from collections.abc import Hashable
 
 import numpy as np
 
-from tesseract_core.runtime.jax_recipes import _cache_key
+from tesseract_core.runtime.jax_recipes import _cache_key_and_device_leaves
+
+
+def _cache_key(tree):
+    return _cache_key_and_device_leaves(tree)[0]
 
 
 class TestCacheKey:
@@ -291,3 +295,100 @@ class TestCacheWithNonArrayInputs:
             np.asarray(got["a.s"]), np.asarray(expected["a.s"]), rtol=1e-6
         )
         assert np.asarray(expected["a.s"]).item() != 0.0
+
+
+class TestCacheWithDeviceArrays:
+    """Accelerator arrays are compared on the device instead of hashed on the host.
+
+    ``_is_device_array`` is patched to accept every JAX array, so the device
+    path runs on CPU-only machines too.
+    """
+
+    @staticmethod
+    def _treat_all_arrays_as_device(monkeypatch):
+        import jax
+
+        from tesseract_core.runtime import jax_recipes
+
+        monkeypatch.setattr(
+            jax_recipes, "_is_device_array", lambda x: isinstance(x, jax.Array)
+        )
+        return jax_recipes
+
+    def test_key_leaves_out_device_bytes(self, monkeypatch):
+        import jax.numpy as jnp
+
+        jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
+        a = {"x": jnp.array([1.0, 2.0])}
+        b = {"x": jnp.array([1.0, 3.0])}
+        assert _cache_key(a) == _cache_key(b)
+        assert _cache_key(a) != _cache_key({"x": jnp.array([1.0, 2.0, 3.0])})
+        (device_leaf,) = jax_recipes._cache_key_and_device_leaves(a)[1]
+        assert device_leaf is a["x"]
+
+    def test_lookup_compares_contents(self, monkeypatch):
+        import jax.numpy as jnp
+
+        jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
+        jax_recipes._set_jax_vjp_cache_size(1)
+        try:
+            x = {"x": jnp.array([0.0, 1.0, jnp.nan])}
+            vjp_func = lambda ct: ct
+            jax_recipes._cache_store(x, vjp_func, "template")
+            same = {"x": jnp.array([0.0, 1.0, jnp.nan])}
+            assert jax_recipes._cache_lookup(same) == (vjp_func, "template")
+            # Comparison is bitwise like the host path, so -0.0 is a new input.
+            assert (
+                jax_recipes._cache_lookup({"x": jnp.array([-0.0, 1.0, jnp.nan])})
+                is None
+            )
+            assert (
+                jax_recipes._cache_lookup({"x": jnp.array([0.0, 2.0, jnp.nan])}) is None
+            )
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+    def test_bitwise_equal_handles_dtypes(self):
+        import jax.numpy as jnp
+
+        from tesseract_core.runtime.jax_recipes import _bitwise_equal
+
+        for arr in (
+            jnp.array([True, False]),
+            jnp.array([1, 2], dtype=jnp.int8),
+            jnp.array([1.0, 2.0], dtype=jnp.bfloat16),
+            jnp.array([1 + 2j, 3 - 4j], dtype=jnp.complex64),
+        ):
+            assert _bitwise_equal((arr,), (arr + 0,))
+            assert not _bitwise_equal((arr,), (jnp.flip(arr),))
+
+    def test_cache_on_matches_cache_off(self, monkeypatch):
+        import jax.numpy as jnp
+
+        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
+
+        jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
+        InputSchema, apply_jit = _build_api()
+
+        def inputs(offset):
+            inp = _make_inputs(InputSchema, offset=offset)
+            inp.a.v = jnp.asarray(inp.a.v)
+            inp.b.v = jnp.asarray(inp.b.v)
+            return inp
+
+        ct = {"y": jnp.ones(3, dtype=jnp.float32)}
+        expected = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
+
+        jax_recipes._set_jax_vjp_cache_size(1)
+        try:
+            jax_apply(apply_jit, inputs(0.0))
+            hit = jax_recipes._cache_lookup(inputs(0.0).model_dump())
+            miss = jax_recipes._cache_lookup(inputs(0.5).model_dump())
+            got = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+        assert hit is not None
+        assert miss is None
+        for k in expected:
+            np.testing.assert_allclose(np.asarray(got[k]), np.asarray(expected[k]))
