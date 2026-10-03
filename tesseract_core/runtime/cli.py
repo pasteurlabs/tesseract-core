@@ -463,8 +463,8 @@ def check_gradients(
     inputs that do not use float64 precision.
 
     \b
-    Differentiable fields that are ``None``, such as optional inputs that were left out, are skipped.
-    Other non-array values are not supported, such as a string passed to an ``Array | str`` field.
+    Differentiable fields that hold no array are skipped, such as an optional input that was left
+    out, or a string passed to an ``Array | str`` field.
     """  # noqa: D301
     config = get_config()
     api_module = get_tesseract_api()

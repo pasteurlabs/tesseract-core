@@ -159,14 +159,17 @@ def test_check_gradients(input_paths, output_paths, endpoints):
         ]
 
 
-class TestExpandPathPatternOptionalFields:
-    """Optional container fields must not abort path expansion.
+ARR = np.ones(3, dtype=np.float32)
 
-    The pattern comes from the schema, so an optional field that was simply
-    not supplied is a normal input rather than a bad path. Every branch of
-    the walk raises on ``None`` though: ``[]`` and ``{}`` iterate it and a
-    named part subscripts it, so a Tesseract with an optional container
-    input used to fail before checking a single gradient.
+
+class TestExpandPathPatternOptionalFields:
+    """A union-typed field must not abort path expansion.
+
+    The pattern comes from the schema, so a field declared as ``Array | None``
+    or ``Array | str`` is a normal input even when it currently holds no array.
+    Every branch of the walk assumed otherwise: ``[]`` and ``{}`` iterate the
+    value and a named part subscripts it, so a Tesseract with such an input
+    used to fail before checking a single gradient.
     """
 
     @pytest.mark.parametrize(
@@ -176,24 +179,40 @@ class TestExpandPathPatternOptionalFields:
             ("a.b", {"a": None}),
             ("a.{}.b", {"a": None}),
             ("a", {"a": None}),
+            ("a.[].b", {"a": "nope"}),
+            ("a.b", {"a": "nope"}),
+            ("a.{}.b", {"a": "nope"}),
+            ("a", {"a": "nope"}),
         ],
-        ids=["optional_list", "optional_submodel", "optional_dict", "optional_leaf"],
+        ids=[
+            "none_list",
+            "none_submodel",
+            "none_dict",
+            "none_leaf",
+            "str_list",
+            "str_submodel",
+            "str_dict",
+            "str_leaf",
+        ],
     )
-    def test_absent_optional_container_expands_to_nothing(self, pattern, inputs):
+    def test_non_array_value_expands_to_nothing(self, pattern, inputs):
         assert expand_path_pattern(pattern, inputs) == []
 
-    def test_none_entry_inside_a_populated_list_is_skipped(self):
-        """The present entries still expand; only the missing one drops out."""
-        assert expand_path_pattern("a.[].b", {"a": [{"b": 1}, None]}) == ["a.[0].b"]
+    @pytest.mark.parametrize("absent", [None, "nope"], ids=["none", "str"])
+    def test_non_array_entry_inside_a_populated_list_is_skipped(self, absent):
+        """The present entries still expand; only the one without an array drops out."""
+        inputs = {"a": [{"b": ARR}, {"b": absent}]}
+        assert expand_path_pattern("a.[].b", inputs) == ["a.[0].b"]
 
     @pytest.mark.parametrize(
         "pattern,inputs,expected",
         [
-            ("a.[].b", {"a": [{"b": 1}, {"b": 2}]}, ["a.[0].b", "a.[1].b"]),
-            ("a.{}.b", {"a": {"x": {"b": 1}}}, ["a.{x}.b"]),
-            ("a.b", {"a": {"b": 1}}, ["a.b"]),
+            ("a.[].b", {"a": [{"b": ARR}, {"b": ARR}]}, ["a.[0].b", "a.[1].b"]),
+            ("a.{}.b", {"a": {"x": {"b": ARR}}}, ["a.{x}.b"]),
+            ("a.b", {"a": {"b": ARR}}, ["a.b"]),
+            ("a", {"a": np.float32(1.0)}, ["a"]),
         ],
-        ids=["list", "dict", "plain"],
+        ids=["list", "dict", "plain", "scalar"],
     )
     def test_populated_paths_are_unchanged(self, pattern, inputs, expected):
         assert expand_path_pattern(pattern, inputs) == expected
@@ -204,17 +223,19 @@ class _OptionalExtra(BaseModel):
 
 
 class OptionalContainerModule(ModuleType):
-    """A schema with an optional sub-model, as real Tesseracts have.
+    """A schema with union-typed inputs, as real Tesseracts have.
 
     Optional initial conditions, boundary data or preconditioner state are
-    ordinary inputs. The differentiable path ``extra.w`` is still declared
-    when ``extra`` is absent, so the path walk meets ``None``.
+    ordinary inputs. The differentiable paths ``extra.w``, ``shift`` and
+    ``mode`` stay declared whatever those fields hold, so the path walk meets
+    a ``None`` or a ``str`` where it expects a container or an array.
     """
 
     class InputSchema(BaseModel):
         x: Differentiable[Array[(3,), Float32]]
         extra: _OptionalExtra | None = None
         shift: Differentiable[Array[(3,), Float32]] | None = None
+        mode: Differentiable[Array[(3,), Float32]] | str = "off"
 
     class OutputSchema(BaseModel):
         y: Differentiable[Array[(3,), Float32]]
@@ -225,6 +246,8 @@ class OptionalContainerModule(ModuleType):
             y = y + np.asarray(inputs.extra.w, dtype=np.float32)
         if inputs.shift is not None:
             y = y + np.asarray(inputs.shift, dtype=np.float32)
+        if not isinstance(inputs.mode, str):
+            y = y + np.asarray(inputs.mode, dtype=np.float32)
         return {"y": y}
 
     def jacobian(
@@ -241,20 +264,29 @@ class OptionalContainerModule(ModuleType):
         }
 
 
-def test_check_gradients_runs_with_an_absent_optional_container():
-    """End-to-end: an absent optional input must not abort the whole check.
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        {"x": np.ones(3, dtype=np.float32), "extra": None},
+        {"x": np.ones(3, dtype=np.float32), "mode": "off"},
+    ],
+    ids=["absent_optional", "string_in_union"],
+)
+def test_check_gradients_runs_with_a_non_array_input(inputs):
+    """End-to-end: an input holding no array must not abort the whole check.
 
-    ``extra.w`` stays in ``differentiable_arrays`` whether or not ``extra``
-    was supplied, so the path walk meets ``None`` and every branch of it
-    raises. On an unguarded tree this fails with ``TypeError: 'NoneType'
-    object is not subscriptable`` before a single gradient is checked.
+    ``extra.w`` and ``mode`` stay in ``differentiable_arrays`` whatever those
+    fields hold, so the path walk meets a ``None`` or a ``str`` and every
+    branch of it raises. On an unguarded tree this fails with ``TypeError:
+    'NoneType' object is not subscriptable`` or ``AttributeError: 'str'
+    object has no attribute 'shape'`` before a single gradient is checked.
     """
     module = OptionalContainerModule("optional_container_module")
 
     num_evals_total = 0
     for _endpoint, failures, num_evals in check_gradients(
         module,
-        {"inputs": {"x": np.ones(3, dtype=np.float32), "extra": None}},
+        {"inputs": inputs},
         base_dir=None,
         endpoints=["jacobian"],
         max_evals=6,

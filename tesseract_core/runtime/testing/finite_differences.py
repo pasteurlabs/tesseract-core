@@ -46,11 +46,30 @@ class GradientCheckResult(NamedTuple):
     exception: str | None
 
 
+def _is_array(value: Any) -> bool:
+    """Check whether a value can be differentiated as an array.
+
+    Duck-typed on ``shape`` so every array a leaf can hold qualifies: NumPy
+    arrays and scalars, on-disk binrefs, and GPU arrays under ``cuda_ipc``.
+    It is also what the checker needs from a leaf to sample indices from it.
+    """
+    return hasattr(value, "shape")
+
+
+def _is_sequence(value: Any) -> bool:
+    """Check whether a value can be walked by a `[]` path part."""
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
 def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     """Expand a path pattern to a list of all matching paths in the given pytree.
 
     For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
     this function would return `["a.[0].{b}", "a.[1].{c}"]`.
+
+    Patterns come from the schema, so a union type (`Array | None`, `Array | str`) can hold
+    something other than an array or container at any point along a path. Such a path has no
+    gradient to check, so it is skipped rather than aborting the whole expansion.
     """
     parts = split_path(path_pattern)
 
@@ -58,11 +77,9 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         parts: Sequence[str], current_inputs: Any, current_path: list[str]
     ) -> list[str]:
         """Recursively expand each part separately."""
-        if current_inputs is None:
-            # An optional field (e.g. `list | None`) that was not supplied.
-            return []
-
         if not parts:
+            if not _is_array(current_inputs):
+                return []
             return [".".join(current_path)]
 
         paths = []
@@ -70,6 +87,8 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
 
         if part == "[]":
             # sequence access
+            if not _is_sequence(current_inputs):
+                return []
             for i, _ in enumerate(current_inputs):
                 subpaths = _handle_part(
                     parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
@@ -77,6 +96,8 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
                 paths.extend(subpaths)
         elif part == "{}":
             # dictionary access
+            if not isinstance(current_inputs, Mapping):
+                return []
             for key in current_inputs:
                 subpaths = _handle_part(
                     parts[1:],
@@ -85,6 +106,8 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
                 )
                 paths.extend(subpaths)
         else:
+            if not isinstance(current_inputs, Mapping):
+                return []
             subpaths = _handle_part(
                 parts[1:], current_inputs[part], [*current_path, part]
             )
