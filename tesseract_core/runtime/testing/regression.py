@@ -205,6 +205,18 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     return exc_class
 
 
+def _coerce_arraylike(value: Any) -> Any:
+    """Convert lazy array-likes (e.g. a ``BinrefArray``) to NumPy arrays.
+
+    Other values, including scalars and containers, are returned unchanged.
+    """
+    if isinstance(value, np.ndarray):
+        return value
+    if hasattr(value, "__array__") and hasattr(value, "shape"):
+        return np.asarray(value)
+    return value
+
+
 def _validate_tree_structure(
     tree: Any,
     template: Any,
@@ -230,6 +242,9 @@ def _validate_tree_structure(
         mismatch messages. Both may be non-empty when some subtrees match and
         others don't.
     """
+    tree = _coerce_arraylike(tree)
+    template = _coerce_arraylike(template)
+
     if type(tree) is not type(template):
         return (
             {},

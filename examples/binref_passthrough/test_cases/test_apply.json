@@ -1,0 +1,55 @@
+{
+  "endpoint": "apply",
+  "skip_output_path_checks": true,
+  "expected_outputs": {
+    "trajectory": [
+      {
+        "object_type": "array",
+        "shape": [4, 4],
+        "dtype": "float64",
+        "data": {
+          "buffer": [
+            0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.0
+          ],
+          "encoding": "json"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [4, 4],
+        "dtype": "float64",
+        "data": {
+          "buffer": [
+            0.0, 0.1, 0.1, 0.0, 0.1, 0.8, 0.8, 0.1, 0.1, 0.8, 0.8, 0.1, 0.0,
+            0.1, 0.1, 0.0
+          ],
+          "encoding": "json"
+        }
+      }
+    ],
+    "final": {
+      "object_type": "array",
+      "shape": [4, 4],
+      "dtype": "float64",
+      "data": {
+        "buffer": [
+          0.0, 0.1, 0.1, 0.0, 0.1, 0.8, 0.8, 0.1, 0.1, 0.8, 0.8, 0.1, 0.0, 0.1,
+          0.1, 0.0
+        ],
+        "encoding": "json"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "size": 4,
+      "steps": 1,
+      "diffusivity": 0.1
+    }
+  }
+}
