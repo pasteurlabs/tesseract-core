@@ -41,7 +41,7 @@ from .serving import (
 )
 from .venv_provision import (
     SCRUBBED_IMPORT_VARS,
-    declared_env,
+    declared_env_and_metadata,
     resolve_python_executable,
 )
 
@@ -388,8 +388,11 @@ def serve(
     python_executable = str(python_executable)
 
     foreign_interpreter = _is_foreign_interpreter(python_executable)
-    # As in a container: the config's `env` is set, and an explicit request wins.
-    environment = {**declared_env(api_path), **(environment or {})}
+    # Apply what a container would bake in from the config, with explicit
+    # arguments taking precedence.
+    declared_environment, declared_config = declared_env_and_metadata(api_path)
+    environment = {**declared_environment, **(environment or {})}
+    runtime_config = {**declared_config, **(runtime_config or {})}
     if foreign_interpreter and not os.path.isfile(python_executable):
         raise FileNotFoundError(
             f"Python interpreter {python_executable} does not exist."
@@ -407,7 +410,7 @@ def serve(
         # the default would collide on the second Tesseract. The host it binds
         # is left to the runtime, which already defaults to loopback. Opt out of
         # debug mode entirely with `runtime_config={"debug": False}`.
-        attempt_config = dict(runtime_config or {})
+        attempt_config = dict(runtime_config)
         if attempt_config.get("debug"):
             attempt_config.setdefault(
                 "debugpy_port", get_free_port(exclude=(chosen_port,))
@@ -519,8 +522,8 @@ def serve(
             # keying the decision on the API port alone would refuse to retry a
             # collision we caused and can trivially resolve.
             debugpy_port = attempt_config.get("debugpy_port")
-            we_chose_debugpy_port = debugpy_port is not None and "debugpy_port" not in (
-                runtime_config or {}
+            we_chose_debugpy_port = (
+                debugpy_port is not None and "debugpy_port" not in runtime_config
             )
             retriable = auto_port or we_chose_debugpy_port
             conflicting = (

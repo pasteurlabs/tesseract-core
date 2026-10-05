@@ -385,7 +385,7 @@ def check_gradients(
         typer.Option(
             "--eps-for",
             help=(
-                "Per-input step size as PATH=VALUE, e.g. --eps-for inputs.a=1e-3. "
+                "Per-input step size as PATH=VALUE, e.g. --eps-for a=1e-3. "
                 "Overrides --eps for that input path; repeat for multiple paths. "
                 "Use this for inputs whose magnitudes differ by orders of magnitude."
             ),

@@ -218,7 +218,18 @@ This works even without containerization, using `tesseract-runtime serve` direct
 
 ## Running Tesseracts without containers
 
-When containerization is unavailable or undesirable, run Tesseracts directly using the `tesseract-runtime` CLI (the same command that runs inside Tesseract containers).
+When containerization is unavailable or undesirable, a Tesseract can run as an ordinary process.
+
+From Python, `Tesseract.from_source` serves a `tesseract_api.py` from a separate process with an environment built from its `tesseract_config.yaml`, and returns the same `Tesseract` object as `from_image`:
+
+```python
+from tesseract_core import Tesseract
+
+with Tesseract.from_source("/path/to/tesseract_api.py") as tess:
+    tess.apply({"name": "Tessie"})
+```
+
+From the command line, or to serve a Tesseract for clients written in other languages, use the `tesseract-runtime` CLI, which is the same command that runs inside Tesseract containers.
 
 Setup:
 
