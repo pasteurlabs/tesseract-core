@@ -227,6 +227,16 @@ def filter_func(
     return filtered_func
 
 
+def is_arraylike(value: Any) -> bool:
+    """Whether ``value`` is an array or converts to one.
+
+    Duck-typed on ``__array__`` and ``shape``, so NumPy arrays and scalars,
+    on-disk binrefs and device arrays all qualify, while a model that happens
+    to carry a ``shape`` field does not.
+    """
+    return hasattr(value, "__array__") and hasattr(value, "shape")
+
+
 class LRUCache:
     """Thread-safe LRU cache with a configurable maximum size.
 

@@ -19,7 +19,13 @@ from pydantic import BaseModel
 from rich.progress import Progress
 
 from ..core import create_endpoints, get_input_schema, get_output_schema
-from ..tree_transforms import escape_dict_key, get_at_path, set_at_path, split_path
+from ..tree_transforms import (
+    escape_dict_key,
+    get_at_path,
+    is_arraylike,
+    set_at_path,
+    split_path,
+)
 
 GradientEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -46,16 +52,6 @@ class GradientCheckResult(NamedTuple):
     exception: str | None
 
 
-def _is_array(value: Any) -> bool:
-    """Check whether a value can be differentiated as an array.
-
-    Duck-typed on ``shape`` so every array a leaf can hold qualifies: NumPy
-    arrays and scalars, on-disk binrefs, and GPU arrays under ``cuda_ipc``.
-    It is also what the checker needs from a leaf to sample indices from it.
-    """
-    return hasattr(value, "shape")
-
-
 def _is_sequence(value: Any) -> bool:
     """Check whether a value can be walked by a `[]` path part."""
     return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
@@ -67,9 +63,10 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
     this function would return `["a.[0].{b}", "a.[1].{c}"]`.
 
-    Patterns come from the schema, so a union type (`Array | None`, `Array | str`) can hold
-    something other than an array or container at any point along a path. Such a path has no
-    gradient to check, so it is skipped rather than aborting the whole expansion.
+    Patterns come from the schema, so a union type (`Array | None`, `Array | str`,
+    `list | str`, `dict | str`) can hold something other than an array or container at
+    any point along a path. Such a path has no gradient to check, so it is skipped
+    rather than aborting the whole expansion.
     """
     parts = split_path(path_pattern)
 
@@ -78,7 +75,7 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     ) -> list[str]:
         """Recursively expand each part separately."""
         if not parts:
-            if not _is_array(current_inputs):
+            if not is_arraylike(current_inputs):
                 return []
             return [".".join(current_path)]
 
