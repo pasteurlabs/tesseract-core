@@ -22,25 +22,24 @@ Some ways of calling a Tesseract (the REST API, or a served Python session)
 need a running container. To list every Tesseract currently running on your
 machine:
 
+% invisible-code-block: bash
+%
+% $ tesseract serve vectoradd
+
 ```bash
 $ tesseract ps
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ID           ┃ Name      ┃ Version ┃ Host Address    ┃ Container Name         ┃ Description                             ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 997fca92ea37 │ vectoradd │ 1.2.3   │ 127.0.0.1:56434 │ tesseract-afn60xa27hih │ Simple tesseract that adds two vectors. │
+└──────────────┴───────────┴─────────┴─────────────────┴────────────────────────┴─────────────────────────────────────────┘
 ```
 
-The output is a table showing each container's ID, name, version, host port,
-project ID, and description:
+The output is a table showing each container's ID, name, version, host address,
+container name, and description. Two columns you'll reach for often:
 
-```bash
-┏━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID           ┃ Name      ┃ Version ┃ Host Port ┃ Project ID             ┃ Description                               ┃
-┡━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 997fca92ea37 │ vectoradd │ 1.2.3   │ 56434     │ tesseract-afn60xa27hih │ Simple tesseract that adds two vectors.\n │
-└──────────────┴───────────┴─────────┴───────────┴────────────────────────┴───────────────────────────────────────────┘
-```
-
-Two columns you'll reach for often:
-
-- **Host Port** — the port to use when calling the Tesseract's REST endpoints.
-- **Project ID** — pass this to `tesseract teardown` to stop all containers in that project.
+- **Host Address** — the address to use when calling the Tesseract's REST endpoints.
+- **Container Name** — pass this to `tesseract teardown` to stop the container.
 
 ## Invoke the `apply` endpoint
 
@@ -69,6 +68,8 @@ The `@` prefix tells the CLI to read the input payload from a file:
 
 For small payloads, you can also pass JSON inline:
 
+% skip: next "abbreviated payload"
+
 ```bash
 $ tesseract run vectoradd apply '{"inputs": {"a": ..., "b": ...}}'
 ```
@@ -83,10 +84,11 @@ First make sure the Tesseract is running (check `tesseract ps`), or launch it wi
 $ tesseract serve vectoradd
 ```
 
-Then post to its `/apply` endpoint, using the host port from `tesseract ps`:
+Then post to its `/apply` endpoint, replacing `<tesseract-address>:<port>` with the
+host address from `tesseract ps`:
 
 ```bash
-$ curl http://<tesseract-address>:<port>/apply \ # Replace with actual address
+$ curl http://<tesseract-address>:<port>/apply \
   -H "Content-Type: application/json" \
   -d @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
@@ -109,7 +111,7 @@ The payload posted to `/apply` is:
 >>> a = np.array([1.0, 2.0, 3.0])
 >>> b = np.array([4.0, 5.0, 6.0])
 >>>
->>> with Tesseract.from_image(image="vectoradd") as vectoradd:
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
 ...     vectoradd.apply({"a": a, "b": b})
 {'result': array([5., 7., 9.])}
 ```
@@ -207,10 +209,12 @@ supports:
 ```python
 >>> with Tesseract.from_image("vectoradd") as vectoradd:
 ...     print(vectoradd.available_endpoints)
-['apply', 'jacobian', 'health']
+['apply', 'jacobian', 'health', 'test']
 ```
 
 `vectoradd` implements `jacobian` but not JVP or VJP, so those don't appear.
+(`test` is listed because the Python SDK serves Tesseracts in debug mode, which
+enables the [`test` endpoint](testing-a-tesseract).)
 
 Equivalently, run `tesseract apidoc vectoradd` or open the `/docs` endpoint of a
 running Tesseract in your browser.

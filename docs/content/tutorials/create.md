@@ -8,6 +8,10 @@ This page walks through creating your own Tesseracts, starting from a basic exam
 
 Run the following to initialize everything needed to define a new Tesseract in the current directory:
 
+% invisible-code-block: bash
+%
+% $ cd "$DOC_TMPDIR"
+
 ```bash
 $ tesseract init --name my_tesseract
 ```
@@ -29,6 +33,10 @@ The generated `tesseract_api.py` contains boilerplate code to guide you. Let's w
 
 The first section defines the input and output schemas:
 
+% invisible-code-block: python
+%
+% from pydantic import BaseModel
+
 ```python
 class InputSchema(BaseModel):
     pass
@@ -40,15 +48,15 @@ class OutputSchema(BaseModel):
 
 Input and output schemas are defined as [Pydantic](https://docs.pydantic.dev/latest/) models[^1]. For `helloworld`, we need a string in and a string out:
 
-```python
-class InputSchema(BaseModel):
-    name: str = Field(
-        description="Name of the person you want to greet."
-    )
-
-class OutputSchema(BaseModel):
-    greeting: str = Field(description="A greeting!")
+```{literalinclude} ../../../examples/helloworld/tesseract_api.py
+:language: python
+:start-at: from pydantic
+:end-before: def apply
 ```
+
+% invisible-code-block: python
+%
+% from pydantic import Field
 
 Field descriptions are optional but recommended — they appear in the auto-generated docs and schemas. You can also use default values, validators, and other Pydantic features (see [Pydantic docs](https://docs.pydantic.dev/latest/)).
 
@@ -61,10 +69,9 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 Currently, only `apply` is required. This is where you define the Tesseract's core computation. For `helloworld`:
 
-```python
-def apply(inputs: InputSchema) -> OutputSchema:
-    """Greet a person whose name is given as input."""
-    return OutputSchema(greeting=f"Hello {inputs.name}")
+```{literalinclude} ../../../examples/helloworld/tesseract_api.py
+:language: python
+:pyobject: apply
 ```
 
 ```{note}
@@ -88,10 +95,9 @@ For a Tesseract with all optional endpoints implemented, see the [Univariate exa
 
 Finally, set the name and version in `tesseract_config.yaml`:
 
-```yaml
-name: "helloworld"
-version: "1.0.0"
-description: "A sample Python app"
+```{literalinclude} ../../../examples/helloworld/tesseract_config.yaml
+:language: yaml
+:lines: 1-3
 ```
 
 You're now ready to build your first Tesseract.
@@ -104,7 +110,11 @@ Before building, you can test locally without containers using `tesseract-runtim
 
 To build, run `tesseract build` from the directory containing `tesseract_api.py`:
 
-```
+% invisible-code-block: bash
+%
+% $ cp -r "$REPO_ROOT"/examples/helloworld/. .
+
+```bash
 $ tesseract build .
 ```
 
@@ -116,19 +126,14 @@ To list all locally available Tesseracts:
 
 ```bash
 $ tesseract list
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ ID                  ┃ Tags                                      ┃ Name       ┃ Version ┃ Description         ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ sha256:d4bdc2c29eb1 │ ['helloworld:1.0.0', 'helloworld:latest'] │ helloworld │ 1.0.0   │ A sample Python app │
+└─────────────────────┴───────────────────────────────────────────┴────────────┴─────────┴─────────────────────┘
 ```
 
-The output is a table of Tesseract images with their ID, name, version, and description:
-
-```bash
-┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID                  ┃ Tags                  ┃ Name       ┃ Version ┃ Description                               ┃
-┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ sha256:d4bdc2c29eb1 │ ['helloworld:latest'] │ helloworld │ 1.0.0   │ A sample Python app                       │
-└─────────────────────┴───────────────────────┴────────────┴─────────┴───────────────────────────────────────────┘
-```
-
-For machine-readable output unaffected by rich formatting use `tesseract list --format json`.
+The output is a table of Tesseract images with their ID, tags, name, version, and description. For machine-readable output unaffected by rich formatting use `tesseract list --format json`.
 
 (testing-a-tesseract)=
 
@@ -138,12 +143,8 @@ Every Tesseract ships with a built-in `test` endpoint for regression testing. It
 
 A test case is a small JSON file. For the `helloworld` example, `test_cases/test_apply.json` looks like this:
 
-```json
-{
-  "endpoint": "apply",
-  "payload": { "inputs": { "name": "Ozzy" } },
-  "expected_outputs": { "greeting": "Hello Ozzy!" }
-}
+```{literalinclude} ../../../examples/helloworld/test_cases/test_apply.json
+:language: json
 ```
 
 Run it against a built image with `tesseract run ... test`, passing the spec as a file with the `@` prefix:
@@ -164,7 +165,7 @@ To test the Tesseract API directly from Python without building an image, which 
 ```python
 from tesseract_core import Tesseract
 
-tess = Tesseract.from_tesseract_api("path/to/tesseract_api.py")
+tess = Tesseract.from_tesseract_api("tesseract_api.py")
 tess.test({
     "endpoint": "apply",
     "payload": {"inputs": {"name": "Ozzy"}},
@@ -183,7 +184,7 @@ Keeping a `test_cases/` directory next to each Tesseract and running every spec 
 N-dimensional arrays are central to scientific computing. Use the `tesseract_core.runtime.Array` type annotation to define them:
 
 ```python
-from tesseract_core.runtime import Array, Float32
+from tesseract_core.runtime import Array, Float32, Float64
 
 class InputSchema(BaseModel):
     x: Array[(3,), Float32] = Field(
@@ -211,6 +212,8 @@ For scalars, use `tesseract_core.runtime.Float32`, `Float64`, `Int32`, etc. (see
 Since `InputSchema` and `OutputSchema` are Pydantic `BaseModel`s, they support nesting other models within them:
 
 ```python
+from tesseract_core.runtime import Int32
+
 class Mesh(BaseModel):
     """A simple mesh schema."""
     points: Array[(None, 3), Float32]
@@ -231,6 +234,8 @@ Schemas support `dict` and `list` containers for variable-length collections or 
 Use `dict[str, ...]` to define a dictionary with string keys:
 
 ```python
+from tesseract_core.runtime import Differentiable
+
 class InputSchema(BaseModel):
     params: dict[str, Differentiable[Array[(None,), Float32]]] = Field(
         description="A dictionary of parameter arrays, e.g. {'x': array, 'y': array}.",
