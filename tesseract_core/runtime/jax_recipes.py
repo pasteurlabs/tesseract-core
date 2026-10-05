@@ -15,15 +15,37 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from pydantic import BaseModel
 
 from tesseract_core.runtime.array_encoding import _fast_tobytes
+from tesseract_core.runtime.cuda.ipc import is_gpu_array
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     filter_func,
     flatten_with_paths,
     set_at_path,
 )
+
+
+def as_jax_array(x: Any) -> jax.Array:
+    """Convert an array to JAX, using DLPack for GPU inputs.
+
+    Existing JAX arrays are returned unchanged. Host inputs use ``asarray``
+    because decoded NumPy inputs can be read-only and cannot export DLPack.
+    """
+    if isinstance(x, jax.Array):
+        return x
+    if is_gpu_array(x):
+        return jnp.from_dlpack(x)
+    return jnp.asarray(x)
+
+
+def as_jax_arrays(tree: Any) -> Any:
+    """Convert array leaves in a pytree to JAX, preserving non-array leaves."""
+    is_array = lambda x: isinstance(x, np.ndarray | np.generic) or is_gpu_array(x)
+    return jax.tree.map(lambda x: as_jax_array(x) if is_array(x) else x, tree)
+
 
 _jax_vjp_cache: LRUCache | None = None
 
@@ -62,7 +84,9 @@ def _cache_key(tree: Any) -> Hashable:
     items: list = [str(treedef)]
     for leaf in leaves:
         if hasattr(leaf, "tobytes"):
-            items.append((leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(leaf))))
+            items.append(
+                (leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(np.asarray(leaf))))
+            )
         else:
             items.append((type(leaf), leaf))
     return tuple(items)
@@ -80,9 +104,9 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     :func:`tesseract_core.runtime.experimental.set_jax_vjp_cache_size`),
     the forward pass is run via ``jax.vjp`` so the resulting backward
     function can be stashed and reused by a later :func:`jax_vjp` call.
-    Otherwise this is just ``apply_jit(inputs.model_dump())``.
+    Array inputs are converted to JAX before calling ``apply_jit``.
     """
-    inputs_dict = inputs.model_dump()
+    inputs_dict = as_jax_arrays(inputs.model_dump())
 
     if _jax_vjp_cache is None:
         return apply_jit(inputs_dict)
@@ -132,7 +156,8 @@ def jax_vjp(
     compilation happens internally on the first miss for a given
     (input shape/dtype, path subset) combination and is cached for reuse.
     """
-    inputs_dict = inputs.model_dump()
+    inputs_dict = as_jax_arrays(inputs.model_dump())
+    cotangent_vector = as_jax_arrays(cotangent_vector)
 
     # Use get (not pop) so the cached residuals can serve multiple sequential
     # vjp calls on the same inputs -- for example, when tesseract-jax's
@@ -172,10 +197,10 @@ def jax_jvp(
     """
     return _jvp_jit(
         apply_jit,
-        inputs.model_dump(),
+        as_jax_arrays(inputs.model_dump()),
         tuple(jvp_inputs),
         tuple(jvp_outputs),
-        tangent_vector,
+        as_jax_arrays(tangent_vector),
     )
 
 
@@ -191,7 +216,10 @@ def jax_jacobian(
     ``(input shape/dtype, jac_inputs, jac_outputs)`` combination.
     """
     return _jac_jit(
-        apply_jit, inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs)
+        apply_jit,
+        as_jax_arrays(inputs.model_dump()),
+        tuple(jac_inputs),
+        tuple(jac_outputs),
     )
 
 

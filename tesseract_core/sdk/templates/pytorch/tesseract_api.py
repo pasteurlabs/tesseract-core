@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Differentiable, Float32
+from tesseract_core.runtime.cuda.ipc import is_gpu_array
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
 
 #
@@ -161,4 +162,9 @@ def vector_jacobian_product(
     return dict(zip(vjp_inputs, vjp_vals, strict=True))
 
 
-to_tensor = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
+def to_tensor(x):
+    if is_gpu_array(x):
+        return torch.from_dlpack(x)
+    if isinstance(x, np.generic | np.ndarray):
+        return torch.tensor(x)
+    return x
