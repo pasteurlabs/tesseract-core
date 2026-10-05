@@ -530,7 +530,7 @@ def create_gradient_schema(
         """Find the PydanticArrayAnnotation for a given concrete path."""
         for path_pattern, array_type in path_patterns.items():
             if _is_regex_pattern(path_pattern):
-                path_matches = bool(re.match(path_pattern, concrete_path))
+                path_matches = bool(re.fullmatch(path_pattern, concrete_path))
             else:
                 path_matches = path_pattern == concrete_path
 
