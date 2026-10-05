@@ -8,6 +8,7 @@ from tesseract_core.runtime.tree_transforms import (
     filter_func,
     flatten_with_paths,
     get_at_path,
+    is_arraylike,
     path_to_index_op,
     set_at_path,
     split_path,
@@ -776,3 +777,37 @@ class TestSplitPath:
         """The case this was for: a state-dict key reaches its value."""
         tree = {"params": {"layer.0.weight": 7}}
         assert get_at_path(tree, "params.{layer.0.weight}") == 7
+
+
+class TestIsArraylike:
+    """Tests for is_arraylike."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [np.zeros((2, 3)), np.float64(1.0), np.array(1.0)],
+    )
+    def test_arrays(self, value):
+        assert is_arraylike(value)
+
+    @pytest.mark.parametrize("value", [1, 1.0, "abc", b"abc", None, [1, 2], {"a": 1}])
+    def test_non_arrays(self, value):
+        assert not is_arraylike(value)
+
+    def test_converts_to_array(self):
+        """A lazy array-like, as a binref or a device buffer appears to a leaf."""
+
+        class Lazy:
+            shape = (2,)
+
+            def __array__(self, dtype=None, copy=None):
+                return np.zeros(2)
+
+        assert is_arraylike(Lazy())
+
+    def test_shape_alone_is_not_enough(self):
+        """A model carrying a shape field is not an array."""
+
+        class Params(BaseModel):
+            shape: tuple[int, int]
+
+        assert not is_arraylike(Params(shape=(2, 3)))

@@ -22,6 +22,7 @@ from pydantic import (
 from ..config import get_config
 from ..core import get_input_schema, get_output_schema
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
+from ..tree_transforms import is_arraylike
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
 
@@ -212,7 +213,7 @@ def _coerce_arraylike(value: Any) -> Any:
     """
     if isinstance(value, np.ndarray):
         return value
-    if hasattr(value, "__array__") and hasattr(value, "shape"):
+    if is_arraylike(value):
         return np.asarray(value)
     return value
 
