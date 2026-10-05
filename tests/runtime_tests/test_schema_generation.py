@@ -158,6 +158,29 @@ def test_create_abstract_eval_schema():
     AbstractOutputSchema.model_validate(testinput_abstract)
 
 
+def test_abstract_eval_schema_array_defaults():
+    class Sub(BaseModel):
+        s: Differentiable[Float32] = 1.0
+
+    class Model(BaseModel):
+        x: Differentiable[Array[(None,), Float32]]
+        y: Array[(2,), Float64] = [1, 2]
+        z: Array[(2,), Float64] = None
+        sub: Sub
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate(
+        {"inputs": {"x": {"shape": [3], "dtype": "float32"}, "sub": {}}}
+    ).inputs
+
+    assert inputs.model_dump() == {
+        "x": {"shape": (3,), "dtype": "float32"},
+        "y": {"shape": (2,), "dtype": "float64"},
+        "z": None,
+        "sub": {"s": {"shape": (), "dtype": "float32"}},
+    }
+
+
 def test_create_jacobian_schema():
     arr = testinput["testdiffarr"]
     testoutput = {
@@ -550,6 +573,44 @@ def test_vjp_cotangent_vector_dtype_casting():
     # The cotangent vector should now have float dtype
     cotangent = result.cotangent_vector["testdiffarr"]
     assert np.issubdtype(cotangent.dtype, np.floating)
+
+
+def test_gradient_paths_match_whole_field_name():
+    """A field whose name starts with a sibling's must get its own annotation.
+
+    Path patterns for fields inside a list or dict are regexes, and an
+    unanchored match let the pattern for `a` claim `layers.[0].alpha`. The
+    first declared field won, so `alpha` was validated against `a`'s shape and
+    dtype: a correct cotangent was rejected, or silently downcast.
+    """
+
+    class Layer(BaseModel):
+        a: Differentiable[Array[(3,), Float32]]
+        alpha: Differentiable[Array[(4,), Float64]]
+
+    class Layers(BaseModel):
+        layers: list[Layer]
+
+    InputSchema, _ = create_gradient_schema(Layers, Layers, "vjp")
+    inputs = {
+        "layers": [
+            {"a": make_array((3,), "float32"), "alpha": make_array((4,), "float64")}
+        ]
+    }
+    cotangent = np.array([1.0, 1 / 3, np.pi, 2 / 3], dtype="float64")
+
+    validated = InputSchema.model_validate(
+        {
+            "inputs": inputs,
+            "vjp_inputs": ["layers.[0].alpha"],
+            "vjp_outputs": ["layers.[0].alpha"],
+            "cotangent_vector": {"layers.[0].alpha": cotangent},
+        }
+    )
+
+    got = validated.cotangent_vector["layers.[0].alpha"]
+    assert got.dtype == np.dtype("float64")
+    np.testing.assert_array_equal(got, cotangent)
 
 
 def test_untyped_container_schema_generation():

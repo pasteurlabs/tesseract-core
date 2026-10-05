@@ -8,7 +8,6 @@ from typing import (
     Annotated,
     Any,
     TypeAlias,
-    get_args,
 )
 
 from pydantic import (
@@ -23,6 +22,7 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import PydanticCustomError, ValidationError, core_schema
 
 from tesseract_core.runtime.array_encoding import (
+    ALLOWED_DTYPE_NAMES,
     AllowedDtypes,
     decode_array,
     encode_array,
@@ -345,12 +345,10 @@ def _ensure_valid_shapedtype(expected_shape: Any, expected_dtype: Any) -> tuple:
     if safe_issubclass(expected_dtype, PydanticArrayAnnotation):
         expected_dtype = expected_dtype.expected_dtype
 
-    allowed_dtypes = get_args(AllowedDtypes)
-
-    if expected_dtype not in allowed_dtypes and expected_dtype is not None:
+    if expected_dtype not in ALLOWED_DTYPE_NAMES and expected_dtype is not None:
         raise ValueError(
             f"Invalid dtype in Array[<shape>, <dtype>]: {expected_dtype} "
-            f"(must be one of {allowed_dtypes} or a scalar Array type like, Array[(), Int32])"
+            f"(must be one of {ALLOWED_DTYPE_NAMES} or a scalar Array type like, Array[(), Int32])"
         )
     return expected_shape, expected_dtype
 
