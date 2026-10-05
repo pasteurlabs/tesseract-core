@@ -4,23 +4,32 @@
 """Tests for tesseract_core.runtime.jax_recipes."""
 
 from collections.abc import Hashable
+from typing import Any
 
+import equinox as eqx
+import jax
+import jax.numpy as jnp
 import numpy as np
+from pydantic import BaseModel, Field
 
-from tesseract_core.runtime.jax_recipes import _cache_key
+from tesseract_core.runtime import Array, Differentiable, Float32, jax_recipes
+from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+from tesseract_core.runtime.jax_recipes import (
+    _cache_key,
+    as_jax_arrays,
+    jax_apply,
+    jax_jacobian,
+    jax_jvp,
+    jax_vjp,
+)
 
 
 def test_as_jax_arrays_preserves_structure_and_static_leaves():
-    import jax
-    import jax.numpy as jnp
-
-    from tesseract_core.runtime import jax_recipes
-
     host = np.array([1.0, 2.0], dtype=np.float32)
     host.setflags(write=False)
     existing = jnp.asarray([3.0])
     tree = {"arrays": [host, np.float32(4), existing], "static": ("tag", None, 2)}
-    result = jax_recipes.as_jax_arrays(tree)
+    result = as_jax_arrays(tree)
     assert all(isinstance(x, jax.Array) for x in result["arrays"])
     np.testing.assert_array_equal(result["arrays"][0], host)
     assert result["arrays"][1].item() == 4
@@ -30,12 +39,6 @@ def test_as_jax_arrays_preserves_structure_and_static_leaves():
 
 
 def test_jax_apply_converts_readonly_host_inputs():
-    import jax
-    from pydantic import BaseModel
-
-    from tesseract_core.runtime import Array, Float32
-    from tesseract_core.runtime.jax_recipes import jax_apply
-
     class Inputs(BaseModel):
         x: Array[(2,), Float32]
 
@@ -50,13 +53,6 @@ def test_jax_apply_converts_readonly_host_inputs():
 
 
 def test_jax_endpoints_convert_device_inputs(monkeypatch):
-    from typing import Any
-
-    import jax.numpy as jnp
-    from pydantic import BaseModel
-
-    from tesseract_core.runtime import jax_recipes as recipes
-
     class DeviceInput:
         # Only the metadata/dispatch boundary is simulated; the differentiation
         # below runs through real JAX arrays on CPU.
@@ -76,23 +72,23 @@ def test_jax_endpoints_convert_device_inputs(monkeypatch):
     inputs = Inputs(x=DeviceInput([2, 3]))
     vector = DeviceInput([1, 1])
     apply = lambda x: {"y": x["x"] ** 2}
-    recipes._set_jax_vjp_cache_size(0)
-    np.testing.assert_array_equal(recipes.jax_apply(apply, inputs)["y"], [4, 9])
+    set_jax_vjp_cache_size(0)
+    np.testing.assert_array_equal(jax_apply(apply, inputs)["y"], [4, 9])
     np.testing.assert_array_equal(
-        recipes.jax_jvp(apply, inputs, {"x"}, {"y"}, {"x": vector})["y"], [4, 6]
+        jax_jvp(apply, inputs, {"x"}, {"y"}, {"x": vector})["y"], [4, 6]
     )
     np.testing.assert_array_equal(
-        recipes.jax_jacobian(apply, inputs, {"x"}, {"y"})["y"]["x"], [[4, 0], [0, 6]]
+        jax_jacobian(apply, inputs, {"x"}, {"y"})["y"]["x"], [[4, 0], [0, 6]]
     )
     for cache_size in (0, 1):
-        recipes._set_jax_vjp_cache_size(cache_size)
+        set_jax_vjp_cache_size(cache_size)
         try:
-            recipes.jax_apply(apply, inputs)
+            jax_apply(apply, inputs)
             np.testing.assert_array_equal(
-                recipes.jax_vjp(apply, inputs, {"x"}, {"y"}, {"y": vector})["x"], [4, 6]
+                jax_vjp(apply, inputs, {"x"}, {"y"}, {"y": vector})["x"], [4, 6]
             )
         finally:
-            recipes._set_jax_vjp_cache_size(0)
+            set_jax_vjp_cache_size(0)
 
 
 class TestCacheKey:
@@ -189,12 +185,6 @@ class TestCacheKey:
 # Minimal pydantic schema + apply_jit, kept inline so the test doesn't
 # depend on the vectoradd_jax example wiring.
 def _build_api():
-    import equinox as eqx
-    import jax.numpy as jnp
-    from pydantic import BaseModel, Field
-
-    from tesseract_core.runtime import Array, Differentiable, Float32
-
     class Vec(BaseModel):
         v: Differentiable[Array[(None,), Float32]] = Field(description="vec")
         s: Differentiable[Float32] = Field(default=1.0, description="scale")
@@ -242,9 +232,6 @@ class TestCacheCorrectness:
         call hits the cache (same input as the apply that filled it), the
         third misses (different input) and falls through to vjp_jit.
         """
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
-
         set_jax_vjp_cache_size(cache_size)
         InputSchema, apply_jit = _build_api()
         inp_a = _make_inputs(InputSchema, offset=0.0)
@@ -289,13 +276,8 @@ class TestCacheCorrectness:
     def test_cache_hit_actually_engages(self):
         # Sanity check that the cache fills and is read back, not silently
         # bypassed.
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
-
         set_jax_vjp_cache_size(1)
         try:
-            from tesseract_core.runtime import jax_recipes
-
             assert jax_recipes._jax_vjp_cache is not None
             assert jax_recipes._jax_vjp_cache.size == 0
 
@@ -329,9 +311,6 @@ class TestCacheWithNonArrayInputs:
     @staticmethod
     def _vjp(cache_size, norm_ord, prime_with=None):
         """Optionally prime the cache at ``prime_with``, then vjp at ``norm_ord``."""
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
-
         InputSchema, apply_jit = _build_api()
         set_jax_vjp_cache_size(cache_size)
         try:
@@ -356,9 +335,6 @@ class TestCacheWithNonArrayInputs:
     def test_non_jax_input_does_not_break_apply(self):
         # jax.vjp traces every leaf it is handed, so the str leaf aborted the
         # call outright and merely enabling the cache broke the Tesseract.
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply
-
         InputSchema, apply_jit = _build_api()
         set_jax_vjp_cache_size(4)
         try:
