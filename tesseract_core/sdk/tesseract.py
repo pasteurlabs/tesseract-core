@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import os
 import shutil
 import sys
 import tempfile
@@ -1002,32 +1003,6 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
-# DLPack DLDeviceType for CUDA global memory (stable part of the DLPack spec).
-_DLDEVICE_CUDA = 2
-
-
-def _is_gpu_array(arr: Any) -> bool:
-    """Whether ``arr`` holds data in CUDA device memory (host-side, no runtime import).
-
-    Mirrors :func:`tesseract_core.runtime.cuda.ipc.is_gpu_array` but stays purely
-    on host protocols so a base SDK install (no runtime extra) can still route a
-    mixed payload: an object either exposes ``__cuda_array_interface__`` (CuPy,
-    PyTorch, Numba) or is a DLPack producer whose buffer lives on a CUDA device
-    (JAX, which does not implement CAI). The DLPack check only runs the cheap
-    ``__dlpack_device__`` handshake -- no capsule is exported here.
-    """
-    if hasattr(arr, "__cuda_array_interface__"):
-        return True
-    dlpack_device = getattr(arr, "__dlpack_device__", None)
-    if not callable(dlpack_device) or not callable(getattr(arr, "__dlpack__", None)):
-        return False
-    try:
-        device_type, _device_id = dlpack_device()
-    except Exception:  # noqa: BLE001 - third-party producer; any failure means "not CUDA"
-        return False
-    return device_type == _DLDEVICE_CUDA
-
-
 @dataclass
 class EncodingContext:
     """Request-scoped context tracking state and resources during input array encoding."""
@@ -1103,15 +1078,30 @@ def _encode_array(
     When ``encoding='cuda_ipc'``, GPU arrays are exported by handle via CUDA IPC,
     keeping the data on-device. An :class:`EncodingContext` is required to track
     the exported allocation so its pinned memory is released on context exit.
+    Any other encoding of a GPU array is a host copy, subject to the runtime's
+    ``check_device_host_copy`` guard.
 
     When ``encoding='binref'``, an :class:`EncodingContext` is required to write
     the buffer to the input directory or write pool and track the file/slot lifetime.
     """
-    if encoding == "cuda_ipc" and _is_gpu_array(arr):
-        if ctx is None:
-            raise ValueError("EncodingContext is required when encoding is 'cuda_ipc'")
-        ctx.exported_cuda_ipc = True
-        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+    if hasattr(arr, "__cuda_array_interface__"):
+        if encoding == "cuda_ipc":
+            if ctx is None:
+                raise ValueError(
+                    "EncodingContext is required when encoding is 'cuda_ipc'"
+                )
+            ctx.exported_cuda_ipc = True
+            return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+        # Import the runtime only when the flag is set, so a base SDK install
+        # without it can still host-copy GPU arrays.
+        # Keep the truthy values in sync with check_device_host_copy.
+        if os.environ.get("TESSERACT_FORBID_DEVICE_HOST_COPY", "").lower() in {
+            "1",
+            "true",
+        }:
+            _import_cuda_ipc().check_device_host_copy(
+                f"a {type(arr).__name__} GPU array"
+            )
 
     if encoding == "binref":
         if ctx is None:
@@ -1174,7 +1164,7 @@ def _encode_payload(
     )
 
     def _encode_leaf(x: Any) -> dict:
-        if _is_gpu_array(x) and gpu_transport != "none":
+        if hasattr(x, "__cuda_array_interface__") and gpu_transport != "none":
             return _encode_array(x, encoding=gpu_transport, ctx=ctx)
 
         # Host array (or GPU array when gpu_transport is "none")
@@ -1184,7 +1174,7 @@ def _encode_payload(
         return _encode_array(x, encoding="base64", ctx=ctx)
 
     def _is_leaf(x: Any) -> bool:
-        return hasattr(x, "__array__") or _is_gpu_array(x)
+        return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
 
     try:
         encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)

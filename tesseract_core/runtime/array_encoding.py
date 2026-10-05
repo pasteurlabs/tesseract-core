@@ -721,10 +721,10 @@ def validate_python_or_gpu_array(
     """Validate a Python array-like input, keeping GPU arrays on-device.
 
     Used as the "load from a Python object" validator. Objects that live in GPU
-    memory (exposing ``__cuda_array_interface__`` or DLPack on a CUDA device) are
-    validated but returned unchanged, so they can later be encoded via CUDA IPC
-    without a host copy; coercing them to NumPy here would force a device-to-host
-    transfer (or fail, since CuPy refuses implicit conversion). A
+    memory (exposing ``__cuda_array_interface__``) are validated but returned
+    unchanged, so they can later be encoded via CUDA IPC without a host copy;
+    coercing them to NumPy here would force a device-to-host transfer (or fail,
+    since CuPy refuses implicit conversion). A
     :class:`~tesseract_core.runtime.experimental.BinrefArray` is likewise
     validated from its metadata and returned unchanged. Everything else is
     coerced to a NumPy array via :func:`python_to_array`.
@@ -738,7 +738,7 @@ def validate_python_or_gpu_array(
     if isinstance(val, BinrefArray):
         return validate_binref_array(val, expected_shape, expected_dtype)
 
-    if cuda_ipc.is_gpu_array(val):
+    if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
@@ -842,7 +842,7 @@ def encode_array(
             return arr.to_arraydict()
         arr = load_for_inline_encoding(arr, array_encoding, context)
 
-    is_gpu_array = cuda_ipc.is_gpu_array(arr)
+    is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate
