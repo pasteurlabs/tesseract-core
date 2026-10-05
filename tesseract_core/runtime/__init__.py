@@ -18,7 +18,7 @@ try:
             # Importing this as a side effect of importing the package makes
             # `python -m tesseract_core.runtime` warn about a double import.
             continue
-        if path.stem in ("jax_recipes",):
+        if path.stem in ("jax_recipes", "julia_recipes"):
             # Recipes typically have optional dependencies that we don't want to require
             # for the core runtime.
             continue

@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import yaml
-from jinja2 import Environment, PackageLoader, StrictUndefined
+from jinja2 import Environment, PackageLoader, StrictUndefined, TemplateNotFound
 from packaging.requirements import Requirement
 from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
@@ -614,15 +614,17 @@ def init_api(
     # If target dir does not exist, create it
     Path(target_dir).mkdir(parents=True, exist_ok=True)
 
-    _write_template_file(
-        "tesseract_api.py", target_dir, template_vars, recipe=Path(recipe)
+    recipe_templates = ENV.list_templates(
+        filter_func=lambda name: name.startswith(f"{recipe}/")
     )
-    _write_template_file(
-        "tesseract_config.yaml", target_dir, template_vars, recipe=Path(recipe)
-    )
-    _write_template_file(
-        "tesseract_requirements.txt", target_dir, template_vars, recipe=Path(recipe)
-    )
+    if not recipe_templates:
+        raise TemplateNotFound(recipe)
+    for template_name in recipe_templates:
+        relpath = Path(template_name).relative_to(recipe)
+        (target_dir / relpath).parent.mkdir(parents=True, exist_ok=True)
+        _write_template_file(
+            relpath.as_posix(), target_dir, template_vars, recipe=Path(recipe)
+        )
 
     return target_dir / "tesseract_api.py"
 
