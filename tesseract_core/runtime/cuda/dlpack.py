@@ -209,7 +209,7 @@ def is_dlpack_cuda(obj: Any) -> bool:
         return False
     try:
         device_type, _device_id = dlpack_device()
-    except Exception:
+    except Exception:  # noqa: BLE001 - third-party producer; any failure means "not CUDA"
         return False
     return device_type == _kDLCUDA
 

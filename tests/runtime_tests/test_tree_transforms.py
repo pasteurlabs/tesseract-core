@@ -202,9 +202,17 @@ class TestGetAtPath:
         with pytest.raises(expected_error):
             get_at_path(sample_tree, invalid_path)
 
+    @pytest.mark.parametrize("key", ["values", "items", "keys", "get", "copy"])
+    def test_dict_method_names_are_keys(self, key):
+        assert get_at_path({key: {"a": 1}}, f"{key}.a") == 1
+
 
 class TestSetAtPath:
     """Test cases for set_at_path function."""
+
+    @pytest.mark.parametrize("key", ["values", "items", "keys", "get", "copy"])
+    def test_dict_method_names_are_keys(self, key):
+        assert set_at_path({key: 1}, {key: 2}) == {key: 2}
 
     def test_set_at_path_creates_deep_copy(self, sample_tree):
         """Test that set_at_path creates a deep copy and doesn't modify original."""

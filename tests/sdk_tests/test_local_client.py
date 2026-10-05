@@ -748,6 +748,7 @@ def test_removing_a_tesseract_does_not_kill_the_caller(dummy_api_path, tmp_path)
             text=True,
             start_new_session=True,
             timeout=120,
+            check=False,
         )
 
     as_shipped = run()
@@ -1112,11 +1113,10 @@ def test_host_credentials_are_reported_as_ignored(
         raise Built
 
     monkeypatch.setattr(venv_provision, "_build_pip_venv", build)
-    with caplog.at_level(logging.WARNING, logger="tesseract"):
-        with pytest.raises(Built):
-            venv_provision.resolve_python_executable(
-                dummy_tesseract_package / "tesseract_api.py"
-            )
+    with caplog.at_level(logging.WARNING, logger="tesseract"), pytest.raises(Built):
+        venv_provision.resolve_python_executable(
+            dummy_tesseract_package / "tesseract_api.py"
+        )
 
     assert "host_credentials" in caplog.text
 
@@ -1154,6 +1154,7 @@ def test_edits_to_a_local_package_need_no_rebuild(example_copy):
             for k, v in os.environ.items()
             if k not in venv_provision.SCRUBBED_IMPORT_VARS
         },
+        check=False,
     )
     assert result.stdout.strip() == "True", result.stderr
 
@@ -1266,7 +1267,12 @@ def test_a_rebuild_drops_packages_no_longer_declared(dummy_tesseract_package):
             for k, v in os.environ.items()
             if k not in venv_provision.SCRUBBED_IMPORT_VARS
         }
-        return subprocess.run([python, "-c", "import cowsay"], env=env).returncode == 0
+        return (
+            subprocess.run(
+                [python, "-c", "import cowsay"], env=env, check=False
+            ).returncode
+            == 0
+        )
 
     requirements.write_text("cowsay\n")
     assert has_cowsay(venv_provision.resolve_python_executable(api_path))

@@ -5,10 +5,6 @@
 class UserError(Exception):
     """Exception raised for anything that is the user's fault."""
 
-    pass
-
 
 class ValidationError(UserError):
     """Exception raised for input validation errors."""
-
-    pass

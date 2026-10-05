@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tesseract_core.sdk.docker_client import CLIDockerClient
+from tesseract_core.sdk.docker_client import APIError, CLIDockerClient
 
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
@@ -49,7 +49,7 @@ def _check_docker() -> bool:
     try:
         CLIDockerClient().info()
         return True
-    except Exception:
+    except (APIError, OSError):
         return False
 
 
@@ -83,6 +83,7 @@ def noop_tesseract_image() -> str | None:
         capture_output=True,
         text=True,
         timeout=300,
+        check=False,
     )
     if result.returncode != 0:
         pytest.fail(f"Failed to build noop tesseract: {result.stderr}")
