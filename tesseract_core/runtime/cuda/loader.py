@@ -230,6 +230,8 @@ def load_cudart() -> Any:
 
     cudart.cudaSetDevice.argtypes = [ctypes.c_int]
     cudart.cudaSetDevice.restype = ctypes.c_int
+    cudart.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    cudart.cudaGetDevice.restype = ctypes.c_int
     cudart.cudaIpcGetMemHandle.argtypes = [
         ctypes.POINTER(CudaIpcMemHandle),
         ctypes.c_void_p,

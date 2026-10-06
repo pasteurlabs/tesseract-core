@@ -15,6 +15,7 @@ this without a real GPU, replace the functions in this module wholesale (see the
 """
 
 import ctypes
+import functools
 from typing import Any
 
 from tesseract_core.runtime.cuda import loader
@@ -84,6 +85,13 @@ def _check(code: int, what: str) -> None:
 def set_device(device: int) -> None:
     """Select the active CUDA device."""
     _check(_get_cudart().cudaSetDevice(device), f"cudaSetDevice({device})")
+
+
+def get_device() -> int:
+    """Return the active CUDA device."""
+    device = ctypes.c_int()
+    _check(_get_cudart().cudaGetDevice(ctypes.byref(device)), "cudaGetDevice")
+    return device.value
 
 
 def malloc(nbytes: int) -> int:
@@ -218,6 +226,7 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     return base.value, size.value
 
 
+@functools.cache
 def device_total_memory(device: int) -> int:
     """Return the total memory of CUDA device ``device`` in bytes."""
     driver = _get_driver()

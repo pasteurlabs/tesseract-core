@@ -121,6 +121,22 @@ def tesseract_output_dir(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def forbid_device_host_copy(monkeypatch):
+    """Make implicit device-to-host copies raise in every test.
+
+    Containers don't inherit the variable and need it passed explicitly. Tests
+    that exercise a host copy on purpose opt out via ``allow_device_host_copy``.
+    """
+    monkeypatch.setenv("TESSERACT_FORBID_DEVICE_HOST_COPY", "1")
+
+
+@pytest.fixture
+def allow_device_host_copy(monkeypatch):
+    """Opt a test out of ``forbid_device_host_copy``."""
+    monkeypatch.delenv("TESSERACT_FORBID_DEVICE_HOST_COPY")
+
+
+@pytest.fixture(autouse=True)
 def reset_config():
     """Reset the runtime configuration before each test."""
     import tesseract_core.runtime.config
@@ -672,11 +688,17 @@ def mocked_cuda(monkeypatch):
             # simulating VMM-backed memory. Its own cudaMalloc buffers, such as
             # staging buffers, stay exportable.
             self.reject_foreign_ipc = False
+            # Active device, as cudaSetDevice / cudaGetDevice see it.
+            self.current_device = 0
 
         # -- device / memory management ---------------------------------
 
         def set_device(self, device: int) -> None:
             self.calls["set_device"].append(device)
+            self.current_device = device
+
+        def get_device(self) -> int:
+            return self.current_device
 
         def malloc(self, nbytes: int) -> int:
             ptr = self._next_ptr
@@ -730,6 +752,7 @@ def mocked_cuda(monkeypatch):
 
     for name in (
         "set_device",
+        "get_device",
         "malloc",
         "free",
         "memcpy_device_to_device",

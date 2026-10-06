@@ -48,6 +48,7 @@ AllowedDtypes = Literal[
     "complex64",
     "complex128",
 ]
+ALLOWED_DTYPE_NAMES: tuple[str, ...] = get_args(AllowedDtypes)
 
 GPUArray: TypeAlias = Any  # Placeholder for GPU array types (e.g., CuPy, PyTorch, etc.)
 EllipsisType: TypeAlias = type(Ellipsis)
@@ -190,9 +191,7 @@ def get_array_model(
     else:
         # Only allow dtypes that can be cast to the expected dtype
         subdtypes = [
-            dtype
-            for dtype in get_args(AllowedDtypes)
-            if _castable(dtype, expected_dtype)
+            dtype for dtype in ALLOWED_DTYPE_NAMES if _castable(dtype, expected_dtype)
         ]
         dtype_type = Literal[tuple(subdtypes)]
 
@@ -285,10 +284,10 @@ def get_array_model(
 
 def _fast_tobytes(arr: ArrayLike) -> bytes:
     """Convert a NumPy array to bytes without copying if possible."""
-    return np.ascontiguousarray(arr).data
+    return np.ascontiguousarray(arr, dtype=arr.dtype.newbyteorder("=")).data
 
 
-def _dump_binref_arraydict(
+def dump_binref_arraydict(
     arr: ArrayLike,
     base_dir: Path | str,
     subdir: Path | str | None,
@@ -386,11 +385,16 @@ def _read_binref_array(
     with open(full_path, "rb") as f:
         if offset:
             f.seek(offset)
-        f.readinto(memoryview(out).cast("B"))
+        num_read = f.readinto(memoryview(out).cast("B"))
+    if num_read < num_bytes:
+        raise ValueError(
+            f"Binref buffer {full_path} is too small: expected {num_bytes} bytes "
+            f"at offset {offset}, but only {num_read} could be read."
+        )
     return out
 
 
-def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
+def load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(
         r"^(?P<path>.+?)(\:(?P<offset>\d+)(\:(?P<compressed_size>\d+))?)?$",
@@ -614,22 +618,71 @@ def _coerce_shape_dtype(
             arr, resolve_dtype(str(arr.dtype), expected_dtype, context)
         )
 
-    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
-    if arr.dtype.name not in allowed_dtypes:
-        raise PydanticCustomError(
-            "array_invalid_dtype",
-            "Array has unsupported dtype '{actual_dtype}'; must be one of: {allowed_dtypes}",
-            {
-                "actual_dtype": arr.dtype.name,
-                "allowed_dtypes": ", ".join(allowed_dtypes),
-            },
-        )
+    check_allowed_dtype(arr.dtype.name)
 
     if not out_shape:
         # Cast to a scalar type
         return arr.dtype.type(arr)
 
     return arr
+
+
+def check_allowed_dtype(dtype_name: str) -> None:
+    """Raise a validation error if ``dtype_name`` is not a supported array dtype."""
+    if dtype_name not in ALLOWED_DTYPE_NAMES:
+        raise PydanticCustomError(
+            "array_invalid_dtype",
+            "Array has unsupported dtype '{actual_dtype}'; must be one of: "
+            "{allowed_dtypes}",
+            {
+                "actual_dtype": dtype_name,
+                "allowed_dtypes": ", ".join(ALLOWED_DTYPE_NAMES),
+            },
+        )
+
+
+def check_shape_dtype_no_cast(
+    shape: tuple[int, ...],
+    dtype_name: str,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+    no_cast_reason: str,
+) -> None:
+    """Check array metadata against the expected shape and dtype, without casting.
+
+    Used for arrays that are passed through unchanged (GPU arrays, on-disk binref
+    references). Mirrors :func:`_coerce_shape_dtype` but never broadcasts or
+    casts. ``no_cast_reason`` is included in the dtype-mismatch error.
+    """
+    # Shape: Ellipsis means "no check"; otherwise each dim must match unless the
+    # expected dim is None (a polymorphic wildcard).
+    if expected_shape is not Ellipsis and (
+        len(shape) != len(expected_shape)
+        or any(
+            exp is not None and got != exp
+            for got, exp in zip(shape, expected_shape, strict=False)
+        )
+    ):
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} is incompatible with expected "
+            "shape {expected_shape}",
+            {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
+        )
+
+    check_allowed_dtype(dtype_name)
+
+    if expected_dtype is not None and dtype_name != expected_dtype:
+        raise PydanticCustomError(
+            "array_dtype_mismatch",
+            "Array dtype '{actual_dtype}' does not match expected dtype "
+            "'{expected_dtype}' ({no_cast_reason})",
+            {
+                "actual_dtype": dtype_name,
+                "expected_dtype": expected_dtype,
+                "no_cast_reason": no_cast_reason,
+            },
+        )
 
 
 def python_to_array(
@@ -668,15 +721,24 @@ def validate_python_or_gpu_array(
     """Validate a Python array-like input, keeping GPU arrays on-device.
 
     Used as the "load from a Python object" validator. Objects that live in GPU
-    memory (exposing ``__cuda_array_interface__`` or DLPack on a CUDA device) are
-    validated but returned unchanged, so they can later be encoded via CUDA IPC
-    without a host copy; coercing them to NumPy here would force a device-to-host
-    transfer (or fail, since CuPy refuses implicit conversion). Everything else
-    is coerced to a NumPy array via :func:`python_to_array`.
+    memory (exposing ``__cuda_array_interface__``) are validated but returned
+    unchanged, so they can later be encoded via CUDA IPC without a host copy;
+    coercing them to NumPy here would force a device-to-host transfer (or fail,
+    since CuPy refuses implicit conversion). A
+    :class:`~tesseract_core.runtime.experimental.BinrefArray` is likewise
+    validated from its metadata and returned unchanged. Everything else is
+    coerced to a NumPy array via :func:`python_to_array`.
     """
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
+    from tesseract_core.runtime.experimental.binref_passthrough import (
+        BinrefArray,
+        validate_binref_array,
+    )
 
-    if cuda_ipc.is_gpu_array(val):
+    if isinstance(val, BinrefArray):
+        return validate_binref_array(val, expected_shape, expected_dtype)
+
+    if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
@@ -703,7 +765,7 @@ def decode_array(
             subdir = context.get("binref_dir", None)
             if subdir is not None:
                 base_dir = join_paths(base_dir, subdir)
-            data = _load_binref_arraydict(val.model_dump(), base_dir)
+            data = load_binref_arraydict(val.model_dump(), base_dir)
 
         elif val.data.encoding == "cuda_ipc":
             from tesseract_core.runtime.device_transport import get_transport
@@ -757,15 +819,30 @@ def encode_array(
     set) is serialized via the host encoding. This is what lets one response mix
     on-device and on-host arrays. In Python mode there is nothing to serialize,
     so arrays pass through as-is.
+
+    A :class:`~tesseract_core.runtime.experimental.BinrefArray` passes through
+    Python mode as-is, is forwarded verbatim for binref output, and is loaded and
+    re-encoded for any other host encoding.
     """
     from tesseract_core.runtime.config import get_config
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
+    from tesseract_core.runtime.experimental.binref_passthrough import (
+        BinrefArray,
+        load_for_inline_encoding,
+    )
 
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
     device_transport = context.get("device_transport")
 
-    is_gpu_array = cuda_ipc.is_gpu_array(arr)
+    if isinstance(arr, BinrefArray):
+        if not info.mode_is_json():
+            return arr
+        if array_encoding == "binref":
+            return arr.to_arraydict()
+        arr = load_for_inline_encoding(arr, array_encoding, context)
+
+    is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate
@@ -798,7 +875,7 @@ def encode_array(
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)
-        data, new_binref_uuid = _dump_binref_arraydict(
+        data, new_binref_uuid = dump_binref_arraydict(
             arr,
             base_dir=base_dir,
             subdir=subdir,

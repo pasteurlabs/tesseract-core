@@ -63,6 +63,11 @@ class RuntimeConfig(BaseModel):
     # by-reference handles unless explicitly opted in. Independent of
     # ``output_format``, which only governs CPU arrays.
     gpu_transport: gpu_transport_type = "none"
+    # Fraction of each GPU's memory that ``cuda_ipc`` may keep in idle device
+    # buffers for reuse across requests, split evenly between buffers for
+    # exported and for received arrays. Applies per process, so a client and a
+    # server on the same GPU can each keep this much. ``0`` disables reuse.
+    cuda_ipc_pool_fraction: float = Field(default=0.25, ge=0, le=1)
 
     @field_validator("input_path", "output_path")
     @classmethod

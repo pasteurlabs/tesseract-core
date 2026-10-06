@@ -110,12 +110,11 @@ def get_at_path(tree: Any, path: str) -> Any:
         if method in ("seq", "dict"):
             return _get_recursive(tree[idx], path)
         elif method == "getattr":
-            if hasattr(tree, key):
-                return _get_recursive(getattr(tree, key), path)
-            elif isinstance(tree, Mapping):
-                # If the key is not an attribute, try to access it as a key in a dictionary
-                # This is useful for accessing keys of models that have been dumped to dictionaries
+            if isinstance(tree, Mapping):
+                # Dumped models are dicts, so look up keys before attributes like dict.values
                 return _get_recursive(tree[key], path)
+            elif hasattr(tree, key):
+                return _get_recursive(getattr(tree, key), path)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -145,18 +144,17 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 return
             return _set_recursive(tree[idx], path, value)
         elif method == "getattr":
-            if hasattr(tree, key):
-                if not path:
-                    setattr(tree, key, value)
-                    return
-                return _set_recursive(getattr(tree, key), path, value)
-            elif isinstance(tree, dict):
-                # If the key is not an attribute, try to access it as a key in a dictionary
-                # This is useful for accessing keys of models that have been dumped to dictionaries
+            if isinstance(tree, dict):
+                # Dumped models are dicts, so look up keys before attributes like dict.values
                 if not path:
                     tree[key] = value
                     return
                 return _set_recursive(tree[key], path, value)
+            elif hasattr(tree, key):
+                if not path:
+                    setattr(tree, key, value)
+                    return
+                return _set_recursive(getattr(tree, key), path, value)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -229,6 +227,16 @@ def filter_func(
     return filtered_func
 
 
+def is_arraylike(value: Any) -> bool:
+    """Whether ``value`` is an array or converts to one.
+
+    Duck-typed on ``__array__`` and ``shape``, so NumPy arrays and scalars,
+    on-disk binrefs and device arrays all qualify, while a model that happens
+    to carry a ``shape`` field does not.
+    """
+    return hasattr(value, "__array__") and hasattr(value, "shape")
+
+
 class LRUCache:
     """Thread-safe LRU cache with a configurable maximum size.
 
@@ -236,36 +244,70 @@ class LRUCache:
     full, the least-recently-used entry is evicted. Set ``maxsize=0`` to
     disable caching entirely (``put`` becomes a no-op).
 
+    Several entries can share a key if ``get`` and ``put`` are given a
+    ``match`` predicate, which tells them apart by their stored values. Like a
+    hash map resolving collisions, a lookup walks the entries under the key and
+    returns the first whose value satisfies ``match``. This lets the key hold
+    only what is cheap to hash, with ``match`` comparing the rest.
+
     All public methods are protected by a lock, so the cache is safe to use
-    from multiple threads.
+    from multiple threads. ``match`` runs while the lock is held.
     """
 
     def __init__(self, maxsize: int = 1) -> None:
         self._maxsize = maxsize
         self._lock = threading.Lock()
-        self._cache: collections.OrderedDict[Hashable, Any] = collections.OrderedDict()
+        # Entry id -> (key, value), least recently used first.
+        self._entries: collections.OrderedDict[int, tuple[Hashable, Any]] = (
+            collections.OrderedDict()
+        )
+        # Key -> ids of the entries stored under it.
+        self._ids_by_key: dict[Hashable, list[int]] = {}
+        self._next_id = 0
 
-    def put(self, key: Hashable, value: Any) -> None:
-        """Insert or update *value* under *key*, evicting LRU entries if needed."""
+    def _find(self, key: Hashable, match: Callable[[Any], bool] | None) -> int | None:
+        """Return the id of the entry under *key* that satisfies *match*, if any."""
+        for entry_id in self._ids_by_key.get(key, ()):
+            if match is None or match(self._entries[entry_id][1]):
+                return entry_id
+        return None
+
+    def put(
+        self, key: Hashable, value: Any, match: Callable[[Any], bool] | None = None
+    ) -> None:
+        """Insert *value* under *key*, evicting LRU entries if needed.
+
+        Replaces the entry that ``get(key, match)`` would return, if any.
+        """
         if self._maxsize <= 0:
             return
         with self._lock:
-            if key in self._cache:
-                self._cache.move_to_end(key)
-            self._cache[key] = value
-            while len(self._cache) > self._maxsize:
-                self._cache.popitem(last=False)
+            entry_id = self._find(key, match)
+            if entry_id is None:
+                entry_id = self._next_id
+                self._next_id += 1
+                self._ids_by_key.setdefault(key, []).append(entry_id)
+            self._entries[entry_id] = (key, value)
+            self._entries.move_to_end(entry_id)
+            while len(self._entries) > self._maxsize:
+                old_id, (old_key, _) = self._entries.popitem(last=False)
+                self._ids_by_key[old_key].remove(old_id)
+                if not self._ids_by_key[old_key]:
+                    del self._ids_by_key[old_key]
 
-    def get(self, key: Hashable) -> Any | None:
-        """Return the value for *key* (marking it MRU), or ``None`` on a miss."""
+    def get(
+        self, key: Hashable, match: Callable[[Any], bool] | None = None
+    ) -> Any | None:
+        """Return the value under *key* that satisfies *match* (marking it MRU), or ``None``."""
         with self._lock:
-            if key not in self._cache:
+            entry_id = self._find(key, match)
+            if entry_id is None:
                 return None
-            self._cache.move_to_end(key)
-            return self._cache[key]
+            self._entries.move_to_end(entry_id)
+            return self._entries[entry_id][1]
 
     @property
     def size(self) -> int:
         """Return the number of entries currently in the cache."""
         with self._lock:
-            return len(self._cache)
+            return len(self._entries)
