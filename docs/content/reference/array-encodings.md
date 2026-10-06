@@ -191,3 +191,5 @@ with Tesseract.from_image("vectoradd") as tess:
     print(tess.server_capabilities.compressions)  # ('none', 'lz4')
     result = tess.with_encoding(compression="lz4").apply(inputs)
 ```
+
+The SDK checks each call against what the server advertises before sending it. Runtimes older than 1.13 advertise nothing and cannot parse `Accept` parameters, so requesting `compression` or a GPU transport other than `none` from them raises an error.

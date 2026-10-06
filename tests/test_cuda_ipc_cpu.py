@@ -340,7 +340,7 @@ def test_client_request_releases_input_exports(mocked_cuda):
     i.e. until the response body is buffered -- so we assert it is still present
     when the (fake) request is dispatched, and gone once _request returns.
     """
-    from tesseract_core.sdk.tesseract import HTTPClient
+    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     seen_during_request = {}
 
@@ -363,6 +363,9 @@ def test_client_request_releases_input_exports(mocked_cuda):
     client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
+    client.server_capabilities = ServerCapabilities(
+        ("json+base64",), ("none", "cuda_ipc"), ("none",)
+    )
 
     arr = FakeCudaArray((3,), "<f4")
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
@@ -383,7 +386,7 @@ def test_client_request_exports_dlpack_only_input(mocked_cuda):
     """
     import orjson
 
-    from tesseract_core.sdk.tesseract import HTTPClient
+    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     encoded_payloads = {}
     response = Mock(status_code=200, ok=True, content=b"{}")
@@ -403,6 +406,9 @@ def test_client_request_exports_dlpack_only_input(mocked_cuda):
     client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
+    client.server_capabilities = ServerCapabilities(
+        ("json+base64",), ("none", "cuda_ipc"), ("none",)
+    )
 
     arr = FakeDLPackCudaArray((3,), "float32")
     client._request("apply", method="POST", payload={"a": arr})
@@ -421,7 +427,7 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     called.
     """
     from tesseract_core.sdk import tesseract as sdk
-    from tesseract_core.sdk.tesseract import HTTPClient
+    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     def _boom():
         raise AssertionError("release must not be called for a CPU-only payload")
@@ -448,6 +454,9 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
+    client.server_capabilities = ServerCapabilities(
+        ("json+base64",), ("none", "cuda_ipc"), ("none",)
+    )
 
     # Plain host array -> encodes as base64, pins nothing, releases nothing.
     client._request("apply", method="POST", payload={"a": np.zeros(3)})

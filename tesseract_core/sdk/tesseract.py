@@ -7,10 +7,11 @@ import sys
 import tempfile
 import traceback
 import uuid
+import warnings
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
@@ -122,19 +123,35 @@ class ServerCapabilities:
     """The encodings a served Tesseract accepts, as advertised by the server.
 
     Each field lists the values a client may request for that part of the
-    encoding. Servers too old to advertise a field report it as empty.
+    encoding, or is None if the server does not advertise it. Runtimes older
+    than 1.13 advertise nothing, and 1.13 and 1.14 advertise only output
+    formats.
     """
 
-    output_formats: tuple[str, ...]
+    output_formats: tuple[str, ...] | None
     """Formats for CPU arrays in responses (e.g. ``json+base64``)."""
 
-    gpu_transports: tuple[str, ...]
+    gpu_transports: tuple[str, ...] | None
     """How GPU arrays may cross the boundary in either direction. ``none`` copies
     them to the host, and anything else (e.g. ``cuda_ipc``) passes them by
     reference."""
 
-    compressions: tuple[str, ...]
+    compressions: tuple[str, ...] | None
     """Compressions for array buffers in responses (``none`` disables it)."""
+
+    @classmethod
+    def from_openapi_schema(cls, schema: dict) -> ServerCapabilities:
+        """Read the capabilities a server advertises in its OpenAPI schema."""
+
+        def advertised(key: str) -> tuple[str, ...] | None:
+            values = schema.get(key)
+            return None if values is None else tuple(values)
+
+        return cls(
+            output_formats=advertised("x-supported-output-formats"),
+            gpu_transports=advertised("x-supported-gpu-transports"),
+            compressions=advertised("x-supported-compressions"),
+        )
 
 
 @dataclass(frozen=True)
@@ -155,22 +172,74 @@ class _RequestedEncoding:
             compression=overrides.compression or self.compression,
         )
 
+    @property
+    def params(self) -> dict[str, str]:
+        """The fields sent as media-type parameters, for those with a preference."""
+        return {
+            name: value
+            for name in ("gpu_transport", "compression")
+            if (value := getattr(self, name)) is not None
+        }
+
     def accept_header(self) -> str | None:
         """The ``Accept`` value requesting this encoding, or None if there is no preference.
 
-        Parameters are only added when needed, since runtimes older than 1.13
-        cannot parse them. ``gpu_transport=none`` is the server default and is
-        never sent.
+        Fields without a preference are left out, so the server picks them.
         """
-        params = []
-        if self.gpu_transport not in (None, "none"):
-            params.append(f"gpu_transport={self.gpu_transport}")
-        if self.compression is not None:
-            params.append(f"compression={self.compression}")
+        params = [f"{name}={value}" for name, value in self.params.items()]
         if self.output_format is None and not params:
             return None
         media_type = f"application/{self.output_format or '*'}"
         return "; ".join([media_type, *params])
+
+
+def _fit_encoding_to_server(
+    encoding: _RequestedEncoding, capabilities: ServerCapabilities
+) -> _RequestedEncoding:
+    """Check ``encoding`` against what the server advertises, before any work is done.
+
+    Raises ValueError if the server cannot provide the encoding. Returns the
+    encoding to request, which drops parameters the server cannot parse but
+    already satisfies.
+    """
+    if capabilities.output_formats is None:
+        # Runtimes older than 1.13 read the entire Accept value as the output
+        # format, so any parameter fails the request after the endpoint has run.
+        # They never pass GPU arrays by reference, though, so gpu_transport=none
+        # can go unsaid.
+        if encoding.gpu_transport == "none":
+            encoding = replace(encoding, gpu_transport=None)
+        if encoding.params:
+            names = " or ".join(encoding.params)
+            raise ValueError(
+                "This Tesseract's runtime is older than 1.13 and cannot be asked "
+                f"for {names} per request. Rebuild it with a newer runtime, or "
+                f"leave {names} unset."
+            )
+        return encoding
+
+    for name, accepted in (
+        ("output_format", capabilities.output_formats),
+        ("gpu_transport", capabilities.gpu_transports),
+        ("compression", capabilities.compressions),
+    ):
+        value = getattr(encoding, name)
+        if value is not None and accepted is not None and value not in accepted:
+            raise ValueError(
+                f"This Tesseract does not accept {name}={value!r} "
+                f"(accepted: {accepted})"
+            )
+
+    if encoding.compression is not None and capabilities.compressions is None:
+        # Compression can only be requested through with_encoding, which checks
+        # first, so this points at the user's with_encoding call
+        warnings.warn(
+            "This Tesseract does not advertise which compressions it accepts. "
+            "Runtimes older than 1.14 ignore the requested compression and use "
+            "the one they were configured with.",
+            stacklevel=4,
+        )
+    return encoding
 
 
 class Tesseract:
@@ -653,10 +722,11 @@ class Tesseract:
         # what this client requests by default (with_encoding overrides them per
         # call). Resolve the transport with the same precedence serve() applies
         # to the container: the explicit kwarg wins, else a value from
-        # runtime_config, else "none".
+        # runtime_config. If neither sets it, the client does not ask, and gets
+        # the server's default of "none".
         runtime_config = self._spawn_config.get("runtime_config") or {}
         gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
-            "gpu_transport", "none"
+            "gpu_transport"
         )
         self._client = HTTPClient(
             self._serve_context.url,
@@ -699,7 +769,7 @@ class Tesseract:
         self._serve_context = None
         self._atexit_finalizer.detach()
 
-    @cached_property
+    @property
     @requires_client
     def openapi_schema(self) -> dict:
         """Get the OpenAPI schema of this Tesseract.
@@ -733,12 +803,7 @@ class Tesseract:
         """
         if isinstance(self._client, LocalClient):
             return None
-        schema = self.openapi_schema
-        return ServerCapabilities(
-            output_formats=tuple(schema.get("x-supported-output-formats", ())),
-            gpu_transports=tuple(schema.get("x-supported-gpu-transports", ())),
-            compressions=tuple(schema.get("x-supported-compressions", ())),
-        )
+        return self._client.server_capabilities
 
     @requires_client
     def with_encoding(
@@ -770,29 +835,23 @@ class Tesseract:
 
         Returns:
             A Tesseract that uses the requested encoding for every call.
+
+        Raises:
+            ValueError: if the server does not accept a requested value, or runs
+                a runtime too old to be asked for it.
         """
         requested = _RequestedEncoding(output_format, gpu_transport, compression)
         capabilities = self.server_capabilities
         if capabilities is not None:
-            for value, accepted, name in (
-                (output_format, capabilities.output_formats, "output_format"),
-                (gpu_transport, capabilities.gpu_transports, "gpu_transport"),
-                (compression, capabilities.compressions, "compression"),
-            ):
-                # Older servers advertise nothing, so leave checking to them
-                if value is not None and accepted and value not in accepted:
-                    raise ValueError(
-                        f"This Tesseract does not accept {name}={value!r} "
-                        f"(accepted: {accepted})"
-                    )
+            # Calls check again with the full encoding, but failing here points
+            # at the argument that caused it
+            _fit_encoding_to_server(requested, capabilities)
 
         view = Tesseract.__new__(Tesseract)
         view._client = self._client
         view._owns_client = False
         view._stream_logs = self._stream_logs
         view._encoding = (self._encoding or _RequestedEncoding()).merge(requested)
-        if "openapi_schema" in self.__dict__:
-            view.openapi_schema = self.openapi_schema
         return view
 
     def container_info(self) -> Container:
@@ -1449,6 +1508,17 @@ class HTTPClient:
         """What this client requests for calls that do not override it."""
         return _RequestedEncoding(self._output_format, self._gpu_transport)
 
+    @cached_property
+    def openapi_schema(self) -> dict:
+        """The server's OpenAPI schema, fetched once per client."""
+        response = self._send(f"{self.url}/openapi.json", "GET", b"", {})
+        return self._decode_response(response, "openapi.json")
+
+    @cached_property
+    def server_capabilities(self) -> ServerCapabilities:
+        """The encodings the server advertises in its OpenAPI schema."""
+        return ServerCapabilities.from_openapi_schema(self.openapi_schema)
+
     def _send(
         self,
         url: str,
@@ -1492,6 +1562,10 @@ class HTTPClient:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
         encoding = self.default_encoding.merge(encoding)
+        # Only parameters can trip up a server, and checking them costs a fetch
+        # of the OpenAPI schema on first use
+        if encoding.params:
+            encoding = _fit_encoding_to_server(encoding, self.server_capabilities)
         accept = encoding.accept_header()
         headers = {"Accept": accept} if accept is not None else None
 
@@ -1630,16 +1704,10 @@ class HTTPClient:
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
-        if endpoint in [
-            "openapi_schema",
-            "health",
-        ]:
-            method = "GET"
-        else:
-            method = "POST"
-
         if endpoint == "openapi_schema":
-            endpoint = "openapi.json"
+            return self.openapi_schema
+
+        method = "GET" if endpoint == "health" else "POST"
 
         # Set up log streaming if requested
         log_streamer = None

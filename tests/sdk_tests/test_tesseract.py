@@ -510,12 +510,10 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     ("encoding", "expected"),
     [
         ({}, None),
-        # from_image / from_source clients send a bare media type by default,
-        # which runtimes that cannot parse media-type parameters understand
-        (
-            {"output_format": "json+base64", "gpu_transport": "none"},
-            "application/json+base64",
-        ),
+        ({"output_format": "json+base64"}, "application/json+base64"),
+        # Opting out is sent too, since runtimes 1.13 and 1.14 otherwise fall
+        # back to the transport they were configured with
+        ({"gpu_transport": "none"}, "application/*; gpu_transport=none"),
         ({"gpu_transport": "cuda_ipc"}, "application/*; gpu_transport=cuda_ipc"),
         (
             {"output_format": "json", "compression": "none"},
@@ -527,6 +525,78 @@ def test_accept_header(encoding, expected):
     from tesseract_core.sdk.tesseract import _RequestedEncoding
 
     assert _RequestedEncoding(**encoding).accept_header() == expected
+
+
+# What runtimes of each age advertise in their OpenAPI schema
+_SCHEMA_BEFORE_1_13 = {}
+_SCHEMA_1_13 = {"x-supported-output-formats": ["json", "json+base64", "json+binref"]}
+_SCHEMA_CURRENT = {
+    **_SCHEMA_1_13,
+    "x-supported-gpu-transports": ["none"],
+    "x-supported-compressions": ["none", "lz4"],
+}
+
+
+@pytest.mark.parametrize(
+    ("schema", "encoding", "expected"),
+    [
+        # Runtimes before 1.13 cannot parse parameters, but never pass GPU arrays
+        # by reference, so opting out needs no parameter
+        (
+            _SCHEMA_BEFORE_1_13,
+            {"output_format": "json+base64", "gpu_transport": "none"},
+            "application/json+base64",
+        ),
+        (_SCHEMA_BEFORE_1_13, {"gpu_transport": "cuda_ipc"}, ValueError),
+        (_SCHEMA_BEFORE_1_13, {"compression": "lz4"}, ValueError),
+        # Runtimes 1.13 and 1.14 parse parameters without advertising which
+        # values they accept, so the server gets the final say
+        (
+            _SCHEMA_1_13,
+            {"gpu_transport": "none"},
+            "application/*; gpu_transport=none",
+        ),
+        (
+            _SCHEMA_1_13,
+            {"gpu_transport": "cuda_ipc"},
+            "application/*; gpu_transport=cuda_ipc",
+        ),
+        (_SCHEMA_1_13, {"output_format": "msgpack"}, ValueError),
+        (_SCHEMA_CURRENT, {"gpu_transport": "cuda_ipc"}, ValueError),
+        (
+            _SCHEMA_CURRENT,
+            {"compression": "lz4"},
+            "application/*; compression=lz4",
+        ),
+    ],
+)
+def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expected):
+    from tesseract_core.sdk.tesseract import (
+        ServerCapabilities,
+        _fit_encoding_to_server,
+        _RequestedEncoding,
+    )
+
+    capabilities = ServerCapabilities.from_openapi_schema(schema)
+    requested = _RequestedEncoding(**encoding)
+    if expected is ValueError:
+        with pytest.raises(ValueError):
+            _fit_encoding_to_server(requested, capabilities)
+    else:
+        fitted = _fit_encoding_to_server(requested, capabilities)
+        assert fitted.accept_header() == expected
+
+
+def test_compression_warns_when_the_server_may_ignore_it():
+    from tesseract_core.sdk.tesseract import (
+        ServerCapabilities,
+        _fit_encoding_to_server,
+        _RequestedEncoding,
+    )
+
+    capabilities = ServerCapabilities.from_openapi_schema(_SCHEMA_1_13)
+    with pytest.warns(UserWarning, match="ignore the requested compression"):
+        _fit_encoding_to_server(_RequestedEncoding(compression="lz4"), capabilities)
 
 
 def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_module):

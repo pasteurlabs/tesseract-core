@@ -239,17 +239,18 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
     thing under each way of setting it. Does not exercise the transport itself,
     which needs a GPU.
     """
-    tess = Tesseract.from_source(
+    with Tesseract.from_source(
         dummy_api_path, python_executable=sys.executable, **kwargs
-    )
-    runtime_config = tess._spawn_config["runtime_config"]
+    ) as tess:
+        runtime_config = tess._spawn_config["runtime_config"]
+        child = serving.runtime_config_to_env(runtime_config).get(
+            "TESSERACT_GPU_TRANSPORT"
+        )
+        client = tess._client.default_encoding.gpu_transport
 
-    child = serving.runtime_config_to_env(runtime_config).get("TESSERACT_GPU_TRANSPORT")
-    client = tess._spawn_config.get("gpu_transport") or runtime_config.get(
-        "gpu_transport", "none"
-    )
     assert child == expected
-    assert client == expected
+    # A client that does not ask gets the server's default of "none"
+    assert (client or "none") == expected
 
 
 @pytest.mark.parametrize(
@@ -288,6 +289,11 @@ def test_with_encoding_applies_to_the_view_only(
 
         tess.apply(sample_inputs)
         assert len(list(tmp_path.rglob("*.bin"))) == num_files
+
+        # Every parameter the server advertises can be requested explicitly
+        explicit = tess.with_encoding(gpu_transport="none", compression="lz4")
+        result = explicit.apply(sample_inputs)
+        np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
         with pytest.raises(ValueError, match="does not accept gpu_transport"):
             tess.with_encoding(gpu_transport="cuda_ipc")
