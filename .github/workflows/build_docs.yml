@@ -1,8 +1,9 @@
 name: Build documentation
 
 on:
-  # run on PRs for validation
-  pull_request:
+  # TEMP: PR trigger disabled during podman CI investigation
+  # pull_request:
+  workflow_dispatch:
 
 jobs:
   test-docs:
