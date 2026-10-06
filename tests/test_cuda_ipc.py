@@ -495,7 +495,7 @@ def test_cross_process_jax_vmm_fallback():
     JAX/XLA's GPU allocator is VMM-backed, so the legacy ``cudaIpcGetMemHandle``
     fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
     rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
-    staging the array into a fresh ``cudaMalloc`` buffer (see
+    staging the array into a ``cudaMalloc`` buffer (see
     cuda.ipc._stage_for_export) and export a handle to that instead.
     """
     results = run_cross_process("jax")

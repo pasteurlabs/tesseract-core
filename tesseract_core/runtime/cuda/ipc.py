@@ -631,39 +631,41 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
-    # Get the owned buffer up front (on the target device) so that if any later
-    # step fails we still close the IPC mapping and free the buffer cleanly.
-    cuda_api.set_device(device)
-    pooled = _OWNED_POOL.take(device, nbytes)
-    if pooled is None:
-        owned_ptr = cuda_api.malloc(nbytes)
-    else:
-        owned_ptr, _ = pooled
-        # The buffer's previous array was released when its consumer dropped
-        # it, but kernels the consumer queued on its own streams may still be
-        # reading it, and the copy below is not ordered after them. Wait for
-        # them first. This costs little because the synchronize after the copy
-        # waits for the same work.
-        cuda_api.device_synchronize()
-
-    try:
-        # Opening the IPC handle can fail too; if it does, we still own the
-        # buffer obtained above and must free it (the except below).
-        base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
-        try:
-            # Copy only this array's own bytes out of the producer's (offset)
-            # mapping into the owned buffer, then block until the copy is done so
-            # we never unmap mid-copy.
-            cuda_api.memcpy_device_to_device(
-                owned_ptr, base_ptr + storage_offset, nbytes
-            )
+    # Allocation and synchronization act on the active device, which need not
+    # be the array's.
+    with _on_device(device):
+        # Get the owned buffer up front so that if any later step fails we still
+        # close the IPC mapping and free the buffer cleanly.
+        pooled = _OWNED_POOL.take(device, nbytes)
+        if pooled is None:
+            owned_ptr = cuda_api.malloc(nbytes)
+        else:
+            owned_ptr, _ = pooled
+            # The buffer's previous array was released when its consumer dropped
+            # it, but kernels the consumer queued on its own streams may still be
+            # reading it, and the copy below is not ordered after them. Wait for
+            # them first. This costs little because the synchronize after the copy
+            # waits for the same work.
             cuda_api.device_synchronize()
-        finally:
-            # Only reached once the mapping was opened; always unmap it.
-            cuda_api.ipc_close_mem_handle(base_ptr)
-    except Exception:
-        cuda_api.free(owned_ptr)
-        raise
+
+        try:
+            # Opening the IPC handle can fail too; if it does, we still own the
+            # buffer obtained above and must free it (the except below).
+            base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
+            try:
+                # Copy only this array's own bytes out of the producer's (offset)
+                # mapping into the owned buffer, then block until the copy is done so
+                # we never unmap mid-copy.
+                cuda_api.memcpy_device_to_device(
+                    owned_ptr, base_ptr + storage_offset, nbytes
+                )
+                cuda_api.device_synchronize()
+            finally:
+                # Only reached once the mapping was opened; always unmap it.
+                cuda_api.ipc_close_mem_handle(base_ptr)
+        except Exception:
+            cuda_api.free(owned_ptr)
+            raise
 
     return IpcDeviceArray(owned_ptr, device, shape, dtype)
 

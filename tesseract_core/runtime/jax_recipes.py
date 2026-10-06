@@ -68,50 +68,6 @@ def _is_device_array(leaf: Any) -> bool:
     )
 
 
-def _cache_key_and_device_leaves(tree: Any) -> tuple[Hashable, tuple[jax.Array, ...]]:
-    """Build an :class:`LRUCache` key from a pytree's structure and leaves.
-
-    Array leaves contribute their dtype + shape + raw bytes so leaves with
-    identical bytes but different interpretations (e.g. ``int64[4]`` vs
-    ``int64[2,2]``) don't collide. Non-array leaves contribute their type
-    alongside their value; they must be hashable.
-
-    JAX arrays on an accelerator contribute only their dtype, shape and
-    devices, since reading their bytes would copy them to the host on every
-    call. They are returned alongside the key instead, so that entries sharing
-    a key can be told apart by comparing them on the device (see
-    :func:`_bitwise_equal`). Keying on the devices ensures that only arrays on
-    the same devices are compared.
-
-    The key is returned as a tuple rather than collapsed with :func:`hash`,
-    so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
-    instead of trusting the hash alone. Collapsing to an ``int`` made every
-    hash collision a silent wrong-gradient bug: CPython reserves ``-1`` as an
-    error sentinel, so ``hash(-1) == hash(-2)``, and a Tesseract taking an
-    integer parameter could serve the backward pass of a different input.
-
-    The per-leaf type tag covers the other direction, where values compare
-    equal across types: ``1 == 1.0 == True``, so a bare value would still
-    collide for a field typed as a union.
-    """
-    leaves, treedef = jax.tree.flatten(tree)
-    # jax.PyTreeDef's __hash__ collides on dicts with different keys, so we
-    # use its string form as the discriminator instead.
-    items: list = [str(treedef)]
-    device_leaves = []
-    for leaf in leaves:
-        if _is_device_array(leaf):
-            items.append((leaf.dtype.str, leaf.shape, frozenset(leaf.devices())))
-            device_leaves.append(leaf)
-        elif hasattr(leaf, "tobytes"):
-            items.append(
-                (leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(np.asarray(leaf))))
-            )
-        else:
-            items.append((type(leaf), leaf))
-    return tuple(items), tuple(device_leaves)
-
-
 def _as_bits(x: jax.Array) -> tuple[jax.Array, ...]:
     """Reinterpret ``x`` as unsigned integers, so that comparing is bitwise."""
     if jnp.issubdtype(x.dtype, jnp.complexfloating):
@@ -136,35 +92,78 @@ def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
     Matches the byte comparison of host leaves, so ``-0.0`` and ``0.0`` differ
     and a NaN equals itself.
     """
-    if not a:
-        # Inputs without device leaves are fully described by the key. Skip the
-        # dispatch and device sync, which would otherwise run on every lookup.
-        return True
     return bool(_bitwise_equal_jit(a, b))
 
 
-def _cache_store(
-    inputs_dict: dict, vjp_func: Callable, cotangent_template: Any
-) -> None:
-    """Cache ``(vjp_func, cotangent_template)`` for these inputs."""
-    key, device_leaves = _cache_key_and_device_leaves(inputs_dict)
-    _jax_vjp_cache.put(
-        key,
-        (vjp_func, cotangent_template, device_leaves),
-        match=lambda cached: _bitwise_equal(cached[2], device_leaves),
-    )
+class _DeviceLeaves:
+    """The accelerator arrays of a cache key, compared on the device.
+
+    Hashing their bytes would copy them to the host on every call, so they hash
+    by dtype, shape and devices only, and ``__eq__`` compares their contents
+    with :func:`_bitwise_equal`. The cache's dict calls ``__eq__`` only for keys
+    with equal hashes, so inputs with equal shapes but different contents get
+    separate entries, and only arrays on the same devices are ever compared.
+    """
+
+    def __init__(self, arrays: tuple[jax.Array, ...]) -> None:
+        self.arrays = arrays
+        self._meta = tuple(
+            (a.dtype.str, a.shape, frozenset(a.devices())) for a in arrays
+        )
+
+    def __hash__(self) -> int:
+        return hash(self._meta)
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _DeviceLeaves)
+            and self._meta == other._meta
+            and _bitwise_equal(self.arrays, other.arrays)
+        )
 
 
-def _cache_lookup(inputs_dict: dict) -> Any | None:
-    """Return the cached ``(vjp_func, cotangent_template)`` for these inputs, or None."""
-    key, device_leaves = _cache_key_and_device_leaves(inputs_dict)
-    cached = _jax_vjp_cache.get(
-        key, match=lambda cached: _bitwise_equal(cached[2], device_leaves)
-    )
-    if cached is None:
-        return None
-    vjp_func, cotangent_template, _ = cached
-    return vjp_func, cotangent_template
+def _cache_key(tree: Any) -> Hashable:
+    """Build an :class:`LRUCache` key from a pytree's structure and leaves.
+
+    Array leaves contribute their dtype + shape + raw bytes so leaves with
+    identical bytes but different interpretations (e.g. ``int64[4]`` vs
+    ``int64[2,2]``) don't collide. Non-array leaves contribute their type
+    alongside their value; they must be hashable.
+
+    JAX arrays on an accelerator are not read, since that would copy them to
+    the host on every call. They leave a placeholder at their position and are
+    gathered into a single :class:`_DeviceLeaves` item at the end of the key,
+    so that one device comparison covers all of them.
+
+    The key is returned as a tuple rather than collapsed with :func:`hash`,
+    so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
+    instead of trusting the hash alone. Collapsing to an ``int`` made every
+    hash collision a silent wrong-gradient bug: CPython reserves ``-1`` as an
+    error sentinel, so ``hash(-1) == hash(-2)``, and a Tesseract taking an
+    integer parameter could serve the backward pass of a different input.
+
+    The per-leaf type tag covers the other direction, where values compare
+    equal across types: ``1 == 1.0 == True``, so a bare value would still
+    collide for a field typed as a union.
+    """
+    leaves, treedef = jax.tree.flatten(tree)
+    # jax.PyTreeDef's __hash__ collides on dicts with different keys, so we
+    # use its string form as the discriminator instead.
+    items: list = [str(treedef)]
+    device_leaves = []
+    for leaf in leaves:
+        if _is_device_array(leaf):
+            items.append(_DeviceLeaves)
+            device_leaves.append(leaf)
+        elif hasattr(leaf, "tobytes"):
+            items.append(
+                (leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(np.asarray(leaf))))
+            )
+        else:
+            items.append((type(leaf), leaf))
+    if device_leaves:
+        items.append(_DeviceLeaves(tuple(device_leaves)))
+    return tuple(items)
 
 
 def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
@@ -212,7 +211,7 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     out = eqx.combine(diff_primals, static_primals)
 
     cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
-    _cache_store(inputs_dict, vjp_func, cotangent_template)
+    _jax_vjp_cache.put(_cache_key(inputs_dict), (vjp_func, cotangent_template))
     return out
 
 
@@ -240,7 +239,7 @@ def jax_vjp(
     # vjp calls per output basis vector.
     if (
         _jax_vjp_cache is not None
-        and (cached := _cache_lookup(inputs_dict)) is not None
+        and (cached := _jax_vjp_cache.get(_cache_key(inputs_dict))) is not None
     ):
         vjp_func, cotangent_template = cached
         full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)

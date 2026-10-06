@@ -513,6 +513,8 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     # Synchronised before the mapping was closed.
     assert mocked_cuda.calls["sync"] == [True]
     assert mocked_cuda.calls["close"] == [0x2000]
+    # The caller's active device is restored.
+    assert mocked_cuda.current_device == 0
     # Returned wrapper is framework-agnostic and correctly shaped.
     assert isinstance(out, cuda_ipc.IpcDeviceArray)
     assert out.shape == (4, 8)

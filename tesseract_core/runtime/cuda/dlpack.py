@@ -9,8 +9,7 @@ Mirrors just enough of the DLPack C ABI to wrap a device buffer in a
 ``__dlpack__`` with :func:`make_dlpack_capsule` and
 :func:`drop_unconsumed_bundle`. All ctypes and CPython capsule calls stay in
 this module. An exported buffer is released through the caller's release
-callback, or freed with :func:`tesseract_core.runtime.cuda.api.free` if there
-is none.
+callback.
 """
 
 import ctypes
@@ -18,8 +17,6 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-
-from tesseract_core.runtime.cuda import api
 
 _kDLCUDA = 2  # DLDeviceType for CUDA global memory
 
@@ -117,14 +114,13 @@ def make_dlpack_capsule(
     device: int,
     shape: tuple[int, ...],
     dtype: np.dtype,
-    release: Callable[[], None] | None = None,
+    release: Callable[[], None],
 ) -> tuple[Any, int]:
     """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
 
     Returns ``(capsule, token)``. The deleter releases the buffer exactly once,
     whether the capsule is consumed by a framework or dropped un-consumed via
-    :func:`drop_unconsumed_bundle`. It calls ``release`` if given and frees the
-    buffer otherwise.
+    :func:`drop_unconsumed_bundle`, by calling ``release``.
     """
     global _NEXT_TOKEN
     token = _NEXT_TOKEN
@@ -147,10 +143,7 @@ def make_dlpack_capsule(
         # against a second invocation (bundle already gone).
         bundle = _BUNDLES.pop(token, None)
         if bundle is not None:
-            if release is None:
-                api.free(ptr)
-            else:
-                release()
+            release()
 
     c_deleter = _DLManagedTensorDeleter(_deleter)
     managed.deleter = c_deleter
