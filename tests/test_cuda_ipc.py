@@ -8,11 +8,10 @@ Run on a GPU machine with ``pytest tests/test_cuda_ipc.py``.
 
 Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
-is framework-agnostic on *both* sides: encode reads an array's metadata from
-``__cuda_array_interface__`` (CuPy, PyTorch, Numba) or from DLPack on a CUDA
-device (JAX, which does not implement CAI), and decode returns a
-framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that exposes
-``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
+is framework-agnostic on *both* sides: encode works with any object that
+implements ``__cuda_array_interface__`` (CuPy, PyTorch, JAX, Numba), and decode
+returns a framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that
+exposes ``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
 
 Note on process model
 ---------------------
@@ -593,13 +592,22 @@ def test_ring1_serial_reuse():
 @requires_cuda
 def test_sdk_encode_structure():
     """The SDK ``_encode_array`` cuda_ipc path yields the expected dict shape."""
-    from tesseract_core.sdk.tesseract import _encode_array
+    from tesseract_core.sdk.tesseract import (
+        EncodingContext,
+        _close_encoding_context,
+        _encode_array,
+    )
 
     arr = cupy.random.randn(32, 64).astype(cupy.float64)
-    encoded = _encode_array(arr, encoding="cuda_ipc")
-    assert encoded["data"]["encoding"] == "cuda_ipc"
-    assert encoded["shape"] == [32, 64]
-    assert encoded["dtype"] == "float64"
+    ctx = EncodingContext()
+    try:
+        encoded = _encode_array(arr, encoding="cuda_ipc", ctx=ctx)
+        assert encoded["data"]["encoding"] == "cuda_ipc"
+        assert encoded["shape"] == [32, 64]
+        assert encoded["dtype"] == "float64"
+        assert ctx.exported_cuda_ipc is True
+    finally:
+        _close_encoding_context(ctx)
 
 
 # ── Test 4: framework interop (encode a torch tensor; decode CuPy-free) ──
@@ -838,8 +846,8 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 
 # apply() builds its GPU leaf via _to_device, injected per framework by the
-# parametrization below. CuPy and PyTorch expose ``__cuda_array_interface__``,
-# JAX only DLPack, so the three cover both metadata sources the transport reads.
+# parametrization below, so the served export path is covered against the
+# device arrays of each framework (CuPy, PyTorch, JAX).
 _MIXED_API_CODE = """
 import numpy as np
 from pydantic import BaseModel
