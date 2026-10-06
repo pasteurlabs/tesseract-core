@@ -235,11 +235,16 @@ jobs:
           ignore_chown_errors = "true"
           EOF
 
+          cat > ~/.config/containers/containers.conf <<'EOF'
+          [network]
+          default_rootless_network_cmd = "pasta"
+          EOF
+
           systemctl start --user podman.socket
           systemctl status --user podman.socket
 
           podman --version
-          podman info --format 'storage driver: {{.Store.GraphDriverName}}'
+          podman info --format 'storage driver: {{.Store.GraphDriverName}} / network: {{.Host.NetworkBackend}}'
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
