@@ -4,12 +4,26 @@
 # Gradient fallback utilities for deriving missing gradient endpoints from existing ones.
 # These are experimental and the API may change in future releases.
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 
 from ..tree_transforms import get_at_path
+
+
+def _shape_and_dtype(value: Any) -> tuple[tuple[int, ...], np.dtype]:
+    """Read shape and dtype from an output leaf.
+
+    Covers every form an eval_fn can hand back for a leaf: a concrete array
+    from apply, a ShapeDType from abstract_eval, or the plain
+    ``{"shape": ..., "dtype": ...}`` dict the JAX recipe returns.
+    """
+    if isinstance(value, Mapping):
+        shape, dtype = value["shape"], value["dtype"]
+    else:
+        shape, dtype = value.shape, value.dtype
+    return tuple(shape), np.dtype(dtype)
 
 
 def vjp_from_jacobian(
@@ -112,7 +126,8 @@ def jacobian_from_vjp(
     """
     # eval_fn is called once to learn output shapes and dtypes without running
     # the full computation. abstract_eval is preferred over apply for this reason.
-    raw_outputs = eval_fn(inputs=inputs)
+    # Called positionally, since abstract_eval names its argument abstract_inputs.
+    raw_outputs = eval_fn(inputs)
     outputs_dict = (
         raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
     )
@@ -123,8 +138,7 @@ def jacobian_from_vjp(
     output_dtypes = {}
     for dy in jac_outputs:
         dy_out = get_at_path(outputs_dict, dy)
-        output_shapes[dy] = tuple(dy_out.shape)
-        output_dtypes[dy] = dy_out.dtype
+        output_shapes[dy], output_dtypes[dy] = _shape_and_dtype(dy_out)
         jac[dy] = {}
         for dx in jac_inputs:
             dx_val = np.asarray(get_at_path(inputs, dx))
