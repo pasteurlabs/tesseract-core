@@ -597,7 +597,9 @@ def create_gradient_schema(
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
-                    expected_annotation = Array[expected_shape, str(arr.dtype)]
+                    # No dtype check: GPU arrays pass through validation unconverted,
+                    # and their dtype (e.g. torch.float32) need not be a NumPy name.
+                    expected_annotation = Array[expected_shape, None]
                     try:
                         result[output_path][input_path] = TypeAdapter(
                             expected_annotation
