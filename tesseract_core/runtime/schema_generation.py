@@ -539,7 +539,9 @@ def create_gradient_schema(
 
         raise ValueError(f"Invalid path: {concrete_path}")
 
-    def _find_shape_from_path(path_patterns: dict, concrete_path: str) -> tuple:
+    def _find_shape_from_path(
+        path_patterns: dict, concrete_path: str
+    ) -> tuple | types.EllipsisType:
         return _find_annotation_from_path(path_patterns, concrete_path).expected_shape
 
     InputSchema = apply_function_to_model_tree(
@@ -584,13 +586,13 @@ def create_gradient_schema(
                         continue
                     elif output_shape is Ellipsis:
                         expected_shape = (
+                            *arr.shape[: len(arr.shape) - len(input_shape)],
                             *input_shape,
-                            arr.shape[-len(input_shape) :],
                         )
                     elif input_shape is Ellipsis:
                         expected_shape = (
                             *output_shape,
-                            *arr.shape[: len(output_shape)],
+                            *arr.shape[len(output_shape) :],
                         )
                     else:
                         expected_shape = (*output_shape, *input_shape)
