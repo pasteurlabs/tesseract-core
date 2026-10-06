@@ -235,16 +235,11 @@ jobs:
           ignore_chown_errors = "true"
           EOF
 
-          cat > ~/.config/containers/containers.conf <<'EOF'
-          [network]
-          default_rootless_network_cmd = "pasta"
-          EOF
-
           systemctl start --user podman.socket
           systemctl status --user podman.socket
 
           podman --version
-          podman info --format 'storage driver: {{.Store.GraphDriverName}} / network: {{.Host.NetworkBackend}}'
+          podman info --format 'storage driver: {{.Store.GraphDriverName}}'
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
@@ -262,6 +257,9 @@ jobs:
           uv run --no-sync tesseract build examples/${{ matrix.unit-tesseract }}
 
       - name: Run test suite
+        env:
+          # TEMP: subprocess instrumentation to see where podman time goes.
+          TESSERACT_INSTRUMENT_SUBPROCESS: "1"
         run: |
           # No typeguard here: it breaks coverage's branch mapping (gh#691).
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
