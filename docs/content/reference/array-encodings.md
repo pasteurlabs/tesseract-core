@@ -166,6 +166,8 @@ $ cat /tmp/output/results.json
 
 When calling `tesseract-runtime` directly (e.g. inside a container), the plain `TESSERACT_COMPRESSION=lz4 tesseract-runtime ...` prefix works as usual.
 
+(choosing-the-encoding-per-request)=
+
 ## Choosing the encoding per request
 
 For a served Tesseract, `--output-format` and `TESSERACT_COMPRESSION` only set defaults. A client can request a different encoding for each call through the `Accept` header, where the media type selects the output format and the `compression` parameter selects the compression.
