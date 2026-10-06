@@ -774,7 +774,7 @@ def mocked_cuda(monkeypatch):
 
     _reset()
     monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())
-    monkeypatch.setattr(cuda_ipc, "_OWNED_POOL", cuda_ipc._BufferPool())
+    monkeypatch.setattr(cuda_ipc, "_DECODE_POOL", cuda_ipc._BufferPool())
     yield fake
     _reset()
 

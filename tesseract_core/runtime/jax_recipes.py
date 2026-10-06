@@ -61,7 +61,7 @@ def _set_jax_vjp_cache_size(size: int) -> None:
     _jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
-def _is_device_array(leaf: Any) -> bool:
+def _is_accelerator_array(leaf: Any) -> bool:
     """Whether ``leaf`` is a JAX array whose data lives off the host."""
     return isinstance(leaf, jax.Array) and any(
         d.platform != "cpu" for d in leaf.devices()
@@ -98,11 +98,9 @@ def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
 class _DeviceLeaves:
     """The accelerator arrays of a cache key, compared on the device.
 
-    Hashing their bytes would copy them to the host on every call, so they hash
-    by dtype, shape and devices only, and ``__eq__`` compares their contents
-    with :func:`_bitwise_equal`. The cache's dict calls ``__eq__`` only for keys
-    with equal hashes, so inputs with equal shapes but different contents get
-    separate entries, and only arrays on the same devices are ever compared.
+    They hash by dtype, shape and devices only. Keys whose arrays differ only in
+    contents therefore share a hash, and the cache's dict tells them apart with
+    ``__eq__``, which compares contents with :func:`_bitwise_equal`.
     """
 
     def __init__(self, arrays: tuple[jax.Array, ...]) -> None:
@@ -130,10 +128,10 @@ def _cache_key(tree: Any) -> Hashable:
     ``int64[2,2]``) don't collide. Non-array leaves contribute their type
     alongside their value; they must be hashable.
 
-    JAX arrays on an accelerator are not read, since that would copy them to
-    the host on every call. They leave a placeholder at their position and are
-    gathered into a single :class:`_DeviceLeaves` item at the end of the key,
-    so that one device comparison covers all of them.
+    The bytes of JAX arrays on an accelerator are not hashed, since that would
+    copy them to the host on every call. Each leaves a placeholder at its
+    position, and together they form a single :class:`_DeviceLeaves` item at
+    the end of the key, so that one device comparison covers all of them.
 
     The key is returned as a tuple rather than collapsed with :func:`hash`,
     so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
@@ -152,7 +150,7 @@ def _cache_key(tree: Any) -> Hashable:
     items: list = [str(treedef)]
     device_leaves = []
     for leaf in leaves:
-        if _is_device_array(leaf):
+        if _is_accelerator_array(leaf):
             items.append(_DeviceLeaves)
             device_leaves.append(leaf)
         elif hasattr(leaf, "tobytes"):

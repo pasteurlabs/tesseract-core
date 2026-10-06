@@ -118,9 +118,9 @@ def make_dlpack_capsule(
 ) -> tuple[Any, int]:
     """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
 
-    Returns ``(capsule, token)``. The deleter releases the buffer exactly once,
+    Returns ``(capsule, token)``. The deleter calls ``release`` exactly once,
     whether the capsule is consumed by a framework or dropped un-consumed via
-    :func:`drop_unconsumed_bundle`, by calling ``release``.
+    :func:`drop_unconsumed_bundle`.
     """
     global _NEXT_TOKEN
     token = _NEXT_TOKEN

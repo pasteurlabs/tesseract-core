@@ -361,14 +361,14 @@ class TestCacheWithNonArrayInputs:
 class TestCacheWithDeviceArrays:
     """Accelerator arrays are compared on the device instead of hashed on the host.
 
-    ``_is_device_array`` is patched to accept every JAX array, so the device
+    ``_is_accelerator_array`` is patched to accept every JAX array, so the device
     path runs on CPU-only machines too.
     """
 
     @staticmethod
     def _treat_all_arrays_as_device(monkeypatch):
         monkeypatch.setattr(
-            jax_recipes, "_is_device_array", lambda x: isinstance(x, jax.Array)
+            jax_recipes, "_is_accelerator_array", lambda x: isinstance(x, jax.Array)
         )
 
     @staticmethod
@@ -429,7 +429,7 @@ class TestCacheWithDeviceArrays:
             import jax.numpy as jnp
             from tesseract_core.runtime import jax_recipes
 
-            jax_recipes._is_device_array = lambda x: isinstance(x, jax.Array)
+            jax_recipes._is_accelerator_array = lambda x: isinstance(x, jax.Array)
             cache = jax_recipes.LRUCache(maxsize=2)
             key = lambda device: jax_recipes._cache_key({"x": jax.device_put(x, device)})
             cpu0, cpu1 = jax.devices()[:2]

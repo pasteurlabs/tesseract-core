@@ -253,7 +253,7 @@ def load_cudart() -> Any:
     # (see the ``_check`` helper in the api module).
     cudart.cudaGetLastError.argtypes = []
     cudart.cudaGetLastError.restype = ctypes.c_int
-    # Used by the VMM staging-buffer fallback (see ipc._stage_for_export).
+    # Used for decode's owned buffers and encode's VMM staging fallback.
     cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
     cudart.cudaMalloc.restype = ctypes.c_int
     cudart.cudaFree.argtypes = [ctypes.c_void_p]

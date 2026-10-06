@@ -242,8 +242,7 @@ class _BufferPool:
 
     Each buffer can carry a value, such as a staging buffer's IPC handle. Idle
     buffers beyond :func:`_pool_max_bytes` per device are freed, least recently
-    released first, so the ``cuda_ipc_pool_fraction`` runtime config bounds the
-    memory pools hold.
+    released first.
     """
 
     def __init__(self) -> None:
@@ -286,10 +285,7 @@ class _BufferPool:
 
 
 def _pool_max_bytes(device: int) -> int:
-    """Cap on a :class:`_BufferPool`'s idle bytes on ``device``.
-
-    The two pools split ``cuda_ipc_pool_fraction`` of the device's memory evenly.
-    """
+    """Cap on a :class:`_BufferPool`'s idle bytes on ``device``, set by ``cuda_ipc_pool_fraction``."""
     fraction = get_config().cuda_ipc_pool_fraction
     if fraction == 0:
         return 0
@@ -456,7 +452,7 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
 # Idle owned buffers of decoded arrays. An array's buffer returns here once the
 # array (or the framework tensor that adopted it) is released, and the next
 # decode of the same size reuses it.
-_OWNED_POOL = _BufferPool()
+_DECODE_POOL = _BufferPool()
 
 
 def _finalize_ipc_device_array(state: dict) -> None:
@@ -467,7 +463,7 @@ def _finalize_ipc_device_array(state: dict) -> None:
     ``state`` is the array's mutable ownership record, shared by reference with
     the live object so ``__dlpack__`` can hand ownership off before this runs:
 
-    * ``dlpack_token is None`` and not ``freed``: we still own the buffer, so
+    * ``dlpack_token is None`` and not ``released``: we still own the buffer, so
       return it to the pool.
     * ``dlpack_token`` set: ``__dlpack__`` moved the buffer into a DLPack bundle;
       drop the bundle iff its capsule was never consumed (a consumer that took
@@ -475,9 +471,9 @@ def _finalize_ipc_device_array(state: dict) -> None:
     """
     try:
         if state["dlpack_token"] is None:
-            if not state["freed"]:
+            if not state["released"]:
                 state["release"]()
-                state["freed"] = True
+                state["released"] = True
         else:
             dlpack.drop_unconsumed_bundle(state["dlpack_token"])
     except Exception:  # noqa: BLE001, S110
@@ -503,7 +499,7 @@ class IpcDeviceArray:
     :func:`weakref.finalize` callback releases it (see
     :func:`_finalize_ipc_device_array`), or a DLPack consumer takes it (the
     capsule is renamed to ``"used_dltensor"`` on consumption, transferring the
-    release to the consumer's deleter). ``_state["freed"]`` guards against a
+    release to the consumer's deleter). ``_state["released"]`` guards against a
     double release.
     """
 
@@ -520,16 +516,15 @@ class IpcDeviceArray:
             else self.dtype.itemsize
         )
         # Ownership record shared by reference with the finalizer below.
-        #   release:      returns the buffer to the pool; called exactly once,
-        #                 by the finalizer or by the DLPack bundle's deleter.
-        #   freed:        True once the buffer is released or ownership was
+        #   release:      returns the buffer to the pool.
+        #   released:     True once the buffer is released or ownership was
         #                 handed to a DLPack capsule. Prevents a double release.
         #   dlpack_token: token of the DLPack bundle produced by __dlpack__, or
         #                 None if __dlpack__ was never called. Ownership of the
         #                 buffer moves into that bundle when it is created.
         self._state: dict = {
-            "release": functools.partial(_OWNED_POOL.put, ptr, device, self._nbytes),
-            "freed": False,
+            "release": functools.partial(_DECODE_POOL.put, ptr, device, self._nbytes),
+            "released": False,
             "dlpack_token": None,
         }
         self._finalizer = weakref.finalize(
@@ -555,7 +550,7 @@ class IpcDeviceArray:
 
     def copy_to_host(self) -> np.ndarray:
         """Copy the owned device buffer into a fresh host NumPy array."""
-        if self._state["freed"]:
+        if self._state["released"]:
             raise RuntimeError("device buffer has been released")
         host = np.empty(self.shape, dtype=self.dtype)
         cuda_api.memcpy_device_to_host(host.ctypes.data, self._ptr, self._nbytes)
@@ -584,7 +579,7 @@ class IpcDeviceArray:
         or the finalizer for an un-consumed capsule) releases the buffer exactly
         once.
         """
-        if self._state["freed"]:
+        if self._state["released"]:
             raise RuntimeError("device buffer has been released")
 
         capsule, token = dlpack.make_dlpack_capsule(
@@ -598,7 +593,7 @@ class IpcDeviceArray:
         # The finalizer reads this shared state to drop the bundle iff its
         # capsule is never consumed.
         self._state["dlpack_token"] = token
-        self._state["freed"] = True
+        self._state["released"] = True
         return capsule
 
 
@@ -636,7 +631,7 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     with _on_device(device):
         # Get the owned buffer up front so that if any later step fails we still
         # close the IPC mapping and free the buffer cleanly.
-        pooled = _OWNED_POOL.take(device, nbytes)
+        pooled = _DECODE_POOL.take(device, nbytes)
         if pooled is None:
             owned_ptr = cuda_api.malloc(nbytes)
         else:
