@@ -19,7 +19,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from tesseract_core.runtime.array_encoding import _fast_tobytes
-from tesseract_core.runtime.cuda.ipc import is_gpu_array
+from tesseract_core.runtime.cuda.ipc import has_cuda_array_interface
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     filter_func,
@@ -36,14 +36,16 @@ def as_jax_array(x: Any) -> jax.Array:
     """
     if isinstance(x, jax.Array):
         return x
-    if is_gpu_array(x):
+    if has_cuda_array_interface(x):
         return jnp.from_dlpack(x)
     return jnp.asarray(x)
 
 
 def as_jax_arrays(tree: Any) -> Any:
     """Convert array leaves in a pytree to JAX, preserving non-array leaves."""
-    is_array = lambda x: isinstance(x, np.ndarray | np.generic) or is_gpu_array(x)
+    is_array = lambda x: (
+        isinstance(x, np.ndarray | np.generic) or has_cuda_array_interface(x)
+    )
     return jax.tree.map(lambda x: as_jax_array(x) if is_array(x) else x, tree)
 
 

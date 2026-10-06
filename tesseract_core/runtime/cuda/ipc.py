@@ -19,7 +19,7 @@ The JSON schema for this encoding (``CudaIpcArrayData``) lives alongside the
 other array-data models in :mod:`array_encoding`; the public entry points used
 by :mod:`array_encoding` are:
 
-* :func:`is_gpu_array` -- detect a GPU leaf via CAI or DLPack,
+* :func:`has_cuda_array_interface` -- detect a GPU leaf,
 * :func:`cuda_array_to_host` -- host-copy helper for non-IPC encodings of GPU
   arrays,
 * :func:`validate_cuda_array` -- shape/dtype validation without a device copy,
@@ -35,8 +35,10 @@ pip-wheel fallback and forward-compatible version range -- via
 maintaining their own soname list.
 """
 
+import math
+import os
 import weakref
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pybase64
@@ -55,7 +57,6 @@ __all__ = [
     "cuda_array_to_host",
     "dump_cuda_ipc_arraydict",
     "has_cuda_array_interface",
-    "is_gpu_array",
     "load_cuda_ipc_arraydict",
     "release_pinned_ipc_exports",
     "validate_cuda_array",
@@ -65,35 +66,43 @@ __all__ = [
 def has_cuda_array_interface(obj: Any) -> bool:
     """Check if an object exposes the __cuda_array_interface__ protocol.
 
-    This protocol is supported by PyTorch, CuPy, Numba, and most CUDA-aware
-    Python libraries. It indicates the object holds data in GPU device memory.
-    JAX is a notable exception: it exposes device buffers only through DLPack, so
-    use :func:`is_gpu_array` to detect GPU leaves generically.
+    This protocol is supported by PyTorch, CuPy, JAX, Numba, and most
+    CUDA-aware Python libraries. It indicates the object holds data in
+    GPU device memory.
     """
     return hasattr(obj, "__cuda_array_interface__")
 
 
-def is_gpu_array(obj: Any) -> bool:
-    """Check if an object holds data in CUDA device memory.
+FORBID_DEVICE_HOST_COPY_ENV = "TESSERACT_FORBID_DEVICE_HOST_COPY"
 
-    Accepts either metadata source the CUDA transports can read: the
-    ``__cuda_array_interface__`` protocol (PyTorch, CuPy, Numba) or a DLPack
-    producer whose buffer lives on a CUDA device (JAX, which does not implement
-    CAI). Prefer this over :func:`has_cuda_array_interface` for detecting GPU
-    leaves so JAX-CUDA arrays are exported by reference instead of silently
-    falling through to a host copy.
+
+def check_device_host_copy(what: str) -> None:
+    """Raise if implicit device-to-host copies are forbidden.
+
+    Setting ``TESSERACT_FORBID_DEVICE_HOST_COPY`` to ``1`` or ``true`` makes
+    silent host copies of GPU data fail loudly, so tests can assert that a path
+    stays on-device. Subprocess servers inherit the variable, and the SDK client
+    checks it too. The guarded paths are GPU arrays serialized without a device
+    transport and ``np.asarray`` on an :class:`IpcDeviceArray`. Explicit copies
+    via :meth:`IpcDeviceArray.copy_to_host` are never blocked.
     """
-    return has_cuda_array_interface(obj) or dlpack.is_dlpack_cuda(obj)
+    if os.environ.get(FORBID_DEVICE_HOST_COPY_ENV, "").lower() in {"1", "true"}:
+        raise RuntimeError(
+            f"Implicit device-to-host copy of {what} "
+            f"({FORBID_DEVICE_HOST_COPY_ENV} is set)."
+        )
 
 
 def cuda_array_to_host(arr: Any) -> np.ndarray:
-    """Copy a GPU array to a host NumPy array (explicit device-to-host copy).
+    """Copy a GPU array to a host NumPy array.
 
-    Used for non-IPC encodings, where the bytes must reach the host. Handles
-    CuPy (``.get()``) and PyTorch (``.cpu().numpy()``) explicitly, then falls
-    back to ``np.asarray`` for any other framework whose arrays support
-    ``__array__`` (e.g. JAX, which fetches to host on conversion).
+    Used for non-IPC encodings, where the bytes must reach the host, and so
+    subject to :func:`check_device_host_copy`. Handles CuPy (``.get()``) and
+    PyTorch (``.cpu().numpy()``) explicitly, then falls back to ``np.asarray``
+    for any other framework whose arrays support ``__array__`` (e.g. JAX, which
+    fetches to host on conversion).
     """
+    check_device_host_copy(f"a {type(arr).__name__} GPU array")
     get = getattr(arr, "get", None)
     if callable(get):  # CuPy
         return np.asarray(get())
@@ -114,108 +123,63 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     )
 
 
-class _CudaArrayMeta:
-    """Unified device-array metadata, read from CAI or DLPack.
+class _CudaArrayInfo(NamedTuple):
+    """Device-array metadata read from ``__cuda_array_interface__``.
 
-    Normalizes the two metadata sources the transports accept into one shape:
-    ``__cuda_array_interface__`` (CuPy, PyTorch, Numba) and DLPack (JAX, which
-    does not implement CAI). Strides are stored in *bytes* when present (DLPack's
-    element strides are converted on the way in); ``None`` means row-major
-    contiguous.
+    ``strides`` is in bytes; ``None`` means row-major contiguous.
     """
 
-    __slots__ = ("_strides_bytes", "data_ptr", "device", "dtype", "shape")
-
-    def __init__(
-        self,
-        data_ptr: int,
-        shape: tuple[int, ...],
-        dtype: np.dtype,
-        device: int,
-        strides_bytes: tuple[int, ...] | None,
-    ) -> None:
-        self.data_ptr = data_ptr
-        self.shape = shape
-        self.dtype = dtype
-        self.device = device
-        self._strides_bytes = strides_bytes
-
-    @property
-    def nbytes(self) -> int:
-        n = int(np.prod(self.shape)) if self.shape else 1
-        return n * self.dtype.itemsize
+    data_ptr: int
+    nbytes: int
+    shape: tuple[int, ...]
+    dtype: np.dtype
+    device: int
+    strides: tuple[int, ...] | None
 
     def is_c_contiguous(self) -> bool:
-        """Whether the array is row-major contiguous.
+        """Whether the array's memory is row-major contiguous.
 
-        cuda_ipc transfers a flat, contiguous byte range: encode copies (or hands
-        off) ``prod(shape) * itemsize`` consecutive bytes and decode rebuilds a
-        contiguous array from shape/dtype alone (the payload carries no strides).
-        A non-contiguous source would be silently misread, so callers reject it.
-
-        ``strides is None`` means row-major contiguous. Explicit strides are
-        still contiguous iff they equal the row-major strides implied by shape
-        and itemsize.
+        cuda_ipc moves ``nbytes`` consecutive bytes and the decoder rebuilds the
+        array from shape and dtype alone, so callers must reject non-contiguous
+        sources, which would otherwise be silently misread.
         """
-        if self._strides_bytes is None:
+        if self.strides is None:
             return True
-        itemsize = self.dtype.itemsize
         expected = []
-        acc = itemsize
+        acc = self.dtype.itemsize
         for dim in reversed(self.shape):
             expected.append(acc)
             acc *= dim
         expected.reverse()
-        return tuple(self._strides_bytes) == tuple(expected)
+        return self.strides == tuple(expected)
 
 
-def _read_cuda_array_meta(arr: Any) -> _CudaArrayMeta:
-    """Read device-array metadata from CAI if present, else DLPack.
+def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
+    """Read a CUDA array's metadata from ``__cuda_array_interface__``.
 
-    Prefers ``__cuda_array_interface__`` (which CuPy/PyTorch/Numba expose, and
-    which needs no capsule handshake); falls back to DLPack for producers that
-    only implement it (JAX). Raises ``TypeError`` if the object is neither.
+    The protocol carries no device ordinal, so it is read from the framework's
+    ``.device`` attribute and defaults to 0.
     """
-    if has_cuda_array_interface(arr):
-        iface = arr.__cuda_array_interface__
-        dtype = np.dtype(iface["typestr"])
-        device = _cai_device_ordinal(arr)
-        return _CudaArrayMeta(
-            data_ptr=iface["data"][0],
-            shape=tuple(iface["shape"]),
-            dtype=dtype,
-            device=device,
-            strides_bytes=iface.get("strides"),
-        )
+    iface = arr.__cuda_array_interface__
+    shape = tuple(iface["shape"])
+    dtype = np.dtype(iface["typestr"])  # e.g. "<f4", "|b1"
+    strides = iface.get("strides")
 
-    data_ptr, device, shape, strides, dtype = dlpack.read_dlpack_cuda_metadata(arr)
-    # DLPack strides are in elements; convert to bytes for the shared contiguity
-    # check (CAI reports strides in bytes).
-    strides_bytes = (
-        None if strides is None else tuple(s * dtype.itemsize for s in strides)
-    )
-    return _CudaArrayMeta(
-        data_ptr=data_ptr,
+    device = 0
+    dev = getattr(arr, "device", None)
+    if hasattr(dev, "id"):
+        device = dev.id  # CuPy
+    elif getattr(dev, "index", None) is not None:
+        device = dev.index  # PyTorch
+
+    return _CudaArrayInfo(
+        data_ptr=iface["data"][0],
+        nbytes=math.prod(shape) * dtype.itemsize,
         shape=shape,
         dtype=dtype,
         device=device,
-        strides_bytes=strides_bytes,
+        strides=None if strides is None else tuple(strides),
     )
-
-
-def _cai_device_ordinal(arr: Any) -> int:
-    """Best-effort CUDA device ordinal for a ``__cuda_array_interface__`` array.
-
-    CAI carries no device field, so read the framework's own attribute: CuPy
-    exposes ``.device.id``, PyTorch ``.device.index``. Defaults to 0 otherwise.
-    """
-    dev = getattr(arr, "device", None)
-    if dev is not None:
-        if hasattr(dev, "id"):
-            return dev.id  # CuPy
-        if getattr(dev, "index", None) is not None:
-            return dev.index  # PyTorch
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -305,9 +269,8 @@ def _pin_cuda_ipc_staging_buffer(device_ptr: int) -> None:
 def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     """Dump a CUDA array to a JSON dict with a CUDA IPC handle.
 
-    Works with any array whose GPU memory is reachable via
-    ``__cuda_array_interface__`` (CuPy, PyTorch, Numba) or via DLPack on a CUDA
-    device (JAX, which does not implement CAI).
+    Works with any object that implements ``__cuda_array_interface__``, such
+    as CuPy arrays, PyTorch tensors, and single-device JAX arrays.
 
     The IPC handle allows another process on the same host (with --ipc=host)
     to access the GPU memory directly without any CPU round-trip.
@@ -324,25 +287,21 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     :func:`tesseract_core.runtime.cuda.api.stage_for_legacy_ipc`) and
     exports a handle to that instead. Still far cheaper than a host round-trip.
     """
-    if not is_gpu_array(arr):
+    if not has_cuda_array_interface(arr):
         raise ValueError(
-            "cuda_ipc encoding requires a CUDA array (object exposing "
-            "__cuda_array_interface__ or DLPack on a CUDA device), got "
-            f"{type(arr).__name__}"
+            "cuda_ipc encoding requires a CUDA array "
+            f"(object with __cuda_array_interface__), got {type(arr).__name__}"
         )
 
-    meta = _read_cuda_array_meta(arr)
-
-    if not meta.is_c_contiguous():
+    info = _read_cuda_array_info(arr)
+    if not info.is_c_contiguous():
         raise ValueError(
             "cuda_ipc encoding requires a C-contiguous array; got one with "
-            "non-row-major strides. Make a contiguous copy first (e.g. "
-            "cupy.ascontiguousarray / torch.Tensor.contiguous / "
-            "jnp.ascontiguousarray)."
+            f"strides {info.strides}. Make a contiguous copy first (e.g. "
+            "cupy.ascontiguousarray / torch.Tensor.contiguous)."
         )
 
-    data_ptr = meta.data_ptr
-    nbytes = meta.nbytes
+    data_ptr, nbytes = info.data_ptr, info.nbytes
 
     # Keep the source allocation alive until exports are explicitly released.
     # (Still needed even on the VMM fallback path below: stage_for_legacy_ipc
@@ -375,10 +334,10 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     handle_b64 = pybase64.b64encode_as_string(handle_bytes)
     return {
         "object_type": "array",
-        "shape": list(meta.shape),
-        "dtype": meta.dtype.name,
+        "shape": list(info.shape),
+        "dtype": info.dtype.name,
         "data": {
-            "buffer": f"{meta.device}:{handle_b64}:{storage_offset}:{storage_size}",
+            "buffer": f"{info.device}:{handle_b64}:{storage_offset}:{storage_size}",
             "encoding": "cuda_ipc",
         },
     }
@@ -432,7 +391,8 @@ class IpcDeviceArray:
     * ``__dlpack__`` / ``__dlpack_device__`` let Torch and JAX adopt it,
 
     both zero-copy. ``.copy_to_host()`` / ``np.asarray(...)`` materialise a host
-    NumPy copy so it can be inspected without any GPU framework installed.
+    NumPy copy so it can be inspected without any GPU framework installed. Only
+    ``np.asarray`` is subject to :func:`check_device_host_copy`.
 
     Ownership of the device buffer is released exactly once: either a
     :func:`weakref.finalize` callback frees it (see
@@ -492,6 +452,7 @@ class IpcDeviceArray:
         return host
 
     def __array__(self, dtype: Any = None) -> np.ndarray:
+        check_device_host_copy("an IpcDeviceArray")
         host = self.copy_to_host()
         return host if dtype is None else host.astype(dtype)
 
@@ -586,15 +547,15 @@ def validate_cuda_array(
     """Validate a GPU array's shape/dtype without pulling it off the device.
 
     Returns the object unchanged so it can later be encoded via CUDA IPC (see
-    :func:`tesseract_core.runtime.array_encoding.encode_array`). Only the array's
-    metadata (from ``__cuda_array_interface__`` or DLPack) is inspected -- no
-    device-to-host copy or kernel launch occurs. Never casts, because a cast
-    would need a device copy the caller did not ask for.
+    :func:`tesseract_core.runtime.array_encoding.encode_array`). It reads only
+    the ``__cuda_array_interface__`` metadata, so no device-to-host copy or
+    kernel launch occurs. Never casts, because a cast would need a device copy
+    the caller did not ask for.
     """
-    meta = _read_cuda_array_meta(val)
+    info = _read_cuda_array_info(val)
     check_shape_dtype_no_cast(
-        meta.shape,
-        meta.dtype.name,
+        info.shape,
+        info.dtype.name,
         expected_shape,
         expected_dtype,
         no_cast_reason="cuda_ipc does not cast on device",
