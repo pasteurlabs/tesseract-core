@@ -226,8 +226,6 @@ def test_schemas_contain_diffable_paths_extra(testmodule):
         # Valid combinations for jac_inputs and jac_outputs
         ({"array_seq.[0]", "array_dict.{a}", "scalar_diff"}, {"result_seq.[0]"}),
         ({"array_seq.[0]", "array_dict.{a}"}, {"result_seq.[0]"}),
-        ({"array_seq.[0]", "array_dict.{a}", "scalar_diff"}, {"result_seq.[0]"}),
-        ({"array_seq.[0]", "array_dict.{a}"}, {"result_seq.[0]"}),
         ({"array_seq.[0]", "array_seq.[1]"}, {"result_seq.[0]"}),
     ],
 )

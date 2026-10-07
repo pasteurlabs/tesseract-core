@@ -124,16 +124,15 @@ class NPZProcessor:
                 qoi_names, qoi = self._extract_optional(self.qoi_processor, folder)
 
                 # Validate QoI if configured (skip folder if empty)
-                if self.qoi_processor is not None:
-                    if (
-                        qoi is None
-                        or len(qoi) == 0
-                        or qoi_names is None
-                        or len(qoi_names) == 0
-                    ):
-                        print(f"⚠️  Skipping {folder.name}: Empty QoI data")
-                        skipped_count += 1
-                        continue
+                if self.qoi_processor is not None and (
+                    qoi is None
+                    or len(qoi) == 0
+                    or qoi_names is None
+                    or len(qoi_names) == 0
+                ):
+                    print(f"⚠️  Skipping {folder.name}: Empty QoI data")
+                    skipped_count += 1
+                    continue
 
                 # Extract geometry (optional, may fail)
                 geometry_names, geometry = self._extract_optional(
@@ -155,7 +154,7 @@ class NPZProcessor:
                 output_paths.append(out_path)
                 processed_count += 1
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - batch job: log and skip the folder
                 print(f"❌ Failed to process {folder.name}: {e}")
                 skipped_count += 1
                 continue
@@ -246,14 +245,10 @@ class NPZProcessor:
             qoi_names, qoi = self._extract_optional(self.qoi_processor, folder)
 
             # Validate QoI if configured (raise error if empty)
-            if self.qoi_processor is not None:
-                if (
-                    qoi is None
-                    or len(qoi) == 0
-                    or qoi_names is None
-                    or len(qoi_names) == 0
-                ):
-                    raise ValueError(f"Empty QoI data for folder {folder.name}")
+            if self.qoi_processor is not None and (
+                qoi is None or len(qoi) == 0 or qoi_names is None or len(qoi_names) == 0
+            ):
+                raise ValueError(f"Empty QoI data for folder {folder.name}")
 
             # Extract geometry (optional)
             geometry_names, geometry = self._extract_optional(

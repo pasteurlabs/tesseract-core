@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
@@ -49,6 +49,15 @@ class RuntimeConfig(BaseModel):
     ] = ()
     docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
 
+    # Used to build environments for `Tesseract.from_source`. conda defaults to
+    # CONDA_EXE, which conda's shell hook exports for the active installation.
+    uv_executable: Annotated[tuple[str, ...], BeforeValidator(validate_executable)] = (
+        "uv",
+    )
+    conda_executable: Annotated[
+        tuple[str, ...], BeforeValidator(validate_executable)
+    ] = Field(default_factory=lambda: (os.environ.get("CONDA_EXE") or "conda",))
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
@@ -60,7 +69,7 @@ def update_config(**kwargs: Any) -> None:
     global _current_config
 
     conf_settings = {}
-    for field in RuntimeConfig.model_fields.keys():
+    for field in RuntimeConfig.model_fields:
         env_key = f"TESSERACT_{field.upper()}"
         if env_key in os.environ:
             conf_settings[field] = os.environ[env_key]

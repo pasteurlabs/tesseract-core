@@ -110,12 +110,11 @@ def get_at_path(tree: Any, path: str) -> Any:
         if method in ("seq", "dict"):
             return _get_recursive(tree[idx], path)
         elif method == "getattr":
-            if hasattr(tree, key):
-                return _get_recursive(getattr(tree, key), path)
-            elif isinstance(tree, Mapping):
-                # If the key is not an attribute, try to access it as a key in a dictionary
-                # This is useful for accessing keys of models that have been dumped to dictionaries
+            if isinstance(tree, Mapping):
+                # Dumped models are dicts, so look up keys before attributes like dict.values
                 return _get_recursive(tree[key], path)
+            elif hasattr(tree, key):
+                return _get_recursive(getattr(tree, key), path)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -145,18 +144,17 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 return
             return _set_recursive(tree[idx], path, value)
         elif method == "getattr":
-            if hasattr(tree, key):
-                if not path:
-                    setattr(tree, key, value)
-                    return
-                return _set_recursive(getattr(tree, key), path, value)
-            elif isinstance(tree, dict):
-                # If the key is not an attribute, try to access it as a key in a dictionary
-                # This is useful for accessing keys of models that have been dumped to dictionaries
+            if isinstance(tree, dict):
+                # Dumped models are dicts, so look up keys before attributes like dict.values
                 if not path:
                     tree[key] = value
                     return
                 return _set_recursive(tree[key], path, value)
+            elif hasattr(tree, key):
+                if not path:
+                    setattr(tree, key, value)
+                    return
+                return _set_recursive(getattr(tree, key), path, value)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -227,6 +225,16 @@ def filter_func(
         return outputs
 
     return filtered_func
+
+
+def is_arraylike(value: Any) -> bool:
+    """Whether ``value`` is an array or converts to one.
+
+    Duck-typed on ``__array__`` and ``shape``, so NumPy arrays and scalars,
+    on-disk binrefs and device arrays all qualify, while a model that happens
+    to carry a ``shape`` field does not.
+    """
+    return hasattr(value, "__array__") and hasattr(value, "shape")
 
 
 class LRUCache:

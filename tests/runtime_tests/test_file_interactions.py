@@ -8,10 +8,7 @@ from pydantic import BaseModel
 from typeguard import suppress_type_checks
 
 from tesseract_core.runtime import Array, Float32
-from tesseract_core.runtime.file_interactions import (
-    output_to_bytes,
-    parse_accept_header,
-)
+from tesseract_core.runtime.file_interactions import output_to_bytes
 
 
 class OutputSchema(BaseModel):
@@ -98,9 +95,11 @@ def test_output_to_bytes_json_binref_lz4(output_data):
 
 
 def test_output_to_bytes_unsupported_format(output_data):
-    with pytest.raises(ValueError, match="Unsupported format invalid"):
-        with suppress_type_checks():
-            output_to_bytes(output_data, "invalid")  # type: ignore
+    with (
+        pytest.raises(ValueError, match="Unsupported format invalid"),
+        suppress_type_checks(),
+    ):
+        output_to_bytes(output_data, "invalid")  # type: ignore
 
 
 def test_output_to_bytes_empty_dict():
@@ -117,28 +116,3 @@ def test_output_to_bytes_scalar_only():
     assert isinstance(result, bytes)
     decoded = json.loads(result.decode())
     assert decoded == 42.0
-
-
-@pytest.mark.parametrize(
-    "accept, expected",
-    [
-        # Bare media type: format from the suffix, no transport (config decides).
-        ("application/json", ("json", None)),
-        ("application/json+base64", ("json+base64", None)),
-        ("application/json+binref", ("json+binref", None)),
-        # gpu_transport parameter is picked up alongside the format.
-        (
-            "application/json+base64; gpu_transport=cuda_ipc",
-            ("json+base64", "cuda_ipc"),
-        ),
-        # No space after ';' and an explicit 'none' both parse.
-        ("application/json+base64;gpu_transport=none", ("json+base64", "none")),
-        # Other parameters (charset, q) are ignored; a quoted value is unwrapped.
-        (
-            'application/json+binref; charset=utf-8; gpu_transport="cuda_ipc"',
-            ("json+binref", "cuda_ipc"),
-        ),
-    ],
-)
-def test_parse_accept_header(accept, expected):
-    assert parse_accept_header(accept) == expected

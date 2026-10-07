@@ -40,13 +40,13 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
     "pydantic<=2.13.5,>=2.10",
-    "fastapi<=0.141.1,>=0.115",
+    "fastapi<=0.142.2,>=0.115",
     "requests<=2.34.2,>=2.32.4",
-    "uvicorn<=0.53.0,>=0.34",
+    "uvicorn<=0.54.0,>=0.34",
     "typer<=0.27.2,>=0.26.8",  # sphinxcontrib-typer needs >=0.26.8
     "fsspec[http,s3]<=2026.9.0,>=2024.12",
     "s3fs<=2026.9.0,>=2024.12",  # enters via fsspec[s3]; pin explicitly so the oldest resolution can't pair an ancient s3fs with a modern aiobotocore
-    "pybase64<=1.5.0,>=1.4",
+    "pybase64<=1.5.1,>=1.4",
     "orjson<=3.12.0,>=3.10",
     "numpy<=2.5.3,>=1.26",
     "debugpy<=1.8.22,>=1.8.14",
@@ -75,7 +75,7 @@ dev = [
     "httpx",  # required by fastapi older test client
     "httpx2",  # required by fastapi newer test client
     "pre-commit",
-    "toml",  # required to test .github/workflows/update_runtime_deps.py
+    "toml",  # required to test .github/scripts/update_runtime_deps.py
     "pytest",
     "pytest-cov",
     "pytest-mock",
@@ -198,6 +198,7 @@ ignore = [
     "D213", # Pydocstyle: multiline docstring summary start on 2nd line. Conflicts with D212
     "ANN202", # Type annotations: allow missing return type for private functions
     "ANN401", # Type annotations: allow Any
+    "C408",  # Unnecessary dict() call, mirrors Tesseract's named-input API
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]

@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
 import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -28,6 +29,7 @@ from pydantic import (
     create_model,
     field_validator,
 )
+from pydantic_core import PydanticUndefined
 
 from .schema_types import (
     Array,
@@ -49,6 +51,24 @@ T = TypeVar("T")
 UNION_TYPES = [Union, types.UnionType]
 
 
+# Building a TypeAdapter generates a pydantic core schema, which for an array
+# annotation means creating a new model class. That costs far more than the
+# validation itself, so gradient endpoints must not build adapters per request.
+@functools.lru_cache(maxsize=1024)
+def _type_adapter(annotation: Any) -> TypeAdapter:
+    """TypeAdapter for an annotation taken from a Tesseract's schema."""
+    return TypeAdapter(annotation)
+
+
+@functools.lru_cache(maxsize=1024)
+def _exact_array_adapter(shape: tuple, dtype: str | None) -> TypeAdapter:
+    """TypeAdapter for ``Array[shape, dtype]``, cached by ``(shape, dtype)``.
+
+    ``Array[...]`` returns a new class per call, so it cannot be the cache key.
+    """
+    return TypeAdapter(Array[shape, dtype])
+
+
 def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
     """Construct an Annotated type with the given metadata."""
     out = obj
@@ -68,6 +88,7 @@ def apply_function_to_model_tree(
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
+    default_func: Callable[[Any, Any], Any] | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -76,6 +97,9 @@ def apply_function_to_model_tree(
     The given function should take two arguments: the type annotation and the path to it
     in the model tree (as a list of field names). It should return the new type annotation
     for the field, or None to remove the field from the model.
+
+    If given, default_func is called with the type annotation and default value of every
+    field that has a default, and should return the default to use in the new model.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
@@ -127,6 +151,8 @@ def apply_function_to_model_tree(
                 new_field = copy(field)
                 # Need to strip off metadata to trigger re-evaluation of the field
                 new_field.metadata = []
+                if default_func is not None and field.default is not PydanticUndefined:
+                    new_field.default = default_func(field.annotation, field.default)
 
                 new_fields[field_name] = (new_type, new_field)
 
@@ -345,11 +371,21 @@ def create_abstract_eval_schema(
             return ShapeDType.from_array_type(obj)
         return obj
 
+    def replace_array_default_with_shapedtype(obj: Any, default: Any) -> Any:
+        if not safe_issubclass(obj, PydanticArrayAnnotation):
+            return default
+        try:
+            arr = TypeAdapter(obj).validate_python(default)
+        except ValidationError:
+            return default
+        return ShapeDType(shape=arr.shape, dtype=str(arr.dtype))
+
     GeneratedInputSchema = apply_function_to_model_tree(
         InputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
+        default_func=replace_array_default_with_shapedtype,
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
@@ -357,6 +393,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
+        default_func=replace_array_default_with_shapedtype,
     )
 
     class AbstractInputSchema(BaseModel):
@@ -512,7 +549,7 @@ def create_gradient_schema(
         """Find the PydanticArrayAnnotation for a given concrete path."""
         for path_pattern, array_type in path_patterns.items():
             if _is_regex_pattern(path_pattern):
-                path_matches = bool(re.match(path_pattern, concrete_path))
+                path_matches = bool(re.fullmatch(path_pattern, concrete_path))
             else:
                 path_matches = path_pattern == concrete_path
 
@@ -521,7 +558,9 @@ def create_gradient_schema(
 
         raise ValueError(f"Invalid path: {concrete_path}")
 
-    def _find_shape_from_path(path_patterns: dict, concrete_path: str) -> tuple:
+    def _find_shape_from_path(
+        path_patterns: dict, concrete_path: str
+    ) -> tuple | types.EllipsisType:
         return _find_annotation_from_path(path_patterns, concrete_path).expected_shape
 
     InputSchema = apply_function_to_model_tree(
@@ -566,21 +605,20 @@ def create_gradient_schema(
                         continue
                     elif output_shape is Ellipsis:
                         expected_shape = (
+                            *arr.shape[: len(arr.shape) - len(input_shape)],
                             *input_shape,
-                            arr.shape[-len(input_shape) :],
                         )
                     elif input_shape is Ellipsis:
                         expected_shape = (
                             *output_shape,
-                            *arr.shape[: len(output_shape)],
+                            *arr.shape[len(output_shape) :],
                         )
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
-                    expected_annotation = Array[expected_shape, str(arr.dtype)]
                     try:
-                        result[output_path][input_path] = TypeAdapter(
-                            expected_annotation
+                        result[output_path][input_path] = _exact_array_adapter(
+                            expected_shape, str(arr.dtype)
                         ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(
@@ -597,7 +635,7 @@ def create_gradient_schema(
                     diffable_output_patterns, output_path
                 )
                 try:
-                    result[output_path] = TypeAdapter(
+                    result[output_path] = _type_adapter(
                         expected_annotation
                     ).validate_python(arr, context=info.context)
                 except ValidationError as e:
@@ -613,7 +651,7 @@ def create_gradient_schema(
                     diffable_input_patterns, input_path
                 )
                 try:
-                    result[input_path] = TypeAdapter(
+                    result[input_path] = _type_adapter(
                         expected_annotation
                     ).validate_python(arr, context=info.context)
                 except ValidationError as e:
@@ -721,11 +759,10 @@ def create_gradient_schema(
                     annotation = _find_annotation_from_path(
                         diffable_input_patterns, path
                     )
-                    exact_annotation = Array[ref_shape, annotation.expected_dtype]
                     try:
-                        validated[path] = TypeAdapter(exact_annotation).validate_python(
-                            arr, context=info.context
-                        )
+                        validated[path] = _exact_array_adapter(
+                            tuple(ref_shape), annotation.expected_dtype
+                        ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(f"Tangent vector '{path}': {e}") from e
                 return validated
@@ -797,7 +834,7 @@ def create_gradient_schema(
                         diffable_output_patterns, path
                     )
                     try:
-                        validated[path] = TypeAdapter(annotation).validate_python(
+                        validated[path] = _type_adapter(annotation).validate_python(
                             arr, context=info.context
                         )
                     except ValidationError as e:

@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable
 from functools import wraps
 from types import ModuleType
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Response
@@ -15,10 +15,11 @@ from pydantic import BaseModel
 from .config import get_config
 from .core import create_endpoints
 from .file_interactions import (
+    available_compressions,
     available_formats,
+    available_gpu_transports,
     join_paths,
     output_to_bytes,
-    parse_accept_header,
 )
 from .mpa import start_run
 from .profiler import Profiler
@@ -27,89 +28,111 @@ from .profiler import Profiler
 GET_ENDPOINTS = {"health"}
 
 
-def negotiate_output_format(accept: str | None) -> str:
-    """Resolve the Accept header to an output format the runtime currently offers.
+class NegotiatedEncoding(NamedTuple):
+    """How a response encodes its arrays, as resolved from the Accept header."""
 
-    Media ranges are tried by descending q-value, so a client listing several
-    types gets the first one this runtime can actually produce.
+    output_format: str
+    gpu_transport: str
+    compression: str | None
+
+
+def parse_media_range(media_range: str) -> tuple[str, dict[str, str]]:
+    """Split one media range of an ``Accept`` header into its type and parameters.
+
+    For example, ``application/json+base64; compression="lz4"`` parses to
+    ``("application/json+base64", {"compression": "lz4"})``. The media type and
+    parameter names are lowercased and quoted values are unwrapped. This does no
+    validation of the values.
     """
+    media_type, *param_strs = media_range.split(";")
+    params = {}
+    for param in param_strs:
+        key, sep, value = param.partition("=")
+        if sep:
+            params[key.strip().lower()] = value.strip().strip('"')
+    return media_type.strip().lower(), params
+
+
+def negotiate_encoding(accept: str | None) -> NegotiatedEncoding:
+    """Resolve the Accept header to an encoding the runtime currently offers.
+
+    Media ranges are tried by descending q-value, and the first one whose format,
+    ``gpu_transport`` and ``compression`` this runtime can all produce wins.
+    Raises a 406 error if there is none.
+
+    Values a range leaves out fall back to the configured ``output_format`` and
+    ``compression``. The GPU transport falls back to ``none`` regardless of the
+    config, which only controls which transports a request may ask for.
+    """
+    config = get_config()
+    default_compression = config.compression or "none"
     if not accept:
-        return get_config().output_format
+        return NegotiatedEncoding(config.output_format, "none", config.compression)
 
-    def quality(media_range: str) -> float:
-        _, _, params = media_range.partition(";")
-        for param in params.split(";"):
-            key, sep, value = param.partition("=")
-            if sep and key.strip() == "q":
-                try:
-                    return float(value.strip())
-                except ValueError:
-                    return 0.0
-        return 1.0
+    def quality(parsed: tuple[str, dict[str, str]]) -> float:
+        try:
+            return float(parsed[1].get("q", 1.0))
+        except ValueError:
+            return 0.0
 
-    allowed = available_formats()
-    ranges = [r.strip() for r in accept.split(",") if r.strip()]
+    formats = available_formats()
+    transports = available_gpu_transports()
+    compressions = available_compressions()
+    ranges = [parse_media_range(r) for r in accept.split(",") if r.strip()]
     # Sorting is stable, so equal-quality ranges keep the client's ordering.
-    for media_range in sorted(ranges, key=quality, reverse=True):
-        media_type = media_range.partition(";")[0].strip().lower()
+    for media_type, params in sorted(ranges, key=quality, reverse=True):
         if media_type in ("*/*", "application/*"):
-            return get_config().output_format
-        output_format = media_type.rpartition("/")[2]
-        if output_format in allowed:
-            return output_format
+            output_format = config.output_format
+        else:
+            output_format = media_type.rpartition("/")[2]
+        gpu_transport = params.get("gpu_transport", "none")
+        compression = params.get("compression", default_compression)
+        if (
+            output_format in formats
+            and gpu_transport in transports
+            and compression in compressions
+        ):
+            return NegotiatedEncoding(
+                output_format,
+                gpu_transport,
+                None if compression == "none" else compression,
+            )
 
     raise HTTPException(
         status_code=406,
         detail={
-            "message": f"Cannot produce any format accepted by {accept!r}",
-            "available_formats": list(allowed),
+            "message": f"Cannot produce any encoding accepted by {accept!r}",
+            "available_formats": list(formats),
+            "available_gpu_transports": list(transports),
+            "available_compressions": list(compressions),
         },
     )
 
 
 def create_response(
     model: BaseModel,
-    output_format: str,
-    accept: str | None,
+    encoding: NegotiatedEncoding,
     base_dir: str | None,
     binref_dir: str | None,
 ) -> Response:
-    """Create a response in the given (already negotiated) output format.
-
-    ``output_format`` is the host-array output format the caller already
-    negotiated from the ``Accept`` header. How GPU arrays leave the process is a
-    separate axis: it may ride the header as a ``gpu_transport`` media-type
-    parameter (``application/json+base64; gpu_transport=cuda_ipc``), and when the
-    header omits it the served Tesseract's ``gpu_transport`` config applies. So a
-    raw HTTP client can opt in (or out) per request on top of the served default.
-    """
-    config = get_config()
-
-    if not accept or accept == "*/*":
-        gpu_transport = config.gpu_transport
-    else:
-        _, requested_transport = parse_accept_header(accept)
-        # Header wins when it names a transport; otherwise fall back to config.
-        gpu_transport = (
-            requested_transport
-            if requested_transport is not None
-            else config.gpu_transport
-        )
-
+    """Create a response in the given (already negotiated) encoding."""
     if base_dir is None:
-        base_dir = config.output_path
+        base_dir = get_config().output_path
 
     content = output_to_bytes(
         model,
-        output_format,
+        encoding.output_format,
         base_dir=base_dir,
         binref_dir=binref_dir,
-        gpu_transport=gpu_transport,
+        compression=encoding.compression,
+        gpu_transport=encoding.gpu_transport,
     )
     # Name the format actually produced, which is not necessarily what the
     # client asked for: an Accept header may hold several media ranges.
     return Response(
-        status_code=200, content=content, media_type=f"application/{output_format}"
+        status_code=200,
+        content=content,
+        media_type=f"application/{encoding.output_format}",
     )
 
 
@@ -137,7 +160,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         @wraps(endpoint_func)
         async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
             config = get_config()
-            output_format = negotiate_output_format(accept)
+            encoding = negotiate_encoding(accept)
 
             # Release device buffers exported by the previous request's GPU
             # transport. Releasing at the start of each request keeps every
@@ -165,8 +188,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 profiler.print_stats()
             return create_response(
                 result,
-                output_format,
-                accept=accept,
+                encoding,
                 base_dir=output_path,
                 binref_dir=rundir_name,
             )
@@ -213,14 +235,16 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
     generate_openapi = app.openapi
 
-    def openapi_with_output_formats() -> dict:
-        from .file_interactions import available_formats
-
+    def openapi_with_encodings() -> dict:
+        # Advertise what the Accept header can negotiate, so clients can discover
+        # it without knowing how this server was configured.
         schema = generate_openapi()
         schema["x-supported-output-formats"] = list(available_formats())
+        schema["x-supported-gpu-transports"] = list(available_gpu_transports())
+        schema["x-supported-compressions"] = list(available_compressions())
         return schema
 
-    app.openapi = openapi_with_output_formats
+    app.openapi = openapi_with_encodings
     return app
 
 

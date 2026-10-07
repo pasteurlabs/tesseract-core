@@ -19,9 +19,9 @@ import argparse
 import os
 from pathlib import Path
 
-import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import animation
 from matplotlib.colors import Normalize
 
 

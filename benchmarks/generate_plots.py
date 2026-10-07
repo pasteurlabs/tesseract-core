@@ -109,8 +109,6 @@ def _format_time_label(time_ms: float) -> str:
         return f"{time_ms:.0f}"
     elif time_ms >= 10:
         return f"{time_ms:.1f}"
-    elif time_ms >= 1:
-        return f"{time_ms:.2f}"
     elif time_ms >= 0.1:
         return f"{time_ms:.2f}"
     else:

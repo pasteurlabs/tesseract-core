@@ -63,7 +63,7 @@ def pytest_collection_modifyitems(config, items):
             docker = docker_client_module.CLIDockerClient()
             docker.info()
             return True
-        except Exception:
+        except (docker_client_module.APIError, OSError):
             return False
 
     run_endtoend = config.getvalue("run_endtoend")
@@ -104,10 +104,11 @@ def _has_cuda_gpu() -> bool:
                 ["nvidia-smi", "-L"],
                 capture_output=True,
                 timeout=10,
+                check=False,
             ).returncode
             == 0
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
@@ -117,6 +118,22 @@ def tesseract_output_dir(tmp_path_factory):
     output_path = tmp_path_factory.mktemp("output_path")
     os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path)
     yield output_path
+
+
+@pytest.fixture(autouse=True)
+def forbid_device_host_copy(monkeypatch):
+    """Make implicit device-to-host copies raise in every test.
+
+    Containers don't inherit the variable and need it passed explicitly. Tests
+    that exercise a host copy on purpose opt out via ``allow_device_host_copy``.
+    """
+    monkeypatch.setenv("TESSERACT_FORBID_DEVICE_HOST_COPY", "1")
+
+
+@pytest.fixture
+def allow_device_host_copy(monkeypatch):
+    """Opt a test out of ``forbid_device_host_copy``."""
+    monkeypatch.delenv("TESSERACT_FORBID_DEVICE_HOST_COPY")
 
 
 @pytest.fixture(autouse=True)
@@ -273,8 +290,10 @@ def serve_in_subprocess():
                 [
                     sys.executable,
                     "-c",
-                    "from tesseract_core.runtime.serve import serve; "
-                    f"serve(host='localhost', port={port}, num_workers={num_workers})",
+                    (
+                        "from tesseract_core.runtime.serve import serve; "
+                        f"serve(host='localhost', port={port}, num_workers={num_workers})"
+                    ),
                 ],
                 env={**os.environ, "TESSERACT_API_PATH": str(api_file), **(env or {})},
                 stdout=subprocess.PIPE,
@@ -390,7 +409,7 @@ def _docker_cleanup(docker_client, request):
                     container_obj = container
 
                 container_obj.remove(v=True, force=True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(
                     f"Failed to remove container {container}: {pprint_exc(e)}"
                 )
@@ -404,7 +423,7 @@ def _docker_cleanup(docker_client, request):
                     image_obj = image
 
                 docker_client.images.remove(image_obj.id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
 
         # Remove volumes
@@ -416,7 +435,7 @@ def _docker_cleanup(docker_client, request):
                     volume_obj = volume
 
                 volume_obj.remove(force=True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
 
         from tesseract_core.sdk.config import get_config
@@ -430,7 +449,7 @@ def _docker_cleanup(docker_client, request):
                     check=True,
                     capture_output=True,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
                 failures.append(f"Failed to remove network {network}: {pprint_exc(e)}")
 
         if failures:
@@ -617,7 +636,7 @@ def mocked_docker(monkeypatch):
     def hacked_get(url, *args, **kwargs):
         if url.endswith("/health"):
             # Simulate a successful health check
-            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+            return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
     monkeypatch.setattr(serving.requests, "get", hacked_get)
@@ -659,22 +678,27 @@ def mocked_cuda(monkeypatch):
                 "get_handle": [],
                 "open": [],
                 "close": [],
-                "stage": [],
             }
             # Simulated device memory, keyed by device pointer.
             self._buffers: dict[int, bytearray] = {}
             self._next_ptr = 0xD000
             # Bytes returned by the next device->host copy, if a test seeds them.
             self.device_bytes: bytes | None = None
-            # Force ipc_get_mem_handle to reject a pointer (simulating a
-            # VMM/pool-backed allocation) unless it is a staging buffer.
-            self.reject_non_staging_ipc = False
-            self._staging_ptrs: set[int] = set()
+            # Make legacy IPC reject pointers this fake did not allocate,
+            # simulating VMM-backed memory. Its own cudaMalloc buffers, such as
+            # staging buffers, stay exportable.
+            self.reject_foreign_ipc = False
+            # Active device, as cudaSetDevice / cudaGetDevice see it.
+            self.current_device = 0
 
         # -- device / memory management ---------------------------------
 
         def set_device(self, device: int) -> None:
             self.calls["set_device"].append(device)
+            self.current_device = device
+
+        def get_device(self) -> int:
+            return self.current_device
 
         def malloc(self, nbytes: int) -> int:
             ptr = self._next_ptr
@@ -688,7 +712,6 @@ def mocked_cuda(monkeypatch):
                 return
             self.calls["free"].append(device_ptr)
             self._buffers.pop(device_ptr, None)
-            self._staging_ptrs.discard(device_ptr)
 
         def memcpy_device_to_device(self, dst: int, src: int, nbytes: int) -> None:
             self.calls["memcpy_d2d"].append((dst, src, nbytes))
@@ -710,7 +733,7 @@ def mocked_cuda(monkeypatch):
             return device_ptr - 256, 4096
 
         def ipc_get_mem_handle(self, device_ptr: int) -> bytes:
-            if self.reject_non_staging_ipc and device_ptr not in self._staging_ptrs:
+            if self.reject_foreign_ipc and device_ptr not in self._buffers:
                 raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
             self.calls["get_handle"].append(device_ptr)
             return b"\x01" * IPC_HANDLE_SIZE
@@ -722,17 +745,14 @@ def mocked_cuda(monkeypatch):
         def ipc_close_mem_handle(self, device_ptr: int) -> None:
             self.calls["close"].append(device_ptr)
 
-        def stage_for_legacy_ipc(self, src_ptr: int, nbytes: int) -> int:
-            self.calls["stage"].append((src_ptr, nbytes))
-            ptr = 0x9000
-            self._staging_ptrs.add(ptr)
-            self._buffers[ptr] = bytearray(nbytes)
-            return ptr
+        def device_total_memory(self, device: int) -> int:
+            return 8 << 30
 
     fake = FakeCuda()
 
     for name in (
         "set_device",
+        "get_device",
         "malloc",
         "free",
         "memcpy_device_to_device",
@@ -742,16 +762,21 @@ def mocked_cuda(monkeypatch):
         "ipc_get_mem_handle",
         "ipc_open_mem_handle",
         "ipc_close_mem_handle",
-        "stage_for_legacy_ipc",
+        "device_total_memory",
     ):
         monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
-    # Each test starts with empty export registries.
-    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+    # Each test starts with empty export registries and buffer pools, and must
+    # not leave fake pointers behind for the next one.
+    def _reset() -> None:
+        cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
+        cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+
+    _reset()
+    monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())
+    monkeypatch.setattr(cuda_ipc, "_DECODE_POOL", cuda_ipc._BufferPool())
     yield fake
-    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+    _reset()
 
 
 @pytest.fixture(scope="module")
@@ -837,6 +862,7 @@ def mlflow_server():
             ["docker", "compose", "-f", str(compose_file), "-p", project_name, "logs"],
             capture_output=True,
             text=True,
+            check=False,
         )
         print(result.stdout)
         # Stop and remove containers
@@ -852,4 +878,5 @@ def mlflow_server():
                 "-v",
             ],
             capture_output=True,
+            check=False,
         )

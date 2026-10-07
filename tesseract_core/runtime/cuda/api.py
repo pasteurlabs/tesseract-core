@@ -15,6 +15,7 @@ this without a real GPU, replace the functions in this module wholesale (see the
 """
 
 import ctypes
+import functools
 from typing import Any
 
 from tesseract_core.runtime.cuda import loader
@@ -56,7 +57,9 @@ def _error_string(code: int) -> str:
         msg = _get_cudart().cudaGetErrorString(code)
         if msg:
             return msg.decode()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
+        # Only used to decorate an error that is already being raised; failing
+        # to look up its description must not replace it.
         pass
     return f"error code {code}"
 
@@ -82,6 +85,13 @@ def _check(code: int, what: str) -> None:
 def set_device(device: int) -> None:
     """Select the active CUDA device."""
     _check(_get_cudart().cudaSetDevice(device), f"cudaSetDevice({device})")
+
+
+def get_device() -> int:
+    """Return the active CUDA device."""
+    device = ctypes.c_int()
+    _check(_get_cudart().cudaGetDevice(ctypes.byref(device)), "cudaGetDevice")
+    return device.value
 
 
 def malloc(nbytes: int) -> int:
@@ -146,8 +156,8 @@ def ipc_get_mem_handle(device_ptr: int) -> bytes:
     underlying allocation.
 
     Raises ``RuntimeError`` if the pointer is rejected by the legacy IPC API
-    (e.g. VMM/pool-backed memory; see :func:`stage_for_legacy_ipc`, which
-    callers should fall back to on failure).
+    (e.g. VMM/pool-backed memory, which callers should stage into a plain
+    ``cudaMalloc`` buffer instead).
     """
     cudart = _get_cudart()
     handle = loader.CudaIpcMemHandle()
@@ -194,38 +204,6 @@ def ipc_close_mem_handle(device_ptr: int) -> None:
     )
 
 
-def stage_for_legacy_ipc(src_ptr: int, nbytes: int) -> int:
-    """Copy ``nbytes`` into a fresh ``cudaMalloc`` buffer IPC-exportable via the legacy API.
-
-    The legacy ``cudaIpcGetMemHandle`` API rejects memory that CUDA's Virtual
-    Memory Management API (``cuMemCreate``/``cuMemAddressReserve``) allocated,
-    which is what modern pool allocators use, including JAX/XLA's default GPU
-    allocator (confirmed: ``cudaIpcGetMemHandle`` returns
-    ``cudaErrorInvalidValue`` for such pointers; CuPy's and PyTorch's default
-    caching allocators happen to use plain ``cudaMalloc`` pools, so they don't
-    hit this).
-
-    Rather than replicate CUDA's VMM export path (which requires transferring
-    a POSIX file descriptor between processes via ``SCM_RIGHTS`` over a Unix
-    domain socket, since a real fd, not just its integer value, is meaningless
-    in another process's fd table), we take the simpler route of copying the data
-    device-to-device into a plain ``cudaMalloc`` allocation, which *is*
-    IPC-exportable via the legacy API. This costs one on-GPU copy but avoids a
-    new cross-process handshake; it is still far cheaper than a host round-trip.
-
-    Returns the device pointer of the new (caller-owned, offset-zero) buffer.
-    The caller is responsible for freeing it via :func:`free` once the export
-    is no longer needed.
-    """
-    staging_ptr = malloc(nbytes)
-    try:
-        memcpy_device_to_device(staging_ptr, src_ptr, nbytes)
-    except Exception:
-        free(staging_ptr)
-        raise
-    return staging_ptr
-
-
 # -- driver API ------------------------------------------------------------
 
 
@@ -246,3 +224,18 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     if ret != 0:
         raise RuntimeError(f"cuMemGetAddressRange failed with error code {ret}")
     return base.value, size.value
+
+
+@functools.cache
+def device_total_memory(device: int) -> int:
+    """Return the total memory of CUDA device ``device`` in bytes."""
+    driver = _get_driver()
+    handle = ctypes.c_int()
+    ret = driver.cuDeviceGet(ctypes.byref(handle), device)
+    if ret != 0:
+        raise RuntimeError(f"cuDeviceGet failed with error code {ret}")
+    total = ctypes.c_size_t()
+    ret = driver.cuDeviceTotalMem_v2(ctypes.byref(total), handle.value)
+    if ret != 0:
+        raise RuntimeError(f"cuDeviceTotalMem failed with error code {ret}")
+    return total.value

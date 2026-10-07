@@ -3,11 +3,96 @@
 
 """Tests for tesseract_core.runtime.jax_recipes."""
 
+import os
+import subprocess
+import sys
+import textwrap
 from collections.abc import Hashable
+from typing import Any
 
+import equinox as eqx
+import jax
+import jax.numpy as jnp
 import numpy as np
+from pydantic import BaseModel, Field
 
-from tesseract_core.runtime.jax_recipes import _cache_key
+from tesseract_core.runtime import Array, Differentiable, Float32, jax_recipes
+from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+from tesseract_core.runtime.jax_recipes import (
+    _cache_key,
+    as_jax_arrays,
+    jax_apply,
+    jax_jacobian,
+    jax_jvp,
+    jax_vjp,
+)
+
+
+def test_as_jax_arrays_preserves_structure_and_static_leaves():
+    host = np.array([1.0, 2.0], dtype=np.float32)
+    host.setflags(write=False)
+    existing = jnp.asarray([3.0])
+    tree = {"arrays": [host, np.float32(4), existing], "static": ("tag", None, 2)}
+    result = as_jax_arrays(tree)
+    assert all(isinstance(x, jax.Array) for x in result["arrays"])
+    np.testing.assert_array_equal(result["arrays"][0], host)
+    assert result["arrays"][1].item() == 4
+    assert result["arrays"][2] is existing
+    assert result["static"] == tree["static"]
+    assert tree["arrays"][0] is host
+
+
+def test_jax_apply_converts_readonly_host_inputs():
+    class Inputs(BaseModel):
+        x: Array[(2,), Float32]
+
+    host = np.array([1.0, 2.0], dtype=np.float32)
+    host.setflags(write=False)
+
+    def apply(inputs):
+        assert isinstance(inputs["x"], jax.Array)
+        return {"y": inputs["x"] * 2}
+
+    np.testing.assert_array_equal(jax_apply(apply, Inputs(x=host))["y"], [2, 4])
+
+
+def test_jax_endpoints_convert_device_inputs(monkeypatch):
+    class DeviceInput:
+        # Only the metadata/dispatch boundary is simulated; the differentiation
+        # below runs through real JAX arrays on CPU.
+        def __init__(self, values):
+            self.__cuda_array_interface__ = {
+                "shape": (2,),
+                "typestr": "<f4",
+                "data": (0, False),
+                "version": 3,
+            }
+            self.array = jnp.asarray(values, dtype=jnp.float32)
+
+    class Inputs(BaseModel):
+        x: Any
+
+    monkeypatch.setattr(jnp, "from_dlpack", lambda x: x.array)
+    inputs = Inputs(x=DeviceInput([2, 3]))
+    vector = DeviceInput([1, 1])
+    apply = lambda x: {"y": x["x"] ** 2}
+    set_jax_vjp_cache_size(0)
+    np.testing.assert_array_equal(jax_apply(apply, inputs)["y"], [4, 9])
+    np.testing.assert_array_equal(
+        jax_jvp(apply, inputs, {"x"}, {"y"}, {"x": vector})["y"], [4, 6]
+    )
+    np.testing.assert_array_equal(
+        jax_jacobian(apply, inputs, {"x"}, {"y"})["y"]["x"], [[4, 0], [0, 6]]
+    )
+    for cache_size in (0, 1):
+        set_jax_vjp_cache_size(cache_size)
+        try:
+            jax_apply(apply, inputs)
+            np.testing.assert_array_equal(
+                jax_vjp(apply, inputs, {"x"}, {"y"}, {"y": vector})["x"], [4, 6]
+            )
+        finally:
+            set_jax_vjp_cache_size(0)
 
 
 class TestCacheKey:
@@ -104,12 +189,6 @@ class TestCacheKey:
 # Minimal pydantic schema + apply_jit, kept inline so the test doesn't
 # depend on the vectoradd_jax example wiring.
 def _build_api():
-    import equinox as eqx
-    import jax.numpy as jnp
-    from pydantic import BaseModel, Field
-
-    from tesseract_core.runtime import Array, Differentiable, Float32
-
     class Vec(BaseModel):
         v: Differentiable[Array[(None,), Float32]] = Field(description="vec")
         s: Differentiable[Float32] = Field(default=1.0, description="scale")
@@ -157,9 +236,6 @@ class TestCacheCorrectness:
         call hits the cache (same input as the apply that filled it), the
         third misses (different input) and falls through to vjp_jit.
         """
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
-
         set_jax_vjp_cache_size(cache_size)
         InputSchema, apply_jit = _build_api()
         inp_a = _make_inputs(InputSchema, offset=0.0)
@@ -204,13 +280,8 @@ class TestCacheCorrectness:
     def test_cache_hit_actually_engages(self):
         # Sanity check that the cache fills and is read back, not silently
         # bypassed.
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
-
         set_jax_vjp_cache_size(1)
         try:
-            from tesseract_core.runtime import jax_recipes
-
             assert jax_recipes._jax_vjp_cache is not None
             assert jax_recipes._jax_vjp_cache.size == 0
 
@@ -244,9 +315,6 @@ class TestCacheWithNonArrayInputs:
     @staticmethod
     def _vjp(cache_size, norm_ord, prime_with=None):
         """Optionally prime the cache at ``prime_with``, then vjp at ``norm_ord``."""
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
-
         InputSchema, apply_jit = _build_api()
         set_jax_vjp_cache_size(cache_size)
         try:
@@ -271,9 +339,6 @@ class TestCacheWithNonArrayInputs:
     def test_non_jax_input_does_not_break_apply(self):
         # jax.vjp traces every leaf it is handed, so the str leaf aborted the
         # call outright and merely enabling the cache broke the Tesseract.
-        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-        from tesseract_core.runtime.jax_recipes import jax_apply
-
         InputSchema, apply_jit = _build_api()
         set_jax_vjp_cache_size(4)
         try:
@@ -291,3 +356,125 @@ class TestCacheWithNonArrayInputs:
             np.asarray(got["a.s"]), np.asarray(expected["a.s"]), rtol=1e-6
         )
         assert np.asarray(expected["a.s"]).item() != 0.0
+
+
+class TestCacheWithDeviceArrays:
+    """Accelerator arrays are compared on the device instead of hashed on the host.
+
+    ``_is_accelerator_array`` is patched to accept every JAX array, so the device
+    path runs on CPU-only machines too.
+    """
+
+    @staticmethod
+    def _treat_all_arrays_as_device(monkeypatch):
+        monkeypatch.setattr(
+            jax_recipes, "_is_accelerator_array", lambda x: isinstance(x, jax.Array)
+        )
+
+    @staticmethod
+    def _store(tree, value):
+        jax_recipes._jax_vjp_cache.put(_cache_key(tree), value)
+
+    @staticmethod
+    def _lookup(tree):
+        return jax_recipes._jax_vjp_cache.get(_cache_key(tree))
+
+    def test_key_hashes_device_arrays_without_their_bytes(self, monkeypatch):
+        self._treat_all_arrays_as_device(monkeypatch)
+        a = {"x": jnp.array([1.0, 2.0])}
+        b = {"x": jnp.array([1.0, 3.0])}
+        assert hash(_cache_key(a)) == hash(_cache_key(b))
+        assert _cache_key(a) != _cache_key(b)
+        assert _cache_key(a) == _cache_key({"x": jnp.array([1.0, 2.0])})
+        assert _cache_key(a) != _cache_key({"x": jnp.array([1.0, 2.0, 3.0])})
+        assert _cache_key(a)[-1].arrays[0] is a["x"]
+
+    def test_lookup_compares_contents(self, monkeypatch):
+        self._treat_all_arrays_as_device(monkeypatch)
+        jax_recipes._set_jax_vjp_cache_size(1)
+        try:
+            x = {"x": jnp.array([0.0, 1.0, jnp.nan])}
+            self._store(x, "cached")
+            assert self._lookup({"x": jnp.array([0.0, 1.0, jnp.nan])}) == "cached"
+            # Comparison is bitwise like the host path, so -0.0 is a new input.
+            assert self._lookup({"x": jnp.array([-0.0, 1.0, jnp.nan])}) is None
+            assert self._lookup({"x": jnp.array([0.0, 2.0, jnp.nan])}) is None
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+    def test_same_shape_inputs_are_cached_side_by_side(self, monkeypatch):
+        self._treat_all_arrays_as_device(monkeypatch)
+        jax_recipes._set_jax_vjp_cache_size(2)
+        try:
+            first = {"x": jnp.array([1.0, 2.0])}
+            second = {"x": jnp.array([3.0, 4.0])}
+            self._store(first, "first")
+            self._store(second, "second")
+            assert jax_recipes._jax_vjp_cache.size == 2
+            assert self._lookup(first) == "first"
+            assert self._lookup(second) == "second"
+
+            # Storing equal inputs again replaces their entry.
+            self._store({"x": jnp.array([1.0, 2.0])}, "again")
+            assert jax_recipes._jax_vjp_cache.size == 2
+            assert self._lookup(first) == "again"
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+    def test_arrays_on_different_devices_miss(self):
+        # Needs two devices, which a JAX process only gets at startup.
+        code = textwrap.dedent(
+            """
+            import jax
+            import jax.numpy as jnp
+            from tesseract_core.runtime import jax_recipes
+
+            jax_recipes._is_accelerator_array = lambda x: isinstance(x, jax.Array)
+            cache = jax_recipes.LRUCache(maxsize=2)
+            key = lambda device: jax_recipes._cache_key({"x": jax.device_put(x, device)})
+            cpu0, cpu1 = jax.devices()[:2]
+            x = jnp.array([1.0, 2.0])
+            cache.put(key(cpu0), "cached")
+            assert cache.get(key(cpu1)) is None
+            assert cache.get(key(cpu0)) == "cached"
+            """
+        )
+        env = {**os.environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2"}
+        subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+    def test_bitwise_equal_handles_dtypes(self):
+        for arr in (
+            jnp.array([True, False]),
+            jnp.array([1, 2], dtype=jnp.int8),
+            jnp.array([1.0, 2.0], dtype=jnp.bfloat16),
+            jnp.array([1 + 2j, 3 - 4j], dtype=jnp.complex64),
+        ):
+            assert jax_recipes._bitwise_equal((arr,), (arr + 0,))
+            assert not jax_recipes._bitwise_equal((arr,), (jnp.flip(arr),))
+
+    def test_cache_on_matches_cache_off(self, monkeypatch):
+        self._treat_all_arrays_as_device(monkeypatch)
+        InputSchema, apply_jit = _build_api()
+
+        def inputs(offset):
+            inp = _make_inputs(InputSchema, offset=offset)
+            inp.a.v = jnp.asarray(inp.a.v)
+            inp.b.v = jnp.asarray(inp.b.v)
+            return inp
+
+        ct = {"y": jnp.ones(3, dtype=jnp.float32)}
+        expected = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
+
+        jax_recipes._set_jax_vjp_cache_size(1)
+        try:
+            jax_apply(apply_jit, inputs(0.0))
+            hit = self._lookup(as_jax_arrays(inputs(0.0).model_dump()))
+            miss = self._lookup(as_jax_arrays(inputs(0.5).model_dump()))
+            got = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+        assert hit is not None
+        assert miss is None
+        for k in expected:
+            np.testing.assert_allclose(np.asarray(got[k]), np.asarray(expected[k]))

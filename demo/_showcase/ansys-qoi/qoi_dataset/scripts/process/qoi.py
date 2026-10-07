@@ -42,7 +42,7 @@ class QoiProcessor:
                 for key, value in report.values.items():
                     qoi_data[f"{key}_{file_stem}"] = value
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - optional report file: log and skip
                 print(f"⚠️  Error reading {filename}: {e}")
                 continue
 

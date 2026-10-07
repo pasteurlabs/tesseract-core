@@ -85,7 +85,7 @@ def vector_jacobian_product(inputs, vjp_inputs, vjp_outputs, cotangent_vector):
     # Your existing VJP implementation
     ...
 
-def abstract_eval(inputs):
+def abstract_eval(abstract_inputs):
     # Your existing abstract_eval implementation (preferred)
     ...
 

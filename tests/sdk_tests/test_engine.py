@@ -93,6 +93,9 @@ def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
     """
     src_dir = tmp_path_factory.mktemp("src")
     (src_dir / "foo").touch()
+    if provider == "conda":
+        # Incidental: conda cannot build without one, so staging now says so.
+        (src_dir / "tesseract_environment.yaml").write_text("name: foobar\n")
     build_dir = tmp_path_factory.mktemp("build")
 
     config = TesseractConfig(
@@ -1707,7 +1710,13 @@ def test_parse_requirements(tmpdir):
 
 
 def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
-    """Conda provider without an environment file does not error at staging."""
+    """Conda provider without an environment file is reported at staging.
+
+    Letting staging succeed only defers the failure: the Dockerfile copies
+    `tesseract_environment.yaml` unconditionally, so the build dies several
+    stages later on a cache-key error that names neither the config nor the
+    provider.
+    """
     src_dir = tmp_path_factory.mktemp("src")
     (src_dir / "tesseract_api.py").touch()
     build_dir = tmp_path_factory.mktemp("build")
@@ -1716,8 +1725,8 @@ def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
         name="foobar",
         build_config=TesseractBuildConfig(requirements={"provider": "conda"}),
     )
-    engine.prepare_build_context(src_dir, build_dir, config)
-    assert (build_dir / "Dockerfile").exists()
+    with pytest.raises(UserError, match=r"tesseract_environment\.yaml"):
+        engine.prepare_build_context(src_dir, build_dir, config)
 
 
 @pytest.mark.parametrize(
