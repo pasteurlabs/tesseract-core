@@ -616,9 +616,11 @@ def create_gradient_schema(
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
+                    # No dtype check: GPU arrays pass through validation unconverted,
+                    # and their dtype (e.g. torch.float32) need not be a NumPy name.
                     try:
                         result[output_path][input_path] = _exact_array_adapter(
-                            expected_shape, str(arr.dtype)
+                            expected_shape, None
                         ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(
