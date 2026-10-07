@@ -549,7 +549,7 @@ def mocked_docker(monkeypatch):
         """Mock CLIDockerClient class."""
 
         @staticmethod
-        def info() -> tuple:
+        def version() -> tuple:
             """Mock info method for DockerClient."""
             return "", ""
 
