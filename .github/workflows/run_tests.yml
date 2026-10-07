@@ -225,15 +225,6 @@ jobs:
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
         run: |
-          mkdir -p ~/.config/containers
-          # TEMP: default to host networking to bypass slirp4netns during the
-          # podman CI investigation. Known to conflict with tests that run
-          # multiple tesseracts on fixed ports or exercise host.docker.internal.
-          cat > ~/.config/containers/containers.conf <<'EOF'
-          [containers]
-          netns = "host"
-          EOF
-
           systemctl start --user podman.socket
           systemctl status --user podman.socket
 
