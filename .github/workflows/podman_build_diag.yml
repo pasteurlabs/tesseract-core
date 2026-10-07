@@ -57,8 +57,9 @@ jobs:
           # exact context so differences are engine-level, not SDK-level.
           mkdir -p /tmp/diag_src
           uv run --no-sync tesseract init --target-dir /tmp/diag_src --name diag
-          uv run --no-sync tesseract build --generate-only /tmp/diag_src
-          BUILD_DIR=$(ls -td /tmp/diag_src/build* 2>/dev/null | head -1 || find /tmp -maxdepth 4 -name Dockerfile -path '*/build*' -printf '%h\n' | head -1)
+          # --generate-only prints the build-context path as its last line of
+          # output; capture it (stdout + stderr merged for robustness).
+          BUILD_DIR=$(uv run --no-sync tesseract build --generate-only /tmp/diag_src 2>&1 | tail -n 1 | xargs)
           echo "BUILD_DIR=${BUILD_DIR}" >> $GITHUB_ENV
           echo "Build context: ${BUILD_DIR}"
           ls -la "${BUILD_DIR}"
