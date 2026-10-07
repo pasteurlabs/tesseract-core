@@ -745,6 +745,38 @@ class TestLRUCache:
         cache.put(b"k", "v")
         assert cache.get(b"k") is None
 
+    def test_compares_keys_at_most_once_per_call(self):
+        """Comparing keys can be costly (the JAX recipe compares device arrays)."""
+
+        class Key:
+            eq_calls = 0
+
+            def __init__(self, value):
+                self.value = value
+
+            def __hash__(self):
+                return hash(self.value)
+
+            def __eq__(self, other):
+                Key.eq_calls += 1
+                return self.value == other.value
+
+        def eq_calls(call):
+            Key.eq_calls = 0
+            call()
+            return Key.eq_calls
+
+        cache = LRUCache(maxsize=2)
+        assert eq_calls(lambda: cache.put(Key(1), "a")) == 0
+        assert eq_calls(lambda: cache.put(Key(2), "b")) == 0
+        assert eq_calls(lambda: cache.get(Key(1))) == 1
+        # Evicts Key(2), the least recently used.
+        assert eq_calls(lambda: cache.put(Key(3), "c")) == 0
+        assert eq_calls(lambda: cache.get(Key(2))) == 0
+        assert eq_calls(lambda: cache.put(Key(3), "d")) <= 2
+        assert cache.get(Key(3)) == "d"
+        assert cache.get(Key(1)) == "a"
+
 
 class TestSplitPath:
     """Dots separate segments except where they belong to a dict key."""

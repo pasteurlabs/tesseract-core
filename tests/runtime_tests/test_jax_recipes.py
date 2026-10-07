@@ -359,17 +359,10 @@ class TestCacheWithNonArrayInputs:
 
 
 class TestCacheWithDeviceArrays:
-    """Accelerator arrays are compared on the device instead of hashed on the host.
+    """Array leaves are compared where they live instead of copied to the host.
 
-    ``_is_accelerator_array`` is patched to accept every JAX array, so the device
-    path runs on CPU-only machines too.
+    Every JAX array takes the same path, so these run on CPU-only machines too.
     """
-
-    @staticmethod
-    def _treat_all_arrays_as_device(monkeypatch):
-        monkeypatch.setattr(
-            jax_recipes, "_is_accelerator_array", lambda x: isinstance(x, jax.Array)
-        )
 
     @staticmethod
     def _store(tree, value):
@@ -379,31 +372,29 @@ class TestCacheWithDeviceArrays:
     def _lookup(tree):
         return jax_recipes._jax_vjp_cache.get(_cache_key(tree))
 
-    def test_key_hashes_device_arrays_without_their_bytes(self, monkeypatch):
-        self._treat_all_arrays_as_device(monkeypatch)
+    def test_key_fingerprints_arrays_without_copying_them(self):
         a = {"x": jnp.array([1.0, 2.0])}
         b = {"x": jnp.array([1.0, 3.0])}
-        assert hash(_cache_key(a)) == hash(_cache_key(b))
+        # The fingerprint separates keys by contents before __eq__ compares them.
+        assert hash(_cache_key(a)) != hash(_cache_key(b))
         assert _cache_key(a) != _cache_key(b)
         assert _cache_key(a) == _cache_key({"x": jnp.array([1.0, 2.0])})
         assert _cache_key(a) != _cache_key({"x": jnp.array([1.0, 2.0, 3.0])})
         assert _cache_key(a)[-1].arrays[0] is a["x"]
 
-    def test_lookup_compares_contents(self, monkeypatch):
-        self._treat_all_arrays_as_device(monkeypatch)
+    def test_lookup_compares_contents(self):
         jax_recipes._set_jax_vjp_cache_size(1)
         try:
             x = {"x": jnp.array([0.0, 1.0, jnp.nan])}
             self._store(x, "cached")
             assert self._lookup({"x": jnp.array([0.0, 1.0, jnp.nan])}) == "cached"
-            # Comparison is bitwise like the host path, so -0.0 is a new input.
+            # Comparison is bitwise, so -0.0 is a new input.
             assert self._lookup({"x": jnp.array([-0.0, 1.0, jnp.nan])}) is None
             assert self._lookup({"x": jnp.array([0.0, 2.0, jnp.nan])}) is None
         finally:
             jax_recipes._set_jax_vjp_cache_size(0)
 
-    def test_same_shape_inputs_are_cached_side_by_side(self, monkeypatch):
-        self._treat_all_arrays_as_device(monkeypatch)
+    def test_same_shape_inputs_are_cached_side_by_side(self):
         jax_recipes._set_jax_vjp_cache_size(2)
         try:
             first = {"x": jnp.array([1.0, 2.0])}
@@ -429,14 +420,36 @@ class TestCacheWithDeviceArrays:
             import jax.numpy as jnp
             from tesseract_core.runtime import jax_recipes
 
-            jax_recipes._is_accelerator_array = lambda x: isinstance(x, jax.Array)
             cache = jax_recipes.LRUCache(maxsize=2)
             key = lambda device: jax_recipes._cache_key({"x": jax.device_put(x, device)})
-            cpu0, cpu1 = jax.devices()[:2]
+            cpu0, cpu1 = jax.devices("cpu")[:2]
             x = jnp.array([1.0, 2.0])
             cache.put(key(cpu0), "cached")
             assert cache.get(key(cpu1)) is None
             assert cache.get(key(cpu0)) == "cached"
+            """
+        )
+        env = {**os.environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2"}
+        subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+    def test_key_holds_arrays_on_different_devices(self):
+        # Needs two devices, which a JAX process only gets at startup.
+        code = textwrap.dedent(
+            """
+            import jax
+            import jax.numpy as jnp
+            from tesseract_core.runtime import jax_recipes
+
+            cache = jax_recipes.LRUCache(maxsize=2)
+            cpu0, cpu1 = jax.devices("cpu")[:2]
+            x = jnp.array([1.0, 2.0])
+            key = lambda d0, d1: jax_recipes._cache_key(
+                {"a": jax.device_put(x, d0), "b": jax.device_put(x + 1, d1)}
+            )
+            cache.put(key(cpu0, cpu1), "cached")
+            assert cache.get(key(cpu0, cpu1)) == "cached"
+            assert cache.get(key(cpu1, cpu0)) is None
+            assert cache.get(key(cpu0, cpu0)) is None
             """
         )
         env = {**os.environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2"}
@@ -452,8 +465,7 @@ class TestCacheWithDeviceArrays:
             assert jax_recipes._bitwise_equal((arr,), (arr + 0,))
             assert not jax_recipes._bitwise_equal((arr,), (jnp.flip(arr),))
 
-    def test_cache_on_matches_cache_off(self, monkeypatch):
-        self._treat_all_arrays_as_device(monkeypatch)
+    def test_cache_on_matches_cache_off(self):
         InputSchema, apply_jit = _build_api()
 
         def inputs(offset):
