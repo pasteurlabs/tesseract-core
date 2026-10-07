@@ -1245,22 +1245,16 @@ class CLIDockerClient:
         self.networks = Networks()
 
     @staticmethod
-    def ping() -> None:
-        """Verify the configured engine is reachable.
-
-        Uses ``version`` rather than ``info`` because ``podman info`` takes
-        1-7 s per call (cold Go binary bootstrap + full system probe), while
-        ``podman version`` is a small daemonless lookup that still hits the
-        socket when DOCKER_HOST is set, matching docker's behaviour.
-        """
+    def info() -> tuple:
+        """Wrapper around docker info call."""
         docker = _get_docker_executable()
         try:
-            subprocess.run(
-                [*docker, "version"],
+            result = subprocess.run(
+                [*docker, "info"],
                 check=True,
                 capture_output=True,
-                timeout=10,
             )
+            return result.stdout, result.stderr
         except subprocess.CalledProcessError as ex:
             raise APIError() from ex
 

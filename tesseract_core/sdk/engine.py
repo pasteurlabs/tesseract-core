@@ -88,7 +88,7 @@ def needs_docker(func: Callable) -> Callable:
     @functools.wraps(func)
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
         try:
-            docker_client.ping()
+            docker_client.info()
         except (APIError, RuntimeError) as ex:
             raise UserError(
                 "Could not reach Docker daemon, check if it is running."
