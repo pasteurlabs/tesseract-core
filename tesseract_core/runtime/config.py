@@ -54,14 +54,12 @@ class RuntimeConfig(BaseModel):
     )
     profiling: bool = False
     tracing: bool = False
-    # How device (GPU) arrays leave the process. Any value other than ``none``
-    # (e.g. ``cuda_ipc``, set via TESSERACT_GPU_TRANSPORT=cuda_ipc) is an
-    # experimental, unstable capability that may change or be removed without
-    # notice: it exports device memory by reference without a host round-trip.
-    # ``none`` (default) instead copies GPU arrays to the host and serializes
-    # them via ``output_format`` like any CPU array, so a Tesseract never emits
-    # by-reference handles unless explicitly opted in. Independent of
-    # ``output_format``, which only governs CPU arrays.
+    # GPU transport this Tesseract accepts besides ``none``, for inputs and
+    # outputs. Any other value (e.g. ``cuda_ipc``) passes device memory by
+    # reference and is experimental, so it may change or be removed without
+    # notice. Responses only use it when a request asks for it (see
+    # serve.negotiate_encoding). Independent of ``output_format``, which only
+    # governs CPU arrays.
     gpu_transport: gpu_transport_type = "none"
     # Fraction of each GPU's memory that ``cuda_ipc`` may keep in idle device
     # buffers for reuse across requests, split evenly between buffers for

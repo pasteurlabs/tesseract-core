@@ -20,14 +20,15 @@ PathLike = str | Path
 #   as ``cuda_ipc`` that exports them by reference without a host round-trip).
 #
 # They compose freely: a response can inline its CPU arrays as JSON while
-# handing its GPU arrays out as ``cuda_ipc`` handles. The two are set
-# independently, via the ``output_format`` and ``gpu_transport`` config.
+# handing its GPU arrays out as ``cuda_ipc`` handles. Clients choose both per
+# request via the ``Accept`` header, while the runtime config sets the default
+# output format and which GPU transports are offered.
 supported_format_type = Literal["json", "json+base64", "json+binref"]
 
 # GPU transports. ``none`` is the always-available default (GPU output is copied
-# to the host and encoded via the output format). Any other value exports device
-# memory by reference and is an experimental, opt-in capability (see
-# available_gpu_transports).
+# to the host and encoded via the output format). Any other value passes device
+# memory by reference and is an experimental capability that must be enabled on
+# the server and requested by the client.
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
@@ -48,13 +49,10 @@ def available_formats() -> tuple[str, ...]:
 
 
 def available_gpu_transports() -> tuple[str, ...]:
-    """GPU transports the runtime currently accepts for device-array output.
+    """GPU transports the runtime accepts for inputs and outputs.
 
-    Always includes ``none`` (copy GPU output to host and serialize it like any
-    CPU array). A by-reference transport such as ``cuda_ipc`` is experimental and
-    only offered when the runtime is configured with a non-``none``
-    ``gpu_transport`` (e.g. ``TESSERACT_GPU_TRANSPORT=cuda_ipc``); it may change
-    or be removed without notice.
+    Always includes ``none``, plus the configured ``gpu_transport`` if it is
+    anything else.
     """
     from tesseract_core.runtime.config import get_config
 
@@ -64,38 +62,9 @@ def available_gpu_transports() -> tuple[str, ...]:
     return ("none",)
 
 
-def parse_accept_header(accept: str) -> tuple[str, str | None, str | None]:
-    """Split an ``Accept`` value into (output_format, gpu_transport, compression).
-
-    The media type's structured-syntax suffix selects the host-array output
-    format (``application/json+binref`` -> ``json+binref``). Parameters such as
-    ``gpu_transport`` and ``compression`` ride as media-type parameters, e.g. an
-    ``Accept`` of ``application/json+base64; compression=lz4; gpu_transport=cuda_ipc``
-    parses to ``("json+base64", "cuda_ipc", "lz4")``.
-
-    Returns the parsed format, transport parameter, and compression parameter.
-    Parameters return ``None`` when the header omits them (the caller falls back
-    to the configured ``gpu_transport`` / ``compression``). Only recognized
-    parameters are extracted; other parameters (e.g. a charset) are ignored.
-    This does no validation of the values -- :func:`output_to_bytes` checks them
-    against the accepted sets.
-    """
-    media_type, _, params_str = accept.partition(";")
-    output_format = media_type.strip().split("/")[-1]
-
-    gpu_transport: str | None = None
-    compression: str | None = None
-    for param in params_str.split(";"):
-        key, sep, value = param.partition("=")
-        if sep:
-            key_clean = key.strip()
-            val_clean = value.strip().strip('"')
-            if key_clean == "gpu_transport":
-                gpu_transport = val_clean
-            elif key_clean == "compression":
-                compression = val_clean
-
-    return output_format, gpu_transport, compression
+def available_compressions() -> tuple[str, ...]:
+    """Output compressions the runtime accepts (``none`` disables compression)."""
+    return ("none", "lz4")
 
 
 def output_to_bytes(
