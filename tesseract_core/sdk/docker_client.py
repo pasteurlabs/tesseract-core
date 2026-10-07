@@ -331,6 +331,13 @@ class Images:
         docker = _get_docker_executable()
         extra_args = config.docker_build_args
 
+        # BuildKit (docker) runs independent stages in parallel by default;
+        # buildah (podman) runs them serially unless "--jobs" is passed. Our
+        # Dockerfile template has two stages (build_stage + run_stage), so
+        # --jobs=2 lets podman match docker's parallelism.
+        if is_podman():
+            extra_args = ("--jobs=2", *extra_args)
+
         for secret in secrets or []:
             extra_args = ("--secret", secret, *extra_args)
 
