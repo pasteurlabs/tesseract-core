@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import traceback
 import uuid
 import warnings
@@ -157,18 +158,22 @@ class ServerCapabilities:
 
 
 @dataclass(frozen=True)
-class _RequestedEncoding:
-    """What a client requests for a call, with ``None`` meaning no preference."""
+class RequestedEncoding:
+    """The encoding calls through a Tesseract request (see :attr:`Tesseract.current_encoding`).
+
+    Each field is the value calls request, or None if they leave it to the
+    server's default.
+    """
 
     output_format: str | None = None
     gpu_transport: str | None = None
     compression: str | None = None
 
-    def merge(self, overrides: _RequestedEncoding | None) -> _RequestedEncoding:
+    def merge(self, overrides: RequestedEncoding | None) -> RequestedEncoding:
         """Return a copy with the fields ``overrides`` sets taking precedence."""
         if overrides is None:
             return self
-        return _RequestedEncoding(
+        return RequestedEncoding(
             output_format=overrides.output_format or self.output_format,
             gpu_transport=overrides.gpu_transport or self.gpu_transport,
             compression=overrides.compression or self.compression,
@@ -196,8 +201,8 @@ class _RequestedEncoding:
 
 
 def _fit_encoding_to_server(
-    encoding: _RequestedEncoding, capabilities: ServerCapabilities
-) -> _RequestedEncoding:
+    encoding: RequestedEncoding, capabilities: ServerCapabilities
+) -> RequestedEncoding:
     """Check ``encoding`` against what the server advertises, before any work is done.
 
     Raises ValueError if the server cannot provide the encoding. Returns the
@@ -234,6 +239,22 @@ def _fit_encoding_to_server(
     return encoding
 
 
+# GPU transports a client picks by itself when a server offers them, in order of
+# preference.
+_AUTO_GPU_TRANSPORTS = ("cuda_ipc",)
+
+
+@dataclass(frozen=True)
+class _TransportCheck:
+    """Whether a GPU transport works between a client and a server."""
+
+    usable: bool | None
+    """None if the server cannot be asked, because its runtime predates the check."""
+
+    reason: str | None = None
+    """Why the transport cannot be used, if it cannot."""
+
+
 class Tesseract:
     """A Tesseract.
 
@@ -255,7 +276,7 @@ class Tesseract:
     _binref_pool_enabled: bool = False
     # Set on views created by with_encoding, which share their parent's client
     # without owning it.
-    _encoding: _RequestedEncoding | None = None
+    _encoding: RequestedEncoding | None = None
     _owns_client: bool = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -472,9 +493,12 @@ class Tesseract:
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            gpu_transport: GPU transport to enable in the runtime config, resolved against
-                ``runtime_config`` with the precedence described in ``engine.serve``.
-                Calls pass arrays in memory, so they never use it to transport arrays.
+            gpu_transport: Whether the endpoints accept GPU arrays, which only
+                integrations that pass GPU arrays act on (see
+                :meth:`resolve_gpu_transport`). ``none`` means they get GPU inputs
+                copied to the host, and ``cuda_ipc`` means they get them as they
+                are. Resolved against ``runtime_config`` with the precedence
+                described in ``engine.serve``.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -813,7 +837,10 @@ class Tesseract:
             ... ) as t:
             ...     t.with_encoding(gpu_transport="none").apply(inputs)
 
-        Has no effect on in-process Tesseracts created via :meth:`from_tesseract_api`.
+        In-process Tesseracts created via :meth:`from_tesseract_api` pass arrays in
+        memory, so only ``gpu_transport`` means anything for them: it is what
+        :meth:`resolve_gpu_transport` returns, which tells integrations such as
+        Tesseract-JAX whether to hand the endpoints GPU arrays as they are.
 
         Args:
             output_format: Format for CPU arrays in responses.
@@ -830,11 +857,13 @@ class Tesseract:
             ValueError: if the server does not accept a requested value, or runs
                 a runtime too old to be asked for it.
         """
-        requested = _RequestedEncoding(output_format, gpu_transport, compression)
-        capabilities = self.server_capabilities
-        if capabilities is not None:
+        requested = RequestedEncoding(output_format, gpu_transport, compression)
+        if isinstance(self._client, LocalClient):
+            self._client.check_requested_gpu_transport(gpu_transport)
+        else:
             # Calls check again with the full encoding, but failing here points
             # at the argument that caused it
+            capabilities = self._client.server_capabilities
             _fit_encoding_to_server(requested, capabilities)
             if compression is not None and capabilities.compressions is None:
                 warnings.warn(
@@ -848,8 +877,58 @@ class Tesseract:
         view._client = self._client
         view._owns_client = False
         view._stream_logs = self._stream_logs
-        view._encoding = (self._encoding or _RequestedEncoding()).merge(requested)
+        view._encoding = (self._encoding or RequestedEncoding()).merge(requested)
         return view
+
+    @property
+    @requires_client
+    def current_encoding(self) -> RequestedEncoding:
+        """The encoding calls through this Tesseract request.
+
+        The options this Tesseract was created with, overridden by those of
+        :meth:`with_encoding` for a view. A field is None if calls leave it to the
+        server's default, which for ``gpu_transport`` means copying GPU arrays to
+        the host. To find out which GPU transport to use for GPU arrays, see
+        :meth:`resolve_gpu_transport`.
+        """
+        return self._client.current_encoding(self._encoding)
+
+    @requires_client
+    def resolve_gpu_transport(self) -> str:
+        """Get the GPU transport that calls through this Tesseract should use for GPU arrays.
+
+        For integrations that pass GPU arrays, such as Tesseract-JAX and
+        Tesseract-Torch, so that GPU arrays stay on the device whenever that
+        works and are copied to the host otherwise:
+
+            >>> transport = tess.resolve_gpu_transport()
+            >>> tess.with_encoding(gpu_transport=transport).apply(gpu_inputs)
+
+        If this Tesseract requests a GPU transport, either through
+        :meth:`with_encoding` or the ``gpu_transport`` it was created with, that
+        transport is returned once it is known to work. Otherwise this returns
+        ``cuda_ipc`` if the server offers it and it works from this process, and
+        ``none`` if not, with a warning if the server offers it but it does not
+        work.
+
+        Whether a transport works depends on how both processes are set up
+        (``cuda_ipc`` needs them on one host with the same GPU visible to both,
+        and container isolation can get in the way), so it is found out by
+        exchanging a small GPU array with the server, once per connection.
+        Runtimes older than 1.15 cannot take part in this exchange, so a
+        transport requested from one is returned unchecked.
+
+        In-process Tesseracts created via :meth:`from_tesseract_api` return the
+        ``gpu_transport`` they were created with unless a view requests ``none``.
+
+        Returns:
+            ``none``, or the name of the GPU transport to use.
+
+        Raises:
+            ValueError: if the requested transport is not enabled on this Tesseract.
+            RuntimeError: if the requested transport does not work from this process.
+        """
+        return self._client.resolve_gpu_transport(self._encoding)
 
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
@@ -1251,6 +1330,27 @@ def _close_encoding_context(ctx: EncodingContext) -> None:
         )
 
 
+def _gpu_array_to_host(arr: Any) -> np.ndarray:
+    """Copy a GPU array to the host, for encodings that serialize its bytes."""
+    # Import the runtime only when the flag is set or the array needs it, so a
+    # base SDK install without it can still host-copy arrays that convert
+    # themselves (e.g. JAX's). Keep the truthy values in sync with
+    # check_device_host_copy.
+    if os.environ.get("TESSERACT_FORBID_DEVICE_HOST_COPY", "").lower() in {
+        "1",
+        "true",
+    }:
+        _import_cuda_ipc().check_device_host_copy(f"a {type(arr).__name__} GPU array")
+    try:
+        host = np.asanyarray(arr)
+    except (TypeError, ValueError):
+        # PyTorch and CuPy refuse to convert device memory implicitly
+        host = None
+    if host is None or host.dtype == object:
+        host = _import_cuda_ipc().cuda_array_to_host(arr)
+    return host
+
+
 def _encode_array(
     arr: Any,
     encoding: Literal["base64", "raw", "cuda_ipc", "cuda_vmm", "binref"] = "base64",
@@ -1275,16 +1375,7 @@ def _encode_array(
                 )
             ctx.exported_cuda_ipc = True
             return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
-        # Import the runtime only when the flag is set, so a base SDK install
-        # without it can still host-copy GPU arrays.
-        # Keep the truthy values in sync with check_device_host_copy.
-        if os.environ.get("TESSERACT_FORBID_DEVICE_HOST_COPY", "").lower() in {
-            "1",
-            "true",
-        }:
-            _import_cuda_ipc().check_device_host_copy(
-                f"a {type(arr).__name__} GPU array"
-            )
+        arr = _gpu_array_to_host(arr)
 
     if encoding == "binref":
         if ctx is None:
@@ -1510,6 +1601,11 @@ def _decode_array(
     return arr
 
 
+# Guards each client's transport checks. Shared by all clients, since checks are
+# rare and short.
+_TRANSPORT_CHECK_LOCK = threading.Lock()
+
+
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
@@ -1573,9 +1669,9 @@ class HTTPClient:
         return self._url
 
     @property
-    def default_encoding(self) -> _RequestedEncoding:
+    def default_encoding(self) -> RequestedEncoding:
         """What this client requests for calls that do not override it."""
-        return _RequestedEncoding(self._output_format, self._gpu_transport)
+        return RequestedEncoding(self._output_format, self._gpu_transport)
 
     @cached_property
     def openapi_schema(self) -> dict:
@@ -1587,6 +1683,116 @@ class HTTPClient:
     def server_capabilities(self) -> ServerCapabilities:
         """The encodings the server advertises in its OpenAPI schema."""
         return ServerCapabilities.from_openapi_schema(self.openapi_schema)
+
+    @cached_property
+    def _transport_checks(self) -> dict[str, _TransportCheck]:
+        """Results of :meth:`check_gpu_transport`, by transport."""
+        return {}
+
+    def check_gpu_transport(self, gpu_transport: str) -> _TransportCheck:
+        """Find out whether ``gpu_transport`` works between this process and the server.
+
+        Runs the check the first time it is asked for each transport and returns
+        the same answer after that.
+        """
+        with _TRANSPORT_CHECK_LOCK:
+            if gpu_transport not in self._transport_checks:
+                self._transport_checks[gpu_transport] = self._run_transport_check(
+                    gpu_transport
+                )
+            return self._transport_checks[gpu_transport]
+
+    def _run_transport_check(self, gpu_transport: str) -> _TransportCheck:
+        if gpu_transport != "cuda_ipc":
+            return _TransportCheck(False, f"unknown gpu_transport {gpu_transport!r}")
+        try:
+            cuda_ipc = _import_cuda_ipc()
+            request, expected, exported = cuda_ipc.start_transport_check()
+        except Exception as exc:  # noqa: BLE001 - becomes the reason it cannot be used
+            return _TransportCheck(
+                False,
+                "this process could not export GPU memory "
+                f"({type(exc).__name__}: {exc})",
+            )
+        # The server reads the exported array while answering, so it must stay
+        # alive until the response is in. It is not in the per-request export
+        # registry, so holding it here is what keeps it alive.
+        response = self._send(
+            f"{self.url}/check_gpu_transport",
+            "POST",
+            orjson.dumps(request),
+            {},
+        )
+        del exported
+        if response.status_code == requests.codes.not_found:
+            return _TransportCheck(None)
+        if not response.ok:
+            return _TransportCheck(
+                False,
+                f"the Tesseract answered the check with error "
+                f"{response.status_code}: {response.text}",
+            )
+        reply = from_json(response.content)
+        if not reply.get("ok"):
+            return _TransportCheck(False, reply.get("reason", "no reason given"))
+        try:
+            cuda_ipc.finish_transport_check(reply.get("array"), expected)
+        except Exception as exc:  # noqa: BLE001 - becomes the reason it cannot be used
+            return _TransportCheck(
+                False,
+                "this process could not open GPU memory exported by the Tesseract "
+                f"({type(exc).__name__}: {exc})",
+            )
+        return _TransportCheck(True)
+
+    def current_encoding(
+        self, overrides: RequestedEncoding | None
+    ) -> RequestedEncoding:
+        """See :attr:`Tesseract.current_encoding`."""
+        return self.default_encoding.merge(overrides)
+
+    def resolve_gpu_transport(self, overrides: RequestedEncoding | None) -> str:
+        """See :meth:`Tesseract.resolve_gpu_transport`."""
+        requested = self.current_encoding(overrides).gpu_transport
+        if requested == "none":
+            return "none"
+
+        if requested is not None:
+            _fit_encoding_to_server(
+                RequestedEncoding(gpu_transport=requested), self.server_capabilities
+            )
+            check = self.check_gpu_transport(requested)
+            if check.usable is False:
+                raise RuntimeError(
+                    f"gpu_transport={requested!r} was requested, but it does not "
+                    f"work between this process and the Tesseract: {check.reason}. "
+                    "Request gpu_transport='none' to copy GPU arrays to the host."
+                )
+            return requested
+
+        offered = self.server_capabilities.gpu_transports or ()
+        for candidate in _AUTO_GPU_TRANSPORTS:
+            if candidate not in offered:
+                continue
+            check = self.check_gpu_transport(candidate)
+            if check.usable:
+                return candidate
+            with _TRANSPORT_CHECK_LOCK:
+                warn = candidate not in self._transport_fallback_warned
+                self._transport_fallback_warned.add(candidate)
+            if warn:
+                warnings.warn(
+                    f"The Tesseract at {self.url} offers gpu_transport="
+                    f"{candidate!r}, but it does not work from this process, so GPU "
+                    f"arrays are copied to the host instead: {check.reason}",
+                    stacklevel=3,
+                )
+        return "none"
+
+    @cached_property
+    def _transport_fallback_warned(self) -> set[str]:
+        """Transports this client has warned about not being able to use."""
+        return set()
 
     def _send(
         self,
@@ -1626,7 +1832,7 @@ class HTTPClient:
         method: str = "GET",
         payload: dict | None = None,
         run_id: str | None = None,
-        encoding: _RequestedEncoding | None = None,
+        encoding: RequestedEncoding | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
@@ -1727,7 +1933,7 @@ class HTTPClient:
         payload: dict | None = None,
         run_id: str | None = None,
         stream_logs: BoolOrCallable = False,
-        encoding: _RequestedEncoding | None = None,
+        encoding: RequestedEncoding | None = None,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -1812,13 +2018,47 @@ class LocalClient:
         # Allows external clients (e.g. tesseract-jax) to access module directly
         self.api_module = tesseract_api
 
+    @property
+    def gpu_transport(self) -> str:
+        """The GPU transport this Tesseract was created with (``none`` if none)."""
+        config = self._config_snapshot[0]
+        return "none" if config is None else config.gpu_transport
+
+    def check_requested_gpu_transport(self, gpu_transport: str | None) -> None:
+        """Raise if ``gpu_transport`` is a transport this Tesseract was not created with."""
+        if gpu_transport not in (None, "none", self.gpu_transport):
+            raise ValueError(
+                f"This in-process Tesseract does not accept gpu_transport="
+                f"{gpu_transport!r}, since it was created with gpu_transport="
+                f"{self.gpu_transport!r}. Create it with Tesseract.from_tesseract_api"
+                f"(..., gpu_transport={gpu_transport!r}) if its endpoints accept GPU "
+                "arrays."
+            )
+
+    def current_encoding(
+        self, overrides: RequestedEncoding | None
+    ) -> RequestedEncoding:
+        """See :attr:`Tesseract.current_encoding`."""
+        config = self._config_snapshot[0]
+        if config is None:
+            created = RequestedEncoding(gpu_transport="none")
+        else:
+            created = RequestedEncoding(
+                config.output_format, config.gpu_transport, config.compression
+            )
+        return created.merge(overrides)
+
+    def resolve_gpu_transport(self, overrides: RequestedEncoding | None) -> str:
+        """See :meth:`Tesseract.resolve_gpu_transport`."""
+        return self.current_encoding(overrides).gpu_transport
+
     def run_tesseract(
         self,
         endpoint: str,
         payload: dict | None = None,
         run_id: str | None = None,
         stream_logs: BoolOrCallable = False,
-        encoding: _RequestedEncoding | None = None,
+        encoding: RequestedEncoding | None = None,
     ) -> dict:
         """Run a Tesseract endpoint.
 

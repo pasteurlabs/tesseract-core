@@ -27,7 +27,10 @@ by :mod:`array_encoding` are:
 * :func:`dump_cuda_ipc_arraydict` / :func:`load_cuda_ipc_arraydict` -- the
   encode/decode pair,
 * :func:`release_pinned_ipc_exports` -- keepalive cleanup, called once per
-  request by both the server (for its outputs) and the client (for its inputs).
+  request by both the server (for its outputs) and the client (for its inputs),
+* :func:`start_transport_check` / :func:`answer_transport_check` /
+  :func:`finish_transport_check` -- the exchange that tells a client whether
+  ``cuda_ipc`` works between it and a particular server.
 
 Out-of-process consumers that ``dlopen`` libcudart themselves (e.g. the
 ``tesseract_jax`` C++ FFI shim) can reuse the library discovery -- including the
@@ -61,11 +64,14 @@ from tesseract_core.runtime.device_transport import DeviceTransport
 
 __all__ = [
     "IpcDeviceArray",
+    "answer_transport_check",
     "cuda_array_to_host",
     "dump_cuda_ipc_arraydict",
+    "finish_transport_check",
     "has_cuda_array_interface",
     "load_cuda_ipc_arraydict",
     "release_pinned_ipc_exports",
+    "start_transport_check",
     "validate_cuda_array",
 ]
 
@@ -174,7 +180,9 @@ def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
 
     device = 0
     dev = getattr(arr, "device", None)
-    if hasattr(dev, "id"):
+    if isinstance(dev, int):
+        device = dev  # IpcDeviceArray
+    elif hasattr(dev, "id"):
         device = dev.id  # CuPy
     elif getattr(dev, "index", None) is not None:
         device = dev.index  # PyTorch
@@ -374,6 +382,11 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     one on-GPU copy (see :func:`_stage_for_export`) and exports a handle to that
     instead, which is still far cheaper than a host round-trip.
     """
+    return _dump_cuda_ipc_arraydict(arr, pin=True)
+
+
+def _dump_cuda_ipc_arraydict(arr: Any, *, pin: bool) -> ArrayDict:
+    """See :func:`dump_cuda_ipc_arraydict`, which pins ``arr`` (``pin=True``)."""
     if not has_cuda_array_interface(arr):
         raise ValueError(
             "cuda_ipc encoding requires a CUDA array "
@@ -394,7 +407,8 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     # (Not strictly needed on the VMM fallback path below, which copies out of
     # `arr` before the handle leaves the process, but keeping the pin gives both
     # paths identical cleanup.)
-    _pin_cuda_ipc_export(arr)
+    if pin:
+        _pin_cuda_ipc_export(arr)
 
     # Synchronization and staging allocations act on the active device, which
     # need not be the array's.
@@ -658,6 +672,110 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
             raise
 
     return IpcDeviceArray(owned_ptr, device, shape, dtype)
+
+
+# ---------------------------------------------------------------------------
+# Transport check
+# ---------------------------------------------------------------------------
+#
+# Whether cuda_ipc works between two processes depends on things neither can
+# see from the other side, such as whether they share a host and a GPU and how a
+# container runtime isolates them. A client therefore finds out by trying,
+# once per server: it exports random bytes, the server opens the handle and
+# checks them, then exports the bytes reversed for the client to open and check
+# in turn. Comparing contents, rather than only whether the handles open, also
+# catches a handle that opens onto the wrong memory.
+#
+# The check can run while other calls are in flight (Tesseract-JAX may lower
+# one function while a compiled one runs), so it never touches the per-request
+# export registry above: releasing that would unpin another call's arrays.
+# Each side keeps its own check buffers alive instead.
+
+# Size of the buffer each side exports during a check.
+_CHECK_NBYTES = 256
+
+# Arrays the server exported in reply to recent checks. Kept alive until enough
+# later checks have replaced them that the client is certainly done reading,
+# even when several clients check at about the same time.
+_CHECK_REPLIES: collections.deque = collections.deque(maxlen=16)
+
+
+def _device_array_from_bytes(data: bytes, device: int) -> IpcDeviceArray:
+    """Copy ``data`` into a fresh ``uint8`` device array owned by this process."""
+    host = np.frombuffer(data, dtype=np.uint8)
+    with _on_device(device):
+        ptr = cuda_api.malloc(host.nbytes)
+        try:
+            cuda_api.memcpy_host_to_device(ptr, host.ctypes.data, host.nbytes)
+            cuda_api.device_synchronize()
+        except Exception:
+            cuda_api.free(ptr)
+            raise
+    return IpcDeviceArray(ptr, device, host.shape, host.dtype)
+
+
+def _export_for_check(arr: IpcDeviceArray) -> ArrayDict:
+    """Export ``arr`` by IPC handle, leaving the per-request export registry alone.
+
+    The caller keeps ``arr`` alive until the other side has read it. ``arr`` is
+    a plain ``cudaMalloc`` buffer, so legacy IPC exports it without the staging
+    copy, whose buffers the next request's release would recycle.
+    """
+    return _dump_cuda_ipc_arraydict(arr, pin=False)
+
+
+def _read_check_array(payload: Any) -> bytes:
+    """Open a check array exported by the other side and return its bytes."""
+    if not isinstance(payload, dict) or payload.get("dtype") != "uint8":
+        raise ValueError("expected a uint8 array")
+    if list(payload.get("shape", ())) != [_CHECK_NBYTES]:
+        raise ValueError(f"expected an array of {_CHECK_NBYTES} bytes")
+    if payload.get("data", {}).get("encoding") != "cuda_ipc":
+        raise ValueError("expected a cuda_ipc array")
+    return load_cuda_ipc_arraydict(payload).copy_to_host().tobytes()
+
+
+def start_transport_check() -> tuple[dict, bytes, IpcDeviceArray]:
+    """Client side: export random bytes from the active CUDA device.
+
+    Returns the request body to send to the server, the bytes its reply must
+    hold, and the exported array, which the caller keeps alive until the server
+    has answered.
+    """
+    data = os.urandom(_CHECK_NBYTES)
+    arr = _device_array_from_bytes(data, cuda_api.get_device())
+    request = {
+        "gpu_transport": "cuda_ipc",
+        "array": _export_for_check(arr),
+        "expected": pybase64.b64encode_as_string(data),
+    }
+    return request, data[::-1], arr
+
+
+def answer_transport_check(request: dict) -> ArrayDict:
+    """Server side: check the client's bytes, then export them reversed.
+
+    Raises if the client's handle cannot be opened or holds the wrong bytes.
+    """
+    data = _read_check_array(request.get("array"))
+    if data != pybase64.b64decode(request.get("expected", ""), validate=True):
+        raise ValueError(
+            "the bytes read through the client's IPC handle differ from the ones "
+            "it wrote"
+        )
+    device = int(request["array"]["data"]["buffer"].split(":", 1)[0])
+    reply = _device_array_from_bytes(data[::-1], device)
+    _CHECK_REPLIES.append(reply)
+    return _export_for_check(reply)
+
+
+def finish_transport_check(reply: Any, expected: bytes) -> None:
+    """Client side: open the server's reply and check it holds ``expected``."""
+    if _read_check_array(reply) != expected:
+        raise ValueError(
+            "the bytes read through the server's IPC handle differ from the ones "
+            "it wrote"
+        )
 
 
 def validate_cuda_array(

@@ -26,6 +26,7 @@ from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, serving, venv_provision
 from tesseract_core.sdk.api_parse import TesseractBuildConfig
 from tesseract_core.sdk.exceptions import UserError
+from tesseract_core.sdk.tesseract import RequestedEncoding
 from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
 
 pytestmark = pytest.mark.timeout(120)
@@ -273,6 +274,18 @@ def test_server_capabilities_reflect_the_server(
             assert capabilities.compressions == ("none", "lz4")
 
 
+def test_no_gpu_transport_without_one_on_the_server(dummy_api_path):
+    """Without a GPU transport on the server, there is nothing to check or use."""
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable
+    ) as tess:
+        assert tess.resolve_gpu_transport() == "none"
+        remote = Tesseract.from_url(tess._client.url)
+        assert remote.resolve_gpu_transport() == "none"
+        # A plain from_url client leaves everything to the server
+        assert remote.current_encoding == RequestedEncoding()
+
+
 def test_with_encoding_applies_to_the_view_only(
     dummy_api_path, sample_inputs, tmp_path
 ):
@@ -282,6 +295,8 @@ def test_with_encoding_applies_to_the_view_only(
         assert list(tmp_path.rglob("*.bin")) == []
 
         binref = tess.with_encoding(output_format="json+binref")
+        assert binref.current_encoding.output_format == "json+binref"
+        assert tess.current_encoding.output_format == "json+base64"
         result = binref.apply(sample_inputs)
         np.testing.assert_allclose(result["result"], [5.0, 8.0])
         num_files = len(list(tmp_path.rglob("*.bin")))

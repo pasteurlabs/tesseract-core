@@ -21,6 +21,7 @@ from typing import Any
 from tesseract_core.runtime.cuda import loader
 
 # cudaMemcpyKind values.
+MEMCPY_HOST_TO_DEVICE = 1
 MEMCPY_DEVICE_TO_HOST = 2
 MEMCPY_DEVICE_TO_DEVICE = 3
 
@@ -124,6 +125,19 @@ def memcpy_device_to_device(dst: int, src: int, nbytes: int) -> None:
             ctypes.c_int(MEMCPY_DEVICE_TO_DEVICE),
         ),
         "cudaMemcpy (device->device)",
+    )
+
+
+def memcpy_host_to_device(dst: int, host_ptr: int, nbytes: int) -> None:
+    """Copy ``nbytes`` from host memory at ``host_ptr`` to a device pointer."""
+    _check(
+        _get_cudart().cudaMemcpy(
+            ctypes.c_void_p(dst),
+            ctypes.c_void_p(host_ptr),
+            ctypes.c_size_t(nbytes),
+            ctypes.c_int(MEMCPY_HOST_TO_DEVICE),
+        ),
+        "cudaMemcpy (host->device)",
     )
 
 

@@ -1052,3 +1052,92 @@ def test_tesseract_api_cuda_ipc_mixed_http(framework, free_port, serve_in_subpro
                 pybase64.b64decode(payload["cpu"]["data"]["buffer"]), dtype=np.float32
             )
             np.testing.assert_allclose(cpu, x + 1.0, rtol=1e-6)
+
+
+# ── Test 7: choosing a GPU transport by checking it works ───────────────
+
+
+# Doubles x with CuPy, or with NumPy where the server has no GPU.
+_DOUBLE_API_CODE = """
+import {module} as xp
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
+
+class InputSchema(BaseModel):
+    x: Array[(None,), Float32]
+
+class OutputSchema(BaseModel):
+    y: Array[(None,), Float32]
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    return OutputSchema(y=xp.asarray(inputs.x) * 2.0)
+"""
+
+
+@requires_cuda
+def test_resolve_gpu_transport_uses_cuda_ipc_when_it_works(
+    free_port, serve_in_subprocess
+):
+    """A client that did not ask for a transport uses cuda_ipc once it checked it works.
+
+    A plain ``from_url`` client has no transport of its own, so this is the
+    case where the client has to find out by itself. Host copies are forbidden
+    throughout (see ``forbid_device_host_copy``), so the call stays on the GPU.
+    """
+    import warnings
+
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE.format(module="cupy"))
+
+        server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc"}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            remote = Tesseract.from_url(url)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                transport = remote.resolve_gpu_transport()
+            assert transport == "cuda_ipc"
+            explicit = remote.with_encoding(gpu_transport="cuda_ipc")
+            assert explicit.resolve_gpu_transport() == "cuda_ipc"
+            disabled = remote.with_encoding(gpu_transport="none")
+            assert disabled.resolve_gpu_transport() == "none"
+
+            x = cupy.arange(4, dtype=cupy.float32)
+            result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
+            np.testing.assert_allclose(
+                result["y"].copy_to_host(), cupy.asnumpy(x) * 2.0, rtol=1e-6
+            )
+
+
+@requires_cuda
+def test_resolve_gpu_transport_falls_back_when_cuda_ipc_does_not_work(
+    free_port, serve_in_subprocess, allow_device_host_copy
+):
+    """A server that offers cuda_ipc but cannot use it gets host copies instead.
+
+    Hiding the GPU from the server stands in for every reason the check can
+    fail, e.g. a server on another host or in another IPC namespace. A client
+    that asked for cuda_ipc gets an error rather than a silent host copy.
+    """
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
+
+        server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc", "CUDA_VISIBLE_DEVICES": ""}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            remote = Tesseract.from_url(url)
+            with pytest.warns(UserWarning, match="copied to the host instead"):
+                transport = remote.resolve_gpu_transport()
+            assert transport == "none"
+
+            # CuPy refuses to convert implicitly, so this takes an explicit copy
+            x = cupy.arange(4, dtype=cupy.float32)
+            result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
+            np.testing.assert_allclose(result["y"], cupy.asnumpy(x) * 2.0, rtol=1e-6)
+
+            with pytest.raises(RuntimeError, match="does not work between"):
+                remote.with_encoding(gpu_transport="cuda_ipc").resolve_gpu_transport()

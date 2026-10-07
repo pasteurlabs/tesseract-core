@@ -184,7 +184,7 @@ Anything the header leaves out falls back to the server's defaults. If the serve
 
 The experimental GPU transports (the `gpu_transport` parameter) must also be enabled on the server, and are only used for requests that ask for them.
 
-In the Python SDK, `Tesseract.server_capabilities` reads what the server supports, and `Tesseract.with_encoding` returns a view of the Tesseract that requests a different encoding for every call made through it:
+In the Python SDK, `Tesseract.server_capabilities` reads what the server supports, and `Tesseract.with_encoding` returns a view of the Tesseract that requests a different encoding for every call made through it. `Tesseract.current_encoding` shows what a Tesseract or view requests:
 
 ```python
 from tesseract_core import Tesseract
@@ -195,3 +195,10 @@ with Tesseract.from_image("vectoradd") as tess:
 ```
 
 The SDK checks each call against what the server advertises before sending it. Runtimes older than 1.13 advertise nothing and cannot parse `Accept` parameters, so requesting `compression` or a GPU transport other than `none` from them raises an error.
+
+A GPU transport the server offers may still not work from a given client. `cuda_ipc`, for example, needs both processes on one host with the same GPU visible to both. `Tesseract.resolve_gpu_transport` finds out by exchanging a small GPU array with the server, once per connection, and returns the transport to use for GPU arrays. That is the one the Tesseract requests if it requests one (raising if it does not work), else `cuda_ipc` if the server offers it and it works, and `none` otherwise. Tesseract-JAX and Tesseract-Torch use it to keep GPU arrays on the device whenever possible, and code passing GPU arrays itself can do the same:
+
+```python
+transport = tess.resolve_gpu_transport()
+result = tess.with_encoding(gpu_transport=transport).apply(gpu_inputs)
+```

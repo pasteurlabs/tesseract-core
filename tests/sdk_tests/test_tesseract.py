@@ -529,9 +529,9 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     ],
 )
 def test_accept_header(encoding, expected):
-    from tesseract_core.sdk.tesseract import _RequestedEncoding
+    from tesseract_core.sdk.tesseract import RequestedEncoding
 
-    assert _RequestedEncoding(**encoding).accept_header() == expected
+    assert RequestedEncoding(**encoding).accept_header() == expected
 
 
 # What runtimes of each age advertise in their OpenAPI schema
@@ -579,13 +579,13 @@ _SCHEMA_CURRENT = {
 )
 def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expected):
     from tesseract_core.sdk.tesseract import (
+        RequestedEncoding,
         ServerCapabilities,
         _fit_encoding_to_server,
-        _RequestedEncoding,
     )
 
     capabilities = ServerCapabilities.from_openapi_schema(schema)
-    requested = _RequestedEncoding(**encoding)
+    requested = RequestedEncoding(**encoding)
     if expected is ValueError:
         with pytest.raises(ValueError):
             _fit_encoding_to_server(requested, capabilities)
@@ -615,6 +615,27 @@ def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_modul
         dummy_tesseract_module, gpu_transport="cuda_ipc"
     )
     assert local.server_capabilities is None
+
+
+def test_in_process_gpu_transport_is_the_one_it_was_created_with(
+    dummy_tesseract_module,
+):
+    # Integrations hand an in-process Tesseract GPU arrays as they are only if it
+    # was created to accept them, since only its creator knows whether the
+    # endpoints can handle them.
+    default = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert default.resolve_gpu_transport() == "none"
+    with pytest.raises(ValueError, match="does not accept gpu_transport='cuda_ipc'"):
+        default.with_encoding(gpu_transport="cuda_ipc")
+
+    enabled = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert enabled.resolve_gpu_transport() == "cuda_ipc"
+    assert enabled.current_encoding.gpu_transport == "cuda_ipc"
+    disabled = enabled.with_encoding(gpu_transport="none")
+    assert disabled.resolve_gpu_transport() == "none"
+    assert disabled.current_encoding.gpu_transport == "none"
 
 
 @pytest.mark.parametrize(

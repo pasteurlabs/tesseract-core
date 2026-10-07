@@ -9,7 +9,7 @@ from types import ModuleType
 from typing import Annotated, Any, NamedTuple
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from .config import get_config
@@ -136,6 +136,32 @@ def create_response(
     )
 
 
+def check_gpu_transport(request: dict) -> dict:
+    """Answer a client checking whether a GPU transport works between it and this server.
+
+    Returns ``{"ok": True, "array": ...}`` with the transport's reply, or
+    ``{"ok": False, "reason": ...}`` if this side of the check failed. See
+    :func:`tesseract_core.runtime.cuda.ipc.answer_transport_check`.
+    """
+    gpu_transport = request.get("gpu_transport")
+    if gpu_transport == "none" or gpu_transport not in available_gpu_transports():
+        return {
+            "ok": False,
+            "reason": f"gpu_transport={gpu_transport!r} is not enabled on this "
+            f"Tesseract (available: {list(available_gpu_transports())})",
+        }
+    try:
+        from tesseract_core.runtime.cuda.ipc import answer_transport_check
+
+        return {"ok": True, "array": answer_transport_check(request)}
+    except Exception as exc:  # noqa: BLE001 - reported to the client, which decides
+        return {
+            "ok": False,
+            "reason": f"the Tesseract could not open GPU memory exported by the "
+            f"client: {type(exc).__name__}: {exc}",
+        }
+
+
 def create_rest_api(api_module: ModuleType) -> FastAPI:
     """Create the Tesseract REST API."""
     config = get_config()
@@ -232,6 +258,22 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         wrapped_endpoint = wrap_endpoint(endpoint_func)
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
+
+    if config.gpu_transport != "none":
+        # Not a Tesseract endpoint, so it stays out of the schema clients read
+        # endpoints from. Async like the endpoints above, so it runs on the event
+        # loop between requests rather than alongside one.
+        async def check_gpu_transport_route(
+            request: Annotated[dict[str, Any], Body()],
+        ) -> dict:
+            return check_gpu_transport(request)
+
+        app.add_api_route(
+            "/check_gpu_transport",
+            check_gpu_transport_route,
+            methods=["POST"],
+            include_in_schema=False,
+        )
 
     generate_openapi = app.openapi
 
