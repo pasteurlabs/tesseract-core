@@ -170,26 +170,73 @@ def test_dump_accepts_explicit_contiguous_strides(mocked_cuda):
 
 
 def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
-    """When the base pointer is rejected, encode stages into a fresh buffer.
+    """When legacy IPC rejects the allocation, encode stages into a fresh buffer.
 
     The staged handle uses offset 0 / size == the array's own nbytes, and the
-    staging buffer is registered for later free.
+    staging buffer is registered for a later release.
     """
-    # Reject the base pointer (VMM-backed) but let the staging buffer succeed,
+    # Reject the array's pointer (VMM-backed) but let the staging buffer succeed,
     # matching real behavior where the fresh cudaMalloc buffer is IPC-exportable.
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
 
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)  # nbytes = 4*8*4 = 128
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
-    # Staging was invoked on the array's own data pointer and byte count.
-    assert mocked_cuda.calls["stage"] == [(0x5000, 128)]
+    # Only the staging buffer's handle was taken.
+    assert mocked_cuda.calls["get_handle"] == [0xD000]
+    # The array's own bytes are copied into a fresh buffer.
+    assert mocked_cuda.calls["malloc"] == [128]
+    assert mocked_cuda.calls["memcpy_d2d"] == [(0xD000, 0x5000, 128)]
     # Payload reflects the staging buffer: offset 0, size == nbytes.
     unpacked = _unpack_cuda_ipc(out["data"])
     assert unpacked["storage_offset"] == 0
     assert unpacked["storage_size"] == 128
-    # Staging pointer registered for a later free.
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [0x9000]
+    # Staging buffer registered for a later release.
+    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
+        (0xD000, 0, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
+    ]
+
+
+def test_dump_synchronizes_before_returning_handle(mocked_cuda):
+    """The consumer reads from another process, so encode waits for the device."""
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))
+    assert mocked_cuda.calls["sync"] == [True]
+
+
+def test_dump_works_on_the_arrays_device(mocked_cuda, monkeypatch):
+    """Staging and synchronization run on the array's device, not the caller's."""
+    mocked_cuda.reject_foreign_ipc = True
+    seen = []
+
+    def record_active_device(name):
+        original = getattr(cuda_api, name)
+
+        def wrapper(*args):
+            seen.append((name, mocked_cuda.current_device))
+            return original(*args)
+
+        monkeypatch.setattr(cuda_api, name, wrapper)
+
+    record_active_device("malloc")
+    record_active_device("device_synchronize")
+
+    out = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", data_ptr=0x5000, device=_TorchDevice(index=1))
+    )
+
+    assert seen == [("malloc", 1), ("device_synchronize", 1), ("device_synchronize", 1)]
+    assert mocked_cuda.current_device == 0
+    cuda_ipc.release_pinned_ipc_exports()
+    assert cuda_ipc._STAGING_POOL.take(1, 16) == (
+        0xD000,
+        b"\x01" * cuda_api.IPC_HANDLE_SIZE,
+    )
+    assert _unpack_cuda_ipc(out["data"])["device"] == 1
+
+
+def test_dump_on_the_active_device_does_not_switch(mocked_cuda):
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))
+    assert mocked_cuda.calls["set_device"] == []
 
 
 # ── Export registry / ring-1 lifetime ───────────────────────────────────
@@ -205,13 +252,78 @@ def test_export_registry_pins_and_releases(mocked_cuda):
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 
-def test_release_frees_staging_buffers(mocked_cuda):
-    """Releasing exports frees every registered staging buffer."""
-    cuda_ipc._pin_cuda_ipc_staging_buffer(0xAAAA)
-    cuda_ipc._pin_cuda_ipc_staging_buffer(0xBBBB)
+def test_release_recycles_staging_buffers(mocked_cuda):
+    """Released staging buffers are reused, handle included, by the next export."""
+    mocked_cuda.reject_foreign_ipc = True
+    first = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", data_ptr=0x5000)
+    )
     cuda_ipc.release_pinned_ipc_exports()
-    assert mocked_cuda.calls["free"] == [0xAAAA, 0xBBBB]
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == []
+    assert mocked_cuda.calls["free"] == []
+
+    second = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", data_ptr=0x6000)
+    )
+
+    assert mocked_cuda.calls["malloc"] == [16]
+    assert mocked_cuda.calls["get_handle"] == [0xD000]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x6000, 16)
+    assert second["data"]["buffer"] == first["data"]["buffer"]
+
+
+def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
+    """Idle staging buffers beyond the pool's byte limit are freed, oldest first."""
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 16)
+    mocked_cuda.reject_foreign_ipc = True
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x6000))
+    cuda_ipc.release_pinned_ipc_exports()
+    assert mocked_cuda.calls["free"] == [0xD000]
+
+    # The next export reuses the pooled buffer, not the freed one.
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x7000))
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xE000, 0x7000, 16)
+    assert mocked_cuda.calls["malloc"] == [16, 16]
+
+
+def test_staging_pool_makes_room_for_a_new_size(mocked_cuda, monkeypatch):
+    """Releasing a buffer of a new size evicts idle buffers of other sizes to make room."""
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 64)
+    mocked_cuda.reject_foreign_ipc = True
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+    cuda_ipc.release_pinned_ipc_exports()
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((16,), "<f4", data_ptr=0x6000))
+    cuda_ipc.release_pinned_ipc_exports()
+    assert mocked_cuda.calls["free"] == [0xD000]
+
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((16,), "<f4", data_ptr=0x7000))
+    assert mocked_cuda.calls["malloc"] == [16, 64]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xE000, 0x7000, 64)
+
+
+@pytest.mark.parametrize(
+    "fraction, expected", [(0.25, 1 << 30), (0.5, 2 << 30), (0, 0)]
+)
+def test_pool_limit_follows_runtime_config(mocked_cuda, fraction, expected):
+    """Each of the two pools gets half of ``cuda_ipc_pool_fraction`` of the device."""
+    from tesseract_core.runtime.config import override_config, update_config
+
+    with override_config():
+        update_config(cuda_ipc_pool_fraction=fraction)
+        assert cuda_ipc._pool_max_bytes(0) == expected  # fake device has 8 GiB
+
+
+def test_zero_pool_fraction_disables_reuse(mocked_cuda):
+    from tesseract_core.runtime.config import override_config, update_config
+
+    mocked_cuda.reject_foreign_ipc = True
+    with override_config():
+        update_config(cuda_ipc_pool_fraction=0)
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+        cuda_ipc.release_pinned_ipc_exports()
+        assert mocked_cuda.calls["free"] == [0xD000]
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x6000))
+    assert mocked_cuda.calls["malloc"] == [16, 16]
 
 
 def test_client_request_releases_input_exports(mocked_cuda):
@@ -407,6 +519,8 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     # Synchronised before the mapping was closed.
     assert mocked_cuda.calls["sync"] == [True]
     assert mocked_cuda.calls["close"] == [0x2000]
+    # The caller's active device is restored.
+    assert mocked_cuda.current_device == 0
     # Returned wrapper is framework-agnostic and correctly shaped.
     assert isinstance(out, cuda_ipc.IpcDeviceArray)
     assert out.shape == (4, 8)
@@ -420,12 +534,43 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     assert iface["typestr"] == np.dtype("float32").str
 
 
-def test_load_frees_owned_buffer_on_del(mocked_cuda):
-    """When no DLPack consumer adopts it, the wrapper frees its buffer on GC."""
+def test_load_reuses_owned_buffer_released_on_del(mocked_cuda):
+    """A decoded array's buffer is reused by the next decode of the same size."""
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    del out
+    import gc
+
+    gc.collect()
+    assert mocked_cuda.calls["free"] == []
+
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x2000, 8)
+    # One sync after each copy, plus one before copying into the reused buffer.
+    assert mocked_cuda.calls["sync"] == [True] * 3
+
+
+def test_load_reuses_owned_buffer_released_by_dlpack_deleter(mocked_cuda):
+    """A buffer handed out via DLPack returns to the pool when its deleter runs."""
+    from tesseract_core.runtime.cuda import dlpack
+
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    out.__dlpack__()
+    # Nobody consumed the capsule, so dropping it runs the deleter.
+    dlpack.drop_unconsumed_bundle(out._state["dlpack_token"])
+    assert mocked_cuda.calls["free"] == []
+
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8]
+
+
+def test_owned_buffers_beyond_pool_limit_are_freed(mocked_cuda, monkeypatch):
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 0)
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     )
-    assert mocked_cuda.calls["free"] == []
     del out
     import gc
 

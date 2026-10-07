@@ -1486,9 +1486,8 @@ def _decode_array(
 
             arr = np.frombuffer(data, dtype=dtype)
     elif encoding == "cuda_ipc":
-        # Returns a fresh, client-owned device-array wrapper: the decode opens
-        # the IPC handle, copies device-to-device into our own memory, and
-        # closes the mapping before returning. The result exposes
+        # Returns a client-owned device-array wrapper. The decode copies
+        # device-to-device into our own memory, and the result exposes
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
