@@ -1,8 +1,7 @@
 name: Code linting
 
 on:
-  # TEMP: PR trigger disabled during podman CI investigation
-  # pull_request:
+  pull_request:
 
   push:
     branches:

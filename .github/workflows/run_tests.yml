@@ -13,7 +13,6 @@ concurrency:
 
 jobs:
   tests-base:
-    if: false  # TEMP: disabled during podman CI investigation
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -83,7 +82,6 @@ jobs:
   # Enforces typeguard's runtime type checks. The coverage jobs disable
   # typeguard (gh#691), so this is where type annotations are validated in CI.
   tests-typeguard:
-    if: false  # TEMP: disabled during podman CI investigation
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -161,28 +159,25 @@ jobs:
         arch: ["x64"]
         docker-engine: ["docker"]
 
-        # TEMP: unit-tesseract fan-out shrunk to just "base" during podman CI
-        # investigation. Original: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
-        unit-tesseract: ["base"]
+        unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
         exclude:
           - arch: x64
             unit-tesseract: "pyvista-arm64"
 
         include:
-          # TEMP: arm docker legs commented out during podman CI investigation.
           # Test on arm to ensure compatibility with Apple M1 chips
           # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-          # - os: "ubuntu-24.04"
-          #   python-version: "3.14"
-          #   arch: "arm"
-          #   docker-engine: "docker"
-          #   unit-tesseract: "base"
-          # - os: "ubuntu-24.04"
-          #   python-version: "3.14"
-          #   arch: "arm"
-          #   docker-engine: "docker"
-          #   unit-tesseract: "pyvista-arm64"
+          - os: "ubuntu-24.04"
+            python-version: "3.14"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "base"
+          - os: "ubuntu-24.04"
+            python-version: "3.14"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "pyvista-arm64"
           # Run tests using Podman
           - os: "ubuntu-24.04"
             python-version: "3.14"
@@ -229,7 +224,6 @@ jobs:
           systemctl status --user podman.socket
 
           podman --version
-          podman info --format 'storage: {{.Store.GraphDriverName}} (native overlay diff: {{index .Store.GraphStatus "Native Overlay Diff"}}) / runtime: {{.Host.OCIRuntime.Name}} / network: {{.Host.NetworkBackend}}'
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
@@ -247,9 +241,6 @@ jobs:
           uv run --no-sync tesseract build examples/${{ matrix.unit-tesseract }}
 
       - name: Run test suite
-        env:
-          # TEMP: subprocess instrumentation to see where podman time goes.
-          TESSERACT_INSTRUMENT_SUBPROCESS: "1"
         run: |
           # No typeguard here: it breaks coverage's branch mapping (gh#691).
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
@@ -287,7 +278,7 @@ jobs:
   tests-demos:
     needs: [get-e2e-matrix]
 
-    if: false  # TEMP: disabled during podman CI investigation
+    if: needs.get-e2e-matrix.outputs.demos != '[]'
 
     strategy:
       matrix:
@@ -344,7 +335,6 @@ jobs:
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
 
   tests-gpu:
-    if: false  # TEMP: disabled during podman CI investigation
     runs-on: tesseract-ci-gpu
     timeout-minutes: 60
 

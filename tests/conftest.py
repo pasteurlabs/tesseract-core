@@ -61,7 +61,7 @@ def pytest_collection_modifyitems(config, items):
 
         try:
             docker = docker_client_module.CLIDockerClient()
-            docker.info()
+            docker.version()
             return True
         except (docker_client_module.APIError, OSError):
             return False
