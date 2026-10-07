@@ -78,21 +78,17 @@ def _as_bits(x: jax.Array) -> tuple[jax.Array, ...]:
 
 
 @jax.jit
-def _bitwise_equal_jit(a: tuple, b: tuple) -> jax.Array:
-    result = jnp.bool_(True)
-    for x, y in zip(a, b, strict=True):
-        for xb, yb in zip(_as_bits(x), _as_bits(y), strict=True):
-            result &= jnp.all(xb == yb)
-    return result
-
-
-def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
+def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> jax.Array:
     """Whether two sequences of device arrays hold identical bytes.
 
     Matches the byte comparison of host leaves, so ``-0.0`` and ``0.0`` differ
     and a NaN equals itself.
     """
-    return bool(_bitwise_equal_jit(a, b))
+    result = jnp.bool_(True)
+    for x, y in zip(a, b, strict=True):
+        for xb, yb in zip(_as_bits(x), _as_bits(y), strict=True):
+            result &= jnp.all(xb == yb)
+    return result
 
 
 class _DeviceLeaves:
@@ -116,7 +112,7 @@ class _DeviceLeaves:
         return (
             isinstance(other, _DeviceLeaves)
             and self._meta == other._meta
-            and _bitwise_equal(self.arrays, other.arrays)
+            and bool(_bitwise_equal(self.arrays, other.arrays))
         )
 
 

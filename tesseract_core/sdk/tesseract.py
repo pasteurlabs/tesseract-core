@@ -231,16 +231,6 @@ def _fit_encoding_to_server(
                 f"This Tesseract does not accept {name}={value!r} "
                 f"(accepted: {accepted})"
             )
-
-    if encoding.compression is not None and capabilities.compressions is None:
-        # Compression can only be requested through with_encoding, which checks
-        # first, so this points at the user's with_encoding call
-        warnings.warn(
-            "This Tesseract does not advertise which compressions it accepts. "
-            "Runtimes older than 1.14 ignore the requested compression and use "
-            "the one they were configured with.",
-            stacklevel=4,
-        )
     return encoding
 
 
@@ -482,11 +472,9 @@ class Tesseract:
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            gpu_transport: How GPU arrays leave the process, independently of ``output_format``
-                (which governs CPU arrays). ``none`` copies GPU arrays to the host and
-                serializes them like any CPU array; ``cuda_ipc`` exports them by reference.
-                Resolved against ``runtime_config`` with the precedence described in
-                ``engine.serve``.
+            gpu_transport: GPU transport to enable in the runtime config, resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``.
+                Calls pass arrays in memory, so they never use it to transport arrays.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -779,7 +767,7 @@ class Tesseract:
         Returns:
             dictionary with the OpenAPI Schema.
         """
-        return self._client.run_tesseract("openapi_schema")
+        return self._client.openapi_schema
 
     @property
     @requires_client
@@ -803,8 +791,6 @@ class Tesseract:
             the advertised capabilities, or None for in-process Tesseracts created
             via :meth:`from_tesseract_api`, which do not serialize arrays.
         """
-        if isinstance(self._client, LocalClient):
-            return None
         return self._client.server_capabilities
 
     @requires_client
@@ -818,7 +804,9 @@ class Tesseract:
         """Get a view of this Tesseract that requests a different encoding.
 
         The view shares this Tesseract's connection and stays usable while this
-        Tesseract is served. Arguments left as None keep this Tesseract's setting.
+        Tesseract is served. It only calls endpoints, so serving, logs and
+        container info stay with this Tesseract. Arguments left as None keep
+        this Tesseract's setting.
 
             >>> with Tesseract.from_image(
             ...     "my_tesseract", gpu_transport="cuda_ipc"
@@ -848,6 +836,13 @@ class Tesseract:
             # Calls check again with the full encoding, but failing here points
             # at the argument that caused it
             _fit_encoding_to_server(requested, capabilities)
+            if compression is not None and capabilities.compressions is None:
+                warnings.warn(
+                    "This Tesseract does not advertise which compressions it "
+                    "accepts. Runtimes older than 1.14 ignore the requested "
+                    "compression and use the one they were configured with.",
+                    stacklevel=3,
+                )
 
         view = Tesseract.__new__(Tesseract)
         view._client = self._client
@@ -1748,9 +1743,6 @@ class HTTPClient:
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
-        if endpoint == "openapi_schema":
-            return self.openapi_schema
-
         method = "GET" if endpoint == "health" else "POST"
 
         # Set up log streaming if requested
@@ -1786,6 +1778,9 @@ class HTTPClient:
 class LocalClient:
     """Local Client for Tesseracts."""
 
+    # Arrays are passed in memory, so there is no encoding to negotiate
+    server_capabilities: ServerCapabilities | None = None
+
     def __init__(
         self,
         tesseract_api: ModuleType,
@@ -1807,7 +1802,7 @@ class LocalClient:
             self._endpoints = {
                 func.__name__: func for func in create_endpoints(tesseract_api)
             }
-            self._openapi_schema = create_rest_api(tesseract_api).openapi()
+            self.openapi_schema = create_rest_api(tesseract_api).openapi()
 
         if output_path is None:
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
@@ -1838,9 +1833,6 @@ class LocalClient:
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
-        if endpoint == "openapi_schema":
-            return self._openapi_schema
-
         if endpoint not in self._endpoints:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
