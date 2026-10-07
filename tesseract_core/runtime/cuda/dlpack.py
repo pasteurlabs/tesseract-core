@@ -8,16 +8,15 @@ Mirrors just enough of the DLPack C ABI to wrap a device buffer in a
 :class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray` implements
 ``__dlpack__`` with :func:`make_dlpack_capsule` and
 :func:`drop_unconsumed_bundle`. All ctypes and CPython capsule calls stay in
-this module, and the buffer is always freed through
-:func:`tesseract_core.runtime.cuda.api.free`.
+this module. An exported buffer is released through the caller's release
+callback.
 """
 
 import ctypes
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-
-from tesseract_core.runtime.cuda import api
 
 _kDLCUDA = 2  # DLDeviceType for CUDA global memory
 
@@ -111,13 +110,17 @@ _NEXT_TOKEN = 0
 
 
 def make_dlpack_capsule(
-    ptr: int, device: int, shape: tuple[int, ...], dtype: np.dtype
+    ptr: int,
+    device: int,
+    shape: tuple[int, ...],
+    dtype: np.dtype,
+    release: Callable[[], None],
 ) -> tuple[Any, int]:
     """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
 
-    Returns ``(capsule, token)``. The buffer is freed exactly once, by the
-    deleter, whether the capsule is consumed by a framework or dropped
-    un-consumed via :func:`drop_unconsumed_bundle`.
+    Returns ``(capsule, token)``. The deleter calls ``release`` exactly once,
+    whether the capsule is consumed by a framework or dropped un-consumed via
+    :func:`drop_unconsumed_bundle`.
     """
     global _NEXT_TOKEN
     token = _NEXT_TOKEN
@@ -134,13 +137,13 @@ def make_dlpack_capsule(
     managed.dl_tensor.strides = ctypes.cast(None, ctypes.POINTER(ctypes.c_int64))
     managed.dl_tensor.byte_offset = 0
 
-    def _deleter(_managed_ptr: int) -> None:
-        # Runs when the consumer releases the tensor. Free the buffer and drop
-        # our registry entry so the ctypes state can be reclaimed. Guard against
-        # a second invocation (bundle already gone).
+    def _deleter(_managed_ptr: int | None) -> None:
+        # Runs when the consumer releases the tensor. Release the buffer and
+        # drop our registry entry so the ctypes state can be reclaimed. Guard
+        # against a second invocation (bundle already gone).
         bundle = _BUNDLES.pop(token, None)
         if bundle is not None:
-            api.free(ptr)
+            release()
 
     c_deleter = _DLManagedTensorDeleter(_deleter)
     managed.deleter = c_deleter
@@ -155,12 +158,12 @@ def make_dlpack_capsule(
 
 
 def drop_unconsumed_bundle(token: int) -> None:
-    """Free a bundle's buffer iff its capsule was never consumed.
+    """Release a bundle's buffer iff its capsule was never consumed.
 
     Called from the :class:`IpcDeviceArray` finalizer. If the capsule is still
     named ``"dltensor"`` no framework adopted it, so we invoke the deleter to
-    free the buffer. If it was renamed to ``"used_dltensor"`` a consumer owns it
-    and will (or already did) free it via the deleter, so we leave it alone.
+    release the buffer. If it was renamed to ``"used_dltensor"`` a consumer owns
+    it and will (or already did) release it via the deleter, so we leave it alone.
     """
     bundle = _BUNDLES.get(token)
     if bundle is None:
@@ -168,5 +171,5 @@ def drop_unconsumed_bundle(token: int) -> None:
     _managed, _shape_arr, c_deleter, capsule = bundle
     still_dltensor = bool(_pythonapi.PyCapsule_IsValid(capsule, b"dltensor"))
     if still_dltensor:
-        # Nobody adopted it -> free now (the deleter pops the registry entry).
+        # Nobody adopted it -> release now (the deleter pops the registry entry).
         c_deleter(0)
