@@ -1265,6 +1265,27 @@ class CLIDockerClient:
         except subprocess.CalledProcessError as ex:
             raise APIError() from ex
 
+    @staticmethod
+    def version() -> tuple:
+        """Wrapper around docker version call.
+
+        Cheaper than ``info`` for liveness checks: ``docker version`` returns
+        client+server versions via one socket round-trip, and ``podman version``
+        skips the full system probe that ``podman info`` performs (which on cold
+        process startup can take 1-7 s). Both still fail when the daemon /
+        socket is unreachable.
+        """
+        docker = _get_docker_executable()
+        try:
+            result = subprocess.run(
+                [*docker, "version"],
+                check=True,
+                capture_output=True,
+            )
+            return result.stdout, result.stderr
+        except subprocess.CalledProcessError as ex:
+            raise APIError() from ex
+
 
 def get_docker_metadata(
     docker_asset_ids: list[str], is_image: bool = False, tesseract_only: bool = True
