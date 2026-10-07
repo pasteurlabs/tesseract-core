@@ -1141,3 +1141,22 @@ def test_resolve_gpu_transport_falls_back_when_cuda_ipc_does_not_work(
 
             with pytest.raises(RuntimeError, match="does not work between"):
                 remote.with_encoding(gpu_transport="cuda_ipc").resolve_gpu_transport()
+
+
+@requires_cuda
+def test_requested_gpu_transport_is_unchecked_without_the_check_route(
+    free_port, serve_in_subprocess
+):
+    """A server that cannot take part in the check leaves a requested transport unchecked.
+
+    Runtimes from before the check have no route for it, like this server
+    without a GPU transport, so asking it gives no answer rather than a failure.
+    """
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
+        with serve_in_subprocess(api_path, free_port) as url:
+            check = HTTPClient(url).check_gpu_transport("cuda_ipc")
+            assert check.usable is None
