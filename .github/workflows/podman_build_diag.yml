@@ -5,6 +5,8 @@ name: Podman build diagnostic
 # podman e2e job runs ~2x the docker e2e job wall time.
 
 on:
+  pull_request:
+
   workflow_dispatch:
 
 jobs:
