@@ -38,6 +38,9 @@ jobs:
           cp production.uv.lock uv.lock
           uv sync --extra dev --frozen
 
+      - name: Install moreutils (for ts)
+        run: sudo apt-get install -y -qq moreutils
+
       - name: Set up Podman
         run: |
           systemctl start --user podman.socket
@@ -77,7 +80,7 @@ jobs:
               --file "${BUILD_DIR}/Dockerfile" \
               --tag "diag:docker-${i}" \
               "${BUILD_DIR}" \
-              > "/tmp/diag_logs/docker_${i}.log" 2>&1 || echo "docker build $i FAILED"
+              2>&1 | ts '%.s' > "/tmp/diag_logs/docker_${i}.log" || echo "docker build $i FAILED"
             end=$(date +%s.%N)
             dur=$(echo "$end - $start" | bc)
             echo "docker run ${i}: ${dur}s wall"
@@ -99,7 +102,7 @@ jobs:
               --file "${BUILD_DIR}/Dockerfile" \
               --tag "diag:podman-${i}" \
               "${BUILD_DIR}" \
-              > "/tmp/diag_logs/podman_${i}.log" 2>&1 || echo "podman build $i FAILED"
+              2>&1 | ts '%.s' > "/tmp/diag_logs/podman_${i}.log" || echo "podman build $i FAILED"
             end=$(date +%s.%N)
             dur=$(echo "$end - $start" | bc)
             echo "podman run ${i}: ${dur}s wall"
@@ -107,70 +110,90 @@ jobs:
 
       - name: Compare per-step durations
         run: |
-          # BuildKit progress=plain emits "#<N> DONE X.Ys" per step; podman's
-          # buildx emits a similar form. Group durations by step line prefix
-          # (whichever shows up) and print medians side by side.
+          # Logs are timestamped (ts '%.s') so each line is "<epoch_sec> <text>".
+          # Derive per-step duration from the delta between successive step headers,
+          # regardless of engine. Step-header regex:
+          #   Docker/BuildKit: "#N [stage-X Y/Z] desc"   (first appearance of #N)
+          #   Podman:          "[N/M] STEP X/Y: desc"
           python3 - <<'PY'
-          import re, statistics, pathlib, collections
+          import re, statistics, pathlib
 
-          STEP_RE = re.compile(r'^#(\d+)\s+(.*?)DONE\s+([\d.]+)s', re.MULTILINE)
-          STEP_HEADER_RE = re.compile(r'^#(\d+)\s+\[([^\]]+)\]\s+(.+?)$', re.MULTILINE)
+          # Match: "<ts> <rest>" and extract a canonical step label for each engine.
+          DOCKER_STEP = re.compile(r'^(\d+\.\d+)\s+#(\d+)\s+\[([^\]]+)\]\s+(.+)$')
+          PODMAN_STEP = re.compile(r'^(\d+\.\d+)\s+\[\d+/\d+\]\s+STEP\s+(\d+)/\d+:\s+(.+)$')
+          TS_LINE = re.compile(r'^(\d+\.\d+)\s')
 
-          def parse_log(path):
-              text = pathlib.Path(path).read_text(errors='replace')
-              headers = {m.group(1): f"[{m.group(2)}] {m.group(3)}"[:80]
-                         for m in STEP_HEADER_RE.finditer(text)}
-              durations = {}
-              for m in re.finditer(r'^#(\d+)\s+DONE\s+([\d.]+)s', text, re.MULTILINE):
-                  n, d = m.group(1), float(m.group(2))
-                  durations[n] = d
-              return headers, durations
+          def parse_log(path, engine):
+              lines = pathlib.Path(path).read_text(errors='replace').splitlines()
+              seen = set()
+              # Ordered list of (label, start_ts). Each step appears once, at first mention.
+              steps = []
+              for line in lines:
+                  if engine == 'docker':
+                      m = DOCKER_STEP.match(line)
+                      if m:
+                          ts, n, stage, desc = m.groups()
+                          label = f"#{n} [{stage}] {desc[:60]}"
+                          if n not in seen:
+                              steps.append((label, float(ts)))
+                              seen.add(n)
+                  else:  # podman
+                      m = PODMAN_STEP.match(line)
+                      if m:
+                          ts, n, desc = m.groups()
+                          label = f"STEP {n}: {desc[:60]}"
+                          if n not in seen:
+                              steps.append((label, float(ts)))
+                              seen.add(n)
+              # End timestamp = last line with a timestamp.
+              end_ts = None
+              for line in reversed(lines):
+                  tm = TS_LINE.match(line)
+                  if tm:
+                      end_ts = float(tm.group(1))
+                      break
+              # Duration of step k = start_ts(k+1) - start_ts(k); last uses end_ts.
+              durs = []
+              for i, (label, start) in enumerate(steps):
+                  next_start = steps[i + 1][1] if i + 1 < len(steps) else end_ts
+                  if next_start is not None:
+                      durs.append((label, next_start - start))
+              return durs
 
           runs = {'docker': [], 'podman': []}
           for engine in runs:
               for i in (1, 2, 3):
                   p = f"/tmp/diag_logs/{engine}_{i}.log"
                   if pathlib.Path(p).exists():
-                      runs[engine].append(parse_log(p))
+                      runs[engine].append(parse_log(p, engine))
 
-          # Union of step numbers across all runs.
-          all_steps = set()
-          for engine_runs in runs.values():
-              for headers, durations in engine_runs:
-                  all_steps.update(durations.keys())
+          # Report per-engine: median per-step across runs, ranked by median.
+          def report(engine):
+              engine_runs = runs[engine]
+              if not engine_runs:
+                  print(f"{engine}: no logs")
+                  return 0.0
+              # Map step index -> list of (label, duration) across runs.
+              max_steps = max(len(r) for r in engine_runs)
+              print(f"\n=== {engine} per-step (median across {len(engine_runs)} runs) ===")
+              print(f"{'#':<3} {'label':<70} {'median':>8}")
+              total = 0.0
+              for k in range(max_steps):
+                  labels = {r[k][0] for r in engine_runs if k < len(r)}
+                  durs = [r[k][1] for r in engine_runs if k < len(r)]
+                  if not durs:
+                      continue
+                  med = statistics.median(durs)
+                  total += med
+                  label = next(iter(labels))  # expect identical across runs
+                  print(f"{k:<3} {label[:70]:<70} {med:7.2f}s")
+              print(f"{'':<3} {'TOTAL':<70} {total:7.2f}s")
+              return total
 
-          print(f"{'step':<6} {'description':<60} {'docker':>10} {'podman':>10} {'ratio':>8}")
-          print('-' * 100)
-          for step in sorted(all_steps, key=int):
-              desc = ''
-              for engine_runs in runs.values():
-                  for headers, _ in engine_runs:
-                      if step in headers:
-                          desc = headers[step]
-                          break
-                  if desc:
-                      break
-              docker_durs = [d.get(step) for _, d in runs['docker'] if d.get(step) is not None]
-              podman_durs = [d.get(step) for _, d in runs['podman'] if d.get(step) is not None]
-              docker_med = statistics.median(docker_durs) if docker_durs else None
-              podman_med = statistics.median(podman_durs) if podman_durs else None
-              ratio = (podman_med / docker_med) if (docker_med and podman_med and docker_med > 0) else None
-              print(f"#{step:<5} {desc[:60]:<60} "
-                    f"{'' if docker_med is None else f'{docker_med:9.2f}s':>10} "
-                    f"{'' if podman_med is None else f'{podman_med:9.2f}s':>10} "
-                    f"{'' if ratio is None else f'{ratio:7.2f}x':>8}")
-
-          # Totals.
-          def total(engine):
-              totals = []
-              for _, d in runs[engine]:
-                  totals.append(sum(d.values()))
-              return totals
-          d_tot, p_tot = total('docker'), total('podman')
+          d_tot = report('docker')
+          p_tot = report('podman')
           if d_tot and p_tot:
-              dm, pm = statistics.median(d_tot), statistics.median(p_tot)
-              print('-' * 100)
-              print(f"{'TOTAL':<6} {'sum of per-step DONE':<60} {dm:9.2f}s  {pm:9.2f}s  {pm/dm:7.2f}x")
+              print(f"\nRatio (podman/docker): {p_tot/d_tot:.2f}x")
           PY
 
       - name: Upload raw build logs
