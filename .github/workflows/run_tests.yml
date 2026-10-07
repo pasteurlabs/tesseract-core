@@ -155,19 +155,19 @@ jobs:
 
     strategy:
       matrix:
-        # TEMP: original matrix commented out during podman CI investigation —
-        # only the podman include is active below. Restore by uncommenting.
-        # os: [ubuntu-24.04]
-        # python-version: ["3.14"]
-        #
-        # arch: ["x64"]
-        # docker-engine: ["docker"]
-        #
-        # unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
-        #
-        # exclude:
-        #   - arch: x64
-        #     unit-tesseract: "pyvista-arm64"
+        os: [ubuntu-24.04]
+        python-version: ["3.14"]
+
+        arch: ["x64"]
+        docker-engine: ["docker"]
+
+        # TEMP: unit-tesseract fan-out shrunk to just "base" during podman CI
+        # investigation. Original: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
+        unit-tesseract: ["base"]
+
+        exclude:
+          - arch: x64
+            unit-tesseract: "pyvista-arm64"
 
         include:
           # TEMP: arm docker legs commented out during podman CI investigation.
@@ -225,21 +225,11 @@ jobs:
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
         run: |
-          mkdir -p ~/.config/containers
-          cat > ~/.config/containers/storage.conf <<'EOF'
-          [storage]
-          driver = "overlay"
-
-          [storage.options.overlay]
-          mount_program = ""
-          ignore_chown_errors = "true"
-          EOF
-
           systemctl start --user podman.socket
           systemctl status --user podman.socket
 
           podman --version
-          podman info --format 'storage driver: {{.Store.GraphDriverName}}'
+          podman info --format 'storage: {{.Store.GraphDriverName}} / runtime: {{.Host.OCIRuntime.Name}} / network: {{.Host.NetworkBackend}}'
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
