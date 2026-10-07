@@ -99,7 +99,13 @@ jobs:
             # --jobs=2 asks buildah to run both stages (build_stage + run_stage)
             # concurrently, which is the one thing BuildKit does and buildah
             # does not by default.
-            podman buildx build \
+            # Run 1 also gets --log-level=debug so we can see what buildah is
+            # actually doing during the COPY --from=build_stage step.
+            debug_flag=""
+            if [ "$i" = "1" ]; then
+              debug_flag="--log-level=debug"
+            fi
+            podman $debug_flag buildx build \
               --jobs=2 \
               --no-cache \
               --progress=plain \
@@ -111,6 +117,43 @@ jobs:
             dur=$(echo "$end - $start" | bc)
             echo "podman run ${i}: ${dur}s wall"
           done
+
+      - name: Measure image sizes and /python-env data volume
+        env:
+          DOCKER_HOST: unix:///run/user/1001/podman/podman.sock
+        run: |
+          # How much actual data is in /python-env (the thing the COPY
+          # --from=build_stage step moves between stages)? Overridden entrypoint
+          # so `du` can run inside the image.
+          echo "--- docker image sizes (bytes) ---"
+          for i in 1 2 3; do
+            sz=$(docker image inspect "diag:docker-${i}" --format '{{.Size}}' 2>/dev/null || echo "n/a")
+            echo "diag:docker-${i}  total=${sz}"
+          done
+
+          echo "--- podman image sizes (bytes) ---"
+          for i in 1 2 3; do
+            sz=$(podman image inspect "diag:podman-${i}" --format '{{.Size}}' 2>/dev/null || echo "n/a")
+            echo "diag:podman-${i}  total=${sz}"
+          done
+
+          echo "--- /python-env size inside the image ---"
+          echo "(from docker run #1)"
+          docker run --rm --entrypoint='' "diag:docker-1" du -sh /python-env 2>&1 || echo "docker inspect failed"
+          echo "(from podman run #1)"
+          podman run --rm --entrypoint='' "diag:podman-1" du -sh /python-env 2>&1 || echo "podman inspect failed"
+
+          echo "--- file counts in /python-env ---"
+          docker run --rm --entrypoint='' "diag:docker-1" sh -c "find /python-env -type f | wc -l" 2>&1 || true
+          podman run --rm --entrypoint='' "diag:podman-1" sh -c "find /python-env -type f | wc -l" 2>&1 || true
+
+      - name: Extract buildah COPY --from debug trace (podman run #1)
+        run: |
+          # Pull the debug lines around the COPY --from=build_stage step so we
+          # can see what buildah actually does: lookup, mount, copy, commit, etc.
+          echo "--- buildah debug around stage handoff ---"
+          grep -E "COPY|--from|commit|mount|layer|rootfs|GraphDriver" /tmp/diag_logs/podman_1.log \
+            | head -80 || echo "(no matching debug lines)"
 
       - name: Compare per-step durations
         run: |
