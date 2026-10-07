@@ -238,7 +238,7 @@ jobs:
           systemctl status --user podman.socket
 
           podman --version
-          podman info --format 'storage: {{.Store.GraphDriverName}} (native overlay diff: {{index .Store.GraphStatus "Native Overlay Diff"}}) / runtime: {{.Host.OCIRuntime.Name}} / network: {{.Host.NetworkBackend}} / rootless netns: {{.Host.RootlessNetworkCmd}}'
+          podman info --format 'storage: {{.Store.GraphDriverName}} (native overlay diff: {{index .Store.GraphStatus "Native Overlay Diff"}}) / runtime: {{.Host.OCIRuntime.Name}} / network: {{.Host.NetworkBackend}}'
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
