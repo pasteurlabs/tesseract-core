@@ -96,7 +96,11 @@ jobs:
             # Restart socket after reset.
             systemctl start --user podman.socket
             start=$(date +%s.%N)
+            # --jobs=2 asks buildah to run both stages (build_stage + run_stage)
+            # concurrently, which is the one thing BuildKit does and buildah
+            # does not by default.
             podman buildx build \
+              --jobs=2 \
               --no-cache \
               --progress=plain \
               --file "${BUILD_DIR}/Dockerfile" \
