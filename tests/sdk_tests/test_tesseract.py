@@ -87,6 +87,9 @@ def mock_serving(mocker):
 @pytest.fixture
 def mock_clients(mocker):
     mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
+    mocker.patch(
+        "tesseract_core.sdk.tesseract.HTTPClient.openapi_schema", {"paths": {}}
+    )
 
 
 def test_Tesseract_init_raises():
@@ -453,13 +456,13 @@ def test_tesseract_in_foreign_environment(dummy_api_path, tmp_path):
 
 
 def test_Tesseract_schema_method(mocker, mock_serving):
-    mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
-    mocked_run.return_value = {"#defs": {"some": "stuff"}}
+    schema = {"#defs": {"some": "stuff"}}
+    mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.openapi_schema", schema)
 
     with Tesseract.from_image("sometesseract:0.2.3") as t:
         openapi_schema = t.openapi_schema
 
-    assert openapi_schema == mocked_run.return_value
+    assert openapi_schema == schema
 
 
 def test_serve_lifecycle(mock_serving, mock_clients):
@@ -511,35 +514,107 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 
 
 @pytest.mark.parametrize(
-    ("kwargs", "expected"),
+    ("encoding", "expected"),
     [
-        ({}, ()),
-        ({"gpu_transport": "none"}, ()),
-        ({"gpu_transport": "cuda_ipc"}, ("cuda_ipc",)),
-        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, ("cuda_ipc",)),
+        ({}, None),
+        ({"output_format": "json+base64"}, "application/json+base64"),
+        # Opting out is sent too, since runtimes 1.13 and 1.14 otherwise fall
+        # back to the transport they were configured with
+        ({"gpu_transport": "none"}, "application/*; gpu_transport=none"),
+        ({"gpu_transport": "cuda_ipc"}, "application/*; gpu_transport=cuda_ipc"),
+        (
+            {"output_format": "json", "compression": "none"},
+            "application/json; compression=none",
+        ),
     ],
 )
-def test_supported_gpu_transports_served(mock_serving, mock_clients, kwargs, expected):
-    t = Tesseract.from_image("sometesseract:0.2.3", **kwargs)
+def test_accept_header(encoding, expected):
+    from tesseract_core.sdk.tesseract import _RequestedEncoding
 
-    # The transport is a property of the client, which only exists once served
-    with pytest.raises(RuntimeError, match="context manager"):
-        _ = t.supported_gpu_transports
-
-    with t:
-        assert t.supported_gpu_transports == expected
+    assert _RequestedEncoding(**encoding).accept_header() == expected
 
 
-def test_supported_gpu_transports_unserved(dummy_tesseract_module):
-    # A remote Tesseract is reached without any device transport configured
-    assert Tesseract.from_url("localhost").supported_gpu_transports == ()
+# What runtimes of each age advertise in their OpenAPI schema
+_SCHEMA_BEFORE_1_13 = {}
+_SCHEMA_1_13 = {"x-supported-output-formats": ["json", "json+base64", "json+binref"]}
+_SCHEMA_CURRENT = {
+    **_SCHEMA_1_13,
+    "x-supported-gpu-transports": ["none"],
+    "x-supported-compressions": ["none", "lz4"],
+}
 
+
+@pytest.mark.parametrize(
+    ("schema", "encoding", "expected"),
+    [
+        # Runtimes before 1.13 cannot parse parameters, but never pass GPU arrays
+        # by reference, so opting out needs no parameter
+        (
+            _SCHEMA_BEFORE_1_13,
+            {"output_format": "json+base64", "gpu_transport": "none"},
+            "application/json+base64",
+        ),
+        (_SCHEMA_BEFORE_1_13, {"gpu_transport": "cuda_ipc"}, ValueError),
+        (_SCHEMA_BEFORE_1_13, {"compression": "lz4"}, ValueError),
+        # Runtimes 1.13 and 1.14 parse parameters without advertising which
+        # values they accept, so the server gets the final say
+        (
+            _SCHEMA_1_13,
+            {"gpu_transport": "none"},
+            "application/*; gpu_transport=none",
+        ),
+        (
+            _SCHEMA_1_13,
+            {"gpu_transport": "cuda_ipc"},
+            "application/*; gpu_transport=cuda_ipc",
+        ),
+        (_SCHEMA_1_13, {"output_format": "msgpack"}, ValueError),
+        (_SCHEMA_CURRENT, {"gpu_transport": "cuda_ipc"}, ValueError),
+        (
+            _SCHEMA_CURRENT,
+            {"compression": "lz4"},
+            "application/*; compression=lz4",
+        ),
+    ],
+)
+def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expected):
+    from tesseract_core.sdk.tesseract import (
+        ServerCapabilities,
+        _fit_encoding_to_server,
+        _RequestedEncoding,
+    )
+
+    capabilities = ServerCapabilities.from_openapi_schema(schema)
+    requested = _RequestedEncoding(**encoding)
+    if expected is ValueError:
+        with pytest.raises(ValueError):
+            _fit_encoding_to_server(requested, capabilities)
+    else:
+        fitted = _fit_encoding_to_server(requested, capabilities)
+        assert fitted.accept_header() == expected
+
+
+def test_compression_warns_when_the_server_may_ignore_it():
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    tess = Tesseract.from_url("localhost")
+    tess._client.server_capabilities = ServerCapabilities.from_openapi_schema(
+        _SCHEMA_1_13
+    )
+    with pytest.warns(UserWarning, match="ignore the requested compression") as record:
+        tess.with_encoding(compression="lz4")
+
+    # Points at the with_encoding call, not into the SDK
+    assert [w.filename for w in record] == [__file__]
+
+
+def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_module):
     # In-process Tesseracts share memory with the caller, so there is nothing to
     # transport -- even when a GPU transport is configured.
     local = Tesseract.from_tesseract_api(
         dummy_tesseract_module, gpu_transport="cuda_ipc"
     )
-    assert local.supported_gpu_transports == ()
+    assert local.server_capabilities is None
 
 
 @pytest.mark.parametrize(

@@ -278,6 +278,84 @@ def test_create_jacobian_schema():
         OutputSchema.model_validate(testoutput["testdiffarr"], context=ctx)
 
 
+@pytest.mark.parametrize(
+    "input_shape,output_shape,jac_shape,valid",
+    [
+        # Both shapes concrete
+        ((3,), (5,), (5, 3), True),
+        ((3,), (5,), (3, 5), False),
+        # Output shape is Ellipsis
+        ((3,), ..., (5, 3), True),
+        ((3,), ..., (3, 3), True),
+        ((3,), ..., (5, 2, 3), True),
+        ((3,), ..., (3,), True),
+        ((), ..., (5,), True),
+        ((3,), ..., (3, 5), False),
+        # Input shape is Ellipsis
+        (..., (5,), (5, 3), True),
+        (..., (5,), (5, 3, 2), True),
+        (..., (5,), (5,), True),
+        (..., (), (3,), True),
+        (..., (5,), (3, 5), False),
+    ],
+)
+def test_jacobian_output_shape_validation(input_shape, output_shape, jac_shape, valid):
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[input_shape, Float64]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[output_shape, Float64]]
+
+    _, JacobianOutputSchema = create_gradient_schema(
+        InputSchema, OutputSchema, "jacobian"
+    )
+    jac = {"y": {"x": np.zeros(jac_shape)}}
+    ctx = {"input_keys": {"x"}, "output_keys": {"y"}}
+
+    if valid:
+        JacobianOutputSchema.model_validate(jac, context=ctx)
+    else:
+        with pytest.raises(ValidationError, match="Jacobian result"):
+            JacobianOutputSchema.model_validate(jac, context=ctx)
+
+
+def test_jacobian_output_validation_accepts_torch_gpu_tensor():
+    """GPU tensors are validated unconverted, and torch dtypes are not NumPy dtype names."""
+
+    class TorchDtype:
+        def __str__(self):
+            return "torch.float32"
+
+    class TorchCudaTensor:
+        shape = (5, 3)
+        dtype = TorchDtype()
+
+        @property
+        def __cuda_array_interface__(self):
+            return {
+                "shape": (5, 3),
+                "typestr": "<f4",
+                "data": (0, False),
+                "strides": None,
+                "version": 3,
+            }
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(3,), Float32]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(5,), Float32]]
+
+    _, JacobianOutputSchema = create_gradient_schema(
+        InputSchema, OutputSchema, "jacobian"
+    )
+    tensor = TorchCudaTensor()
+    result = JacobianOutputSchema.model_validate(
+        {"y": {"x": tensor}}, context={"input_keys": {"x"}, "output_keys": {"y"}}
+    )
+    assert result.root["y"]["x"] is tensor
+
+
 def test_create_jvp_schema():
     testoutput = {
         "testdiffarr": testinput["testdiffarr"],

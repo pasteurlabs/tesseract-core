@@ -461,6 +461,10 @@ def check_gradients(
     Finite difference approximations are sensitive to numerical precision. When finite differences
     are reported incorrectly as 0.0, it is likely that the chosen `eps` is too small, especially for
     inputs that do not use float64 precision.
+
+    \b
+    Differentiable fields that hold no array are skipped, such as an optional input that was left
+    out, or a string passed to an ``Array | str`` field.
     """  # noqa: D301
     config = get_config()
     api_module = get_tesseract_api()
