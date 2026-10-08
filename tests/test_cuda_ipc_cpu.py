@@ -235,8 +235,10 @@ def test_dump_works_on_the_arrays_device(mocked_cuda, monkeypatch):
 
 
 def test_dump_on_the_active_device_does_not_switch(mocked_cuda):
+    # The device is still set once, to make its context current on this thread
+    # (a fresh thread has none), but nothing switches or needs restoring.
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))
-    assert mocked_cuda.calls["set_device"] == []
+    assert mocked_cuda.calls["set_device"] == [0]
 
 
 # ── Export registry / ring-1 lifetime ───────────────────────────────────
@@ -552,18 +554,27 @@ def test_load_reuses_owned_buffer_released_on_del(mocked_cuda):
 
 
 def test_load_reuses_owned_buffer_released_by_dlpack_deleter(mocked_cuda):
-    """A buffer handed out via DLPack returns to the pool when its deleter runs."""
-    from tesseract_core.runtime.cuda import dlpack
+    """A buffer handed out via DLPack returns to the pool once its capsule is gone.
+
+    The capsule keeps the array alive even after the array's last other
+    reference is dropped, so the buffer is reused only after both are gone.
+    """
+    import gc
 
     encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
-    out.__dlpack__()
-    # Nobody consumed the capsule, so dropping it runs the deleter.
-    dlpack.drop_unconsumed_bundle(out._state["dlpack_token"])
-    assert mocked_cuda.calls["free"] == []
-
+    capsule = out.__dlpack__()
+    del out
+    gc.collect()
     cuda_ipc.load_cuda_ipc_arraydict(encoded)
-    assert mocked_cuda.calls["malloc"] == [8]
+    assert mocked_cuda.calls["malloc"] == [8, 8]
+
+    # Nobody consumed the capsule, so destroying it runs the deleter.
+    del capsule
+    gc.collect()
+    assert mocked_cuda.calls["free"] == []
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8, 8]
 
 
 def test_owned_buffers_beyond_pool_limit_are_freed(mocked_cuda, monkeypatch):
@@ -1192,3 +1203,61 @@ def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
     assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
     transport.release()
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+
+
+# ── Empty arrays, dtypes without a NumPy equivalent, finalizers in the pool ──
+
+
+def test_empty_array_crosses_without_a_handle(mocked_cuda):
+    """An empty array has no memory to share; frameworks give it a null pointer."""
+    from tesseract_core.runtime.array_encoding import CudaIpcArrayData
+
+    out = cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((0, 3), "<f4", data_ptr=0))
+    assert out["data"]["buffer"] == "0::0:0"
+    assert mocked_cuda.calls["get_handle"] == []
+    CudaIpcArrayData(**out["data"])  # the wire schema accepts it
+
+    decoded = cuda_ipc.load_cuda_ipc_arraydict(out)
+    assert decoded.shape == (0, 3)
+    assert decoded.dtype == np.float32
+    assert mocked_cuda.calls["open"] == []
+    assert mocked_cuda.calls["malloc"] == []
+    assert decoded.copy_to_host().shape == (0, 3)
+
+
+def test_descriptor_without_a_handle_must_be_for_an_empty_array(mocked_cuda):
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=0)
+    encoded["data"]["buffer"] = "0::0:0"
+    with pytest.raises(ValueError, match="no handle"):
+        cuda_ipc.load_cuda_ipc_arraydict(encoded)
+
+
+def test_dtype_without_numpy_equivalent_is_refused(mocked_cuda):
+    # PyTorch describes bfloat16 as a 2-byte void dtype.
+    with pytest.raises(TypeError, match="no NumPy equivalent"):
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "|V2"))
+
+
+def test_non_contiguous_arrays_are_not_exportable():
+    assert cuda_ipc.is_c_contiguous(FakeCudaArray((3, 2), "<f4"))
+    assert not cuda_ipc.is_c_contiguous(FakeCudaArray((3, 2), "<f4", strides=(4, 12)))
+
+
+def test_release_while_the_pool_lock_is_held_does_not_wait(mocked_cuda):
+    """A finalizer run by a GC pass inside take() or put() must not deadlock.
+
+    The buffer it hands back joins the pool at the next take() or put().
+    """
+    import threading
+
+    pool = cuda_ipc._BufferPool()
+
+    def finalizer_inside_the_pool():
+        with pool._lock:
+            pool.release(0xA000, 0, 8)
+
+    worker = threading.Thread(target=finalizer_inside_the_pool, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), "release() waited for the pool's own lock"
+    assert pool.take(0, 8) == (0xA000, None)

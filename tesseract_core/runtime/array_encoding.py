@@ -138,7 +138,8 @@ class CudaIpcArrayData(BaseModel):
 
     - ``device`` is the CUDA device ordinal the memory lives on,
     - ``handle`` is the base64-encoded 64-byte cudaIpcMemHandle_t (its base64
-      alphabet never contains ``:``, so it is safe as a field delimiter),
+      alphabet never contains ``:``, so it is safe as a field delimiter), or
+      empty for an empty array, which has no memory to share,
     - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
     - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
 
@@ -148,7 +149,7 @@ class CudaIpcArrayData(BaseModel):
     """
 
     buffer: StrictStr = Field(
-        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
+        pattern=r"^\d+:[A-Za-z0-9+/=]*:\d+:\d+$",
         description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
     )
     encoding: Literal["cuda_ipc"]
@@ -861,10 +862,11 @@ def encode_array(
         return python_to_array(arr, expected_shape, expected_dtype, context)
 
     # A GPU array with a device transport set is exported by reference, staying
-    # on-device. A GPU array without a transport, or any host array, falls
-    # through to the host encoding below -- so a mixed payload (some GPU, some
-    # CPU arrays) serializes each leaf by where it lives instead of failing.
-    if device_transport is not None and is_gpu_array:
+    # on-device. A GPU array without a transport, a non-contiguous one (which
+    # cuda_ipc cannot move), or any host array, falls through to the host
+    # encoding below -- so a mixed payload (some GPU, some CPU arrays)
+    # serializes each leaf by where it lives instead of failing.
+    if device_transport is not None and is_gpu_array and cuda_ipc.is_c_contiguous(arr):
         from tesseract_core.runtime.device_transport import get_transport
 
         transport = get_transport(device_transport)

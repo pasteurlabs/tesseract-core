@@ -6,14 +6,13 @@
 Mirrors just enough of the DLPack C ABI to wrap a device buffer in a
 ``"dltensor"`` PyCapsule without depending on any GPU framework.
 :class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray` implements
-``__dlpack__`` with :func:`make_dlpack_capsule` and
-:func:`drop_unconsumed_bundle`. All ctypes and CPython capsule calls stay in
-this module. An exported buffer is released through the caller's release
-callback.
+``__dlpack__`` with :func:`make_dlpack_capsule`. All ctypes and CPython capsule
+calls stay in this module. A capsule, and the tensor a framework adopts from
+it, keep the object that owns the buffer alive until the framework is done.
 """
 
 import ctypes
-from collections.abc import Callable
+import sys
 from typing import Any
 
 import numpy as np
@@ -66,20 +65,18 @@ _DLPACK_TYPE_CODES = {
     "c": 5,  # kDLComplex
 }
 
-# Keep PyCapsule_* usable from ctypes for the DLPack capsule handshake.
-_pythonapi = ctypes.pythonapi
-_pythonapi.PyCapsule_New.restype = ctypes.py_object
-_pythonapi.PyCapsule_New.argtypes = [
-    ctypes.c_void_p,
-    ctypes.c_char_p,
-    ctypes.c_void_p,
-]
-_pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
-_pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
-_pythonapi.PyCapsule_SetName.restype = ctypes.c_int
-_pythonapi.PyCapsule_SetName.argtypes = [ctypes.py_object, ctypes.c_char_p]
-_pythonapi.PyCapsule_IsValid.restype = ctypes.c_int
-_pythonapi.PyCapsule_IsValid.argtypes = [ctypes.py_object, ctypes.c_char_p]
+# Private prototypes for the PyCapsule calls, so the shared ctypes.pythonapi
+# functions keep whatever argtypes other code gave them.
+_capsule_new = ctypes.PYFUNCTYPE(
+    ctypes.py_object, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p
+)(("PyCapsule_New", ctypes.pythonapi))
+_capsule_is_valid = ctypes.PYFUNCTYPE(ctypes.c_int, ctypes.py_object, ctypes.c_char_p)(
+    ("PyCapsule_IsValid", ctypes.pythonapi)
+)
+
+# Capsule name for an unconsumed DLPack tensor. Kept here because a capsule
+# borrows its name for its whole life.
+_DLTENSOR = b"dltensor"
 
 # DLDeviceType for CUDA, re-exported for __dlpack_device__ callers.
 DLDEVICE_CUDA = _kDLCUDA
@@ -99,14 +96,52 @@ def _dlpack_dtype(dtype: np.dtype) -> _DLDataType:
 #
 # A DLPack capsule must outlive the object that produced it: the consumer may
 # hold the borrowed tensor arbitrarily long and only calls the deleter when it
-# is done. We therefore keep each capsule's backing ctypes state (the
-# DLManagedTensor, the shape array, the CFUNCTYPE deleter trampoline) alive in a
-# process-global registry keyed by an integer token, rather than on the
-# producing IpcDeviceArray. The deleter removes its own entry when invoked, so
-# the state is reclaimed exactly when the consumer releases the tensor.
+# is done. Each capsule's backing ctypes state (the DLManagedTensor and its
+# shape array), together with the object that owns the device buffer and the
+# capsule itself, is kept in a process-global registry keyed by the
+# DLManagedTensor's address. The deleter removes the entry, which lets the
+# owner go and free the buffer once nothing else uses it either.
 
 _BUNDLES: dict[int, Any] = {}
-_NEXT_TOKEN = 0
+
+# Addresses of capsules no framework has consumed yet. A framework consumes a
+# capsule as soon as it gets it, so this stays small.
+_UNCONSUMED: set[int] = set()
+
+
+@_DLManagedTensorDeleter
+def _deleter(managed_ptr: int | None) -> None:
+    # Runs when the consumer releases the tensor, possibly at interpreter
+    # shutdown, and a ctypes callback must not raise.
+    try:
+        _BUNDLES.pop(managed_ptr, None)
+    except BaseException:  # noqa: BLE001, S110
+        pass
+
+
+def drop_abandoned_capsules() -> None:
+    """Let go of the owners of capsules that were dropped without being consumed.
+
+    A capsule a framework refused, or that was never passed to one, has no
+    consumer to call the deleter, so its bundle would keep the owner alive for
+    good. Capsules without a destructor are used because a destructor would run
+    Python code from inside the consumer's error handling; instead, a capsule
+    that is still unconsumed and that nothing but its bundle references is
+    dropped here, which callers do before each export and decode.
+    """
+    for address in list(_UNCONSUMED):
+        bundle = _BUNDLES.get(address)
+        if bundle is None:
+            _UNCONSUMED.discard(address)
+            continue
+        capsule = bundle[3]
+        if not _capsule_is_valid(capsule, _DLTENSOR):
+            # Consumed: the consumer calls the deleter when it is done.
+            _UNCONSUMED.discard(address)
+        elif sys.getrefcount(capsule) <= 3:
+            # Referenced only by the bundle, this local and the call's argument.
+            _UNCONSUMED.discard(address)
+            _BUNDLES.pop(address, None)
 
 
 def make_dlpack_capsule(
@@ -114,18 +149,15 @@ def make_dlpack_capsule(
     device: int,
     shape: tuple[int, ...],
     dtype: np.dtype,
-    release: Callable[[], None],
-) -> tuple[Any, int]:
-    """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
+    owner: Any,
+) -> Any:
+    """Build a ``"dltensor"`` capsule for the C-contiguous buffer at ``ptr``.
 
-    Returns ``(capsule, token)``. The deleter calls ``release`` exactly once,
-    whether the capsule is consumed by a framework or dropped un-consumed via
-    :func:`drop_unconsumed_bundle`.
+    ``owner`` is the object whose lifetime the buffer follows. The capsule keeps
+    it alive until the consumer releases the tensor, or, for a capsule dropped
+    without being consumed, until :func:`drop_abandoned_capsules` next runs.
     """
-    global _NEXT_TOKEN
-    token = _NEXT_TOKEN
-    _NEXT_TOKEN += 1
-
+    drop_abandoned_capsules()
     shape_arr = (ctypes.c_int64 * len(shape))(*shape)
 
     managed = _DLManagedTensor()
@@ -136,40 +168,11 @@ def make_dlpack_capsule(
     managed.dl_tensor.shape = shape_arr
     managed.dl_tensor.strides = ctypes.cast(None, ctypes.POINTER(ctypes.c_int64))
     managed.dl_tensor.byte_offset = 0
-
-    def _deleter(_managed_ptr: int | None) -> None:
-        # Runs when the consumer releases the tensor. Release the buffer and
-        # drop our registry entry so the ctypes state can be reclaimed. Guard
-        # against a second invocation (bundle already gone).
-        bundle = _BUNDLES.pop(token, None)
-        if bundle is not None:
-            release()
-
-    c_deleter = _DLManagedTensorDeleter(_deleter)
-    managed.deleter = c_deleter
+    managed.deleter = _deleter
     managed.manager_ctx = None
 
-    capsule = _pythonapi.PyCapsule_New(ctypes.byref(managed), b"dltensor", None)
-
-    # Keep every object the capsule/consumer may still touch alive until the
-    # deleter drops the entry.
-    _BUNDLES[token] = (managed, shape_arr, c_deleter, capsule)
-    return capsule, token
-
-
-def drop_unconsumed_bundle(token: int) -> None:
-    """Release a bundle's buffer iff its capsule was never consumed.
-
-    Called from the :class:`IpcDeviceArray` finalizer. If the capsule is still
-    named ``"dltensor"`` no framework adopted it, so we invoke the deleter to
-    release the buffer. If it was renamed to ``"used_dltensor"`` a consumer owns
-    it and will (or already did) release it via the deleter, so we leave it alone.
-    """
-    bundle = _BUNDLES.get(token)
-    if bundle is None:
-        return
-    _managed, _shape_arr, c_deleter, capsule = bundle
-    still_dltensor = bool(_pythonapi.PyCapsule_IsValid(capsule, b"dltensor"))
-    if still_dltensor:
-        # Nobody adopted it -> release now (the deleter pops the registry entry).
-        c_deleter(0)
+    address = ctypes.addressof(managed)
+    capsule = _capsule_new(address, _DLTENSOR, None)
+    _BUNDLES[address] = (managed, shape_arr, owner, capsule)
+    _UNCONSUMED.add(address)
+    return capsule

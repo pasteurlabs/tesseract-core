@@ -41,7 +41,6 @@ maintaining their own soname list.
 
 import collections
 import contextlib
-import functools
 import math
 import os
 import threading
@@ -69,6 +68,7 @@ __all__ = [
     "dump_cuda_ipc_arraydict",
     "finish_transport_check",
     "has_cuda_array_interface",
+    "is_c_contiguous",
     "load_cuda_ipc_arraydict",
     "release_pinned_ipc_exports",
     "start_transport_check",
@@ -185,6 +185,14 @@ class _CudaArrayInfo(NamedTuple):
         return self.strides == tuple(expected)
 
 
+def is_c_contiguous(arr: Any) -> bool:
+    """Whether a GPU array's memory is row-major contiguous, as cuda_ipc needs.
+
+    Encoders send other GPU arrays as host copies instead.
+    """
+    return _read_cuda_array_info(arr).is_c_contiguous()
+
+
 def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
     """Read a CUDA array's metadata from ``__cuda_array_interface__``.
 
@@ -279,9 +287,40 @@ class _BufferPool:
         )
         self._idle_bytes: collections.Counter[int] = collections.Counter()
         self._lock = threading.Lock()
+        # Buffers handed back by release() and not yet added to the pool.
+        self._released: collections.deque[tuple[int, int, int]] = collections.deque()
+
+    def release(self, ptr: int, device: int, nbytes: int) -> None:
+        """Hand back a buffer from a finalizer, which may run at any point.
+
+        A garbage-collection pass can run a finalizer while this thread holds
+        the pool's lock inside :meth:`take` or :meth:`put`, so this never waits
+        for the lock: it queues the buffer, which goes into the pool now if the
+        lock is free and otherwise at the next :meth:`take` or :meth:`put`.
+        Finalizers must never raise, so neither does this.
+        """
+        try:
+            if not ptr:
+                return
+            self._released.append((ptr, device, nbytes))
+            if self._lock.acquire(blocking=False):
+                self._lock.release()
+                self._drain()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    def _drain(self) -> None:
+        """Add the buffers queued by :meth:`release` to the pool."""
+        while True:
+            try:
+                ptr, device, nbytes = self._released.popleft()
+            except IndexError:
+                return
+            self._put(ptr, device, nbytes, None)
 
     def take(self, device: int, nbytes: int) -> tuple[int, Any] | None:
         """Remove and return ``(ptr, value)`` for an idle buffer of this device and size, or ``None``."""
+        self._drain()
         with self._lock:
             for ptr in reversed(self._idle):
                 buf_device, buf_nbytes, value = self._idle[ptr]
@@ -293,6 +332,10 @@ class _BufferPool:
 
     def put(self, ptr: int, device: int, nbytes: int, value: Any = None) -> None:
         """Keep a buffer for reuse, then free the oldest idle buffers beyond the cap."""
+        self._drain()
+        self._put(ptr, device, nbytes, value)
+
+    def _put(self, ptr: int, device: int, nbytes: int, value: Any) -> None:
         if not ptr:
             return
         max_bytes = _pool_max_bytes(device)
@@ -371,10 +414,13 @@ def _pin_cuda_ipc_export(arr: Any) -> None:
 def _on_device(device: int) -> Iterator[None]:
     """Make ``device`` the active CUDA device for the block, then restore the caller's."""
     previous = cuda_api.get_device()
+    # Set it even when it is already active: cudaSetDevice also makes the
+    # device's primary context current on this thread, which the driver calls
+    # in the block need, e.g. on a fresh thread that has made no CUDA call yet.
+    cuda_api.set_device(device)
     if previous == device:
         yield
         return
-    cuda_api.set_device(device)
     try:
         yield
     finally:
@@ -420,7 +466,24 @@ def _dump_cuda_ipc_arraydict(arr: Any, *, pin: bool) -> ArrayDict:
             "cupy.ascontiguousarray / torch.Tensor.contiguous)."
         )
 
+    if info.dtype.kind == "V":
+        raise TypeError(
+            f"cuda_ipc cannot encode arrays of dtype {info.dtype}, which have no "
+            "NumPy equivalent (e.g. bfloat16)."
+        )
+
     data_ptr, nbytes = info.data_ptr, info.nbytes
+
+    if nbytes == 0:
+        # An empty array has no memory to share (frameworks give it a null
+        # pointer, which the CUDA calls below reject), so its descriptor
+        # carries no handle and the consumer recreates it without opening one.
+        return {
+            "object_type": "array",
+            "shape": list(info.shape),
+            "dtype": info.dtype.name,
+            "data": {"buffer": f"{info.device}::0:0", "encoding": "cuda_ipc"},
+        }
 
     # Keep the source allocation alive until exports are explicitly released.
     # (Not strictly needed on the VMM fallback path below, which copies out of
@@ -483,32 +546,6 @@ def _dump_cuda_ipc_arraydict(arr: Any, *, pin: bool) -> ArrayDict:
 _DECODE_POOL = _BufferPool()
 
 
-def _finalize_ipc_device_array(state: dict) -> None:
-    """Release an :class:`IpcDeviceArray`'s device buffer exactly once.
-
-    Registered via :func:`weakref.finalize`, so it runs when the array is
-    garbage-collected *and* at interpreter shutdown, and can fire at most once.
-    ``state`` is the array's mutable ownership record, shared by reference with
-    the live object so ``__dlpack__`` can hand ownership off before this runs:
-
-    * ``dlpack_token is None`` and not ``released``: we still own the buffer, so
-      return it to the pool.
-    * ``dlpack_token`` set: ``__dlpack__`` moved the buffer into a DLPack bundle;
-      drop the bundle iff its capsule was never consumed (a consumer that took
-      the capsule already owns the free).
-    """
-    try:
-        if state["dlpack_token"] is None:
-            if not state["released"]:
-                state["release"]()
-                state["released"] = True
-        else:
-            dlpack.drop_unconsumed_bundle(state["dlpack_token"])
-    except Exception:  # noqa: BLE001, S110
-        # Finalizers must never raise.
-        pass
-
-
 class IpcDeviceArray:
     """Owns a device buffer decoded from a CUDA IPC handle.
 
@@ -523,12 +560,11 @@ class IpcDeviceArray:
     NumPy copy so it can be inspected without any GPU framework installed. Only
     ``np.asarray`` is subject to :func:`check_device_host_copy`.
 
-    The device buffer returns to the decode pool exactly once. Either a
-    :func:`weakref.finalize` callback releases it (see
-    :func:`_finalize_ipc_device_array`), or a DLPack consumer takes it (the
-    capsule is renamed to ``"used_dltensor"`` on consumption, transferring the
-    release to the consumer's deleter). ``_state["released"]`` guards against a
-    double release.
+    The device buffer returns to the decode pool once this object is garbage
+    collected. Every DLPack capsule it hands out, and the tensor a framework
+    adopts from one, keeps it alive until the framework releases the tensor.
+    A framework adopting it through ``__cuda_array_interface__`` keeps a
+    reference to it for the same reason.
     """
 
     def __init__(
@@ -543,20 +579,8 @@ class IpcDeviceArray:
             if self.shape
             else self.dtype.itemsize
         )
-        # Ownership record shared by reference with the finalizer below.
-        #   release:      returns the buffer to the pool.
-        #   released:     True once the buffer is released or ownership was
-        #                 handed to a DLPack capsule. Prevents a double release.
-        #   dlpack_token: token of the DLPack bundle produced by __dlpack__, or
-        #                 None if __dlpack__ was never called. Ownership of the
-        #                 buffer moves into that bundle when it is created.
-        self._state: dict = {
-            "release": functools.partial(_DECODE_POOL.put, ptr, device, self._nbytes),
-            "released": False,
-            "dlpack_token": None,
-        }
         self._finalizer = weakref.finalize(
-            self, _finalize_ipc_device_array, self._state
+            self, _DECODE_POOL.release, ptr, device, self._nbytes
         )
 
     # -- inspection ------------------------------------------------------
@@ -578,9 +602,9 @@ class IpcDeviceArray:
 
     def copy_to_host(self) -> np.ndarray:
         """Copy the owned device buffer into a fresh host NumPy array."""
-        if self._state["released"]:
-            raise RuntimeError("device buffer has been released")
         host = np.empty(self.shape, dtype=self.dtype)
+        if self._nbytes == 0:
+            return host
         cuda_api.memcpy_device_to_host(host.ctypes.data, self._ptr, self._nbytes)
         cuda_api.device_synchronize()
         return host
@@ -598,31 +622,14 @@ class IpcDeviceArray:
     def __dlpack__(self, stream: Any = None, **kwargs: Any) -> Any:
         """Return a ``"dltensor"`` PyCapsule wrapping the owned buffer.
 
-        Ownership of the device buffer moves into a self-contained DLPack bundle
-        (see :func:`tesseract_core.runtime.cuda.dlpack.make_dlpack_capsule`)
-        whose deleter returns it to the pool. The bundle's lifetime is
-        deliberately *not* tied to this object's, because a consumer (Torch/JAX)
-        may keep the tensor long after this ``IpcDeviceArray`` is gone and will
-        call the deleter then. Whoever ends up owning the capsule (the consumer,
-        or the finalizer for an un-consumed capsule) releases the buffer exactly
-        once.
+        The capsule keeps this object, and so the buffer, alive until the
+        consumer (Torch/JAX) releases the tensor, however long after this
+        object's last other reference that is. Each call returns a new capsule
+        onto the same buffer.
         """
-        if self._state["released"]:
-            raise RuntimeError("device buffer has been released")
-
-        capsule, token = dlpack.make_dlpack_capsule(
-            self._ptr,
-            self.device,
-            self.shape,
-            self.dtype,
-            release=self._state["release"],
+        return dlpack.make_dlpack_capsule(
+            self._ptr, self.device, self.shape, self.dtype, owner=self
         )
-        # The buffer now belongs to the bundle; this object must not free it.
-        # The finalizer reads this shared state to drop the bundle iff its
-        # capsule is never consumed.
-        self._state["dlpack_token"] = token
-        self._state["released"] = True
-        return capsule
 
 
 def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
@@ -654,9 +661,21 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
+    if not handle_bytes:
+        # An empty array's descriptor carries no handle (see the encoder).
+        if nbytes:
+            raise ValueError(
+                f"cuda_ipc descriptor has no handle, but the array of shape "
+                f"{shape} and dtype {dtype} is not empty"
+            )
+        return IpcDeviceArray(0, device, shape, dtype)
+
     # Allocation and synchronization act on the active device, which need not
     # be the array's.
     with _on_device(device):
+        # Free the buffers of decoded arrays whose only remaining reference was
+        # a DLPack capsule nobody consumed, so the pool can offer them below.
+        dlpack.drop_abandoned_capsules()
         # Get the owned buffer up front so that if any later step fails we still
         # close the IPC mapping and free the buffer cleanly.
         pooled = _DECODE_POOL.take(device, nbytes)

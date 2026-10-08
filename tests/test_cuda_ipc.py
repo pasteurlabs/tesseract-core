@@ -827,6 +827,73 @@ def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
         _close_encoding_context(ctx)
 
 
+@requires_torch_cuda
+def test_empty_and_non_contiguous_torch_tensors_are_encoded(allow_device_host_copy):
+    """Empty tensors cross by an empty descriptor, non-contiguous ones as host copies."""
+    import torch
+
+    from tesseract_core.sdk.tesseract import _encode_payload
+
+    empty = torch.empty(0, 3, device="cuda")
+    transposed = torch.arange(6, dtype=torch.float32, device="cuda").reshape(2, 3).T
+    with _encode_payload(
+        {"e": empty, "t": transposed}, gpu_transport="cuda_ipc"
+    ) as out:
+        assert out["e"]["data"] == {"buffer": "0::0:0", "encoding": "cuda_ipc"}
+        assert out["t"]["data"]["encoding"] == "base64"
+        assert list(out["t"]["shape"]) == [3, 2]
+
+
+@requires_torch_cuda
+def test_export_from_a_thread_that_made_no_cuda_call():
+    """The driver call resolving the allocation needs a current context on the thread."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import torch
+
+    from tesseract_core.runtime.cuda.ipc import (
+        dump_cuda_ipc_arraydict,
+        release_pinned_ipc_exports,
+    )
+
+    x = torch.ones(16, device="cuda")
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            exported = pool.submit(dump_cuda_ipc_arraydict, x).result()
+        assert exported["data"]["encoding"] == "cuda_ipc"
+    finally:
+        release_pinned_ipc_exports()
+
+
+@requires_torch_cuda
+def test_dlpack_capsule_keeps_its_array_alive_and_can_be_made_twice():
+    """A capsule outlives the array it came from, and each __dlpack__ call works.
+
+    Dropping the array before consuming its capsule used to free the buffer and
+    the capsule's struct under the consumer.
+    """
+    import gc
+
+    import torch
+
+    from tesseract_core.runtime.cuda.ipc import _device_array_from_bytes
+
+    data = bytes(range(16))
+    array = _device_array_from_bytes(data, 0)
+    capsule = array.__dlpack__()
+    del array
+    gc.collect()
+    _device_array_from_bytes(b"\xff" * 16, 0)  # would reuse a freed buffer
+    assert torch.from_dlpack(capsule).cpu().numpy().tobytes() == data
+
+    array = _device_array_from_bytes(data, 0)
+    first, second = torch.from_dlpack(array), torch.from_dlpack(array)
+    assert first.data_ptr() == second.data_ptr()
+    with pytest.raises((BufferError, RuntimeError)):
+        np.from_dlpack(array)  # NumPy refuses device memory
+    assert array.copy_to_host().tobytes() == data
+
+
 @requires_cuda
 @requires_torch_cuda
 def test_decode_to_torch_via_cuda_array_interface():
