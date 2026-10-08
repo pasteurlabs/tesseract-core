@@ -167,7 +167,7 @@ def is_podman() -> bool:
             check=True,
         )
         return "podman" in result.stdout.lower()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
 
