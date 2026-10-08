@@ -9,10 +9,11 @@ import sys
 import tempfile
 import traceback
 import uuid
+import warnings
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
@@ -119,6 +120,130 @@ def requires_client(func: Callable) -> Callable:
     return wrapper
 
 
+@dataclass(frozen=True)
+class ServerCapabilities:
+    """The encodings a served Tesseract accepts, as advertised by the server.
+
+    Each field lists the values a client may request for that part of the
+    encoding, or is None if the server does not advertise it. Runtimes older
+    than 1.13 advertise nothing, and 1.13 and 1.14 advertise only output
+    formats.
+    """
+
+    output_formats: tuple[str, ...] | None
+    """Formats for CPU arrays in responses (e.g. ``json+base64``)."""
+
+    gpu_transports: tuple[str, ...] | None
+    """How GPU arrays may cross the boundary in either direction. ``none`` copies
+    them to the host, and anything else (e.g. ``cuda_ipc``) passes them by
+    reference."""
+
+    compressions: tuple[str, ...] | None
+    """Compressions for array buffers in responses (``none`` disables it)."""
+
+    @classmethod
+    def from_openapi_schema(cls, schema: dict) -> ServerCapabilities:
+        """Read the capabilities a server advertises in its OpenAPI schema."""
+
+        def advertised(key: str) -> tuple[str, ...] | None:
+            values = schema.get(key)
+            return None if values is None else tuple(values)
+
+        return cls(
+            output_formats=advertised("x-supported-output-formats"),
+            gpu_transports=advertised("x-supported-gpu-transports"),
+            compressions=advertised("x-supported-compressions"),
+        )
+
+
+@dataclass(frozen=True)
+class _RequestedEncoding:
+    """What a client requests for a call, with ``None`` meaning no preference."""
+
+    output_format: str | None = None
+    gpu_transport: str | None = None
+    compression: str | None = None
+
+    def merge(self, overrides: _RequestedEncoding | None) -> _RequestedEncoding:
+        """Return a copy with the fields ``overrides`` sets taking precedence."""
+        if overrides is None:
+            return self
+        return _RequestedEncoding(
+            output_format=overrides.output_format or self.output_format,
+            gpu_transport=overrides.gpu_transport or self.gpu_transport,
+            compression=overrides.compression or self.compression,
+        )
+
+    @property
+    def params(self) -> dict[str, str]:
+        """The fields sent as media-type parameters, for those with a preference."""
+        return {
+            name: value
+            for name in ("gpu_transport", "compression")
+            if (value := getattr(self, name)) is not None
+        }
+
+    def accept_header(self) -> str | None:
+        """The ``Accept`` value requesting this encoding, or None if there is no preference.
+
+        Fields without a preference are left out, so the server picks them.
+        """
+        params = [f"{name}={value}" for name, value in self.params.items()]
+        if self.output_format is None and not params:
+            return None
+        media_type = f"application/{self.output_format or '*'}"
+        return "; ".join([media_type, *params])
+
+
+def _fit_encoding_to_server(
+    encoding: _RequestedEncoding, capabilities: ServerCapabilities
+) -> _RequestedEncoding:
+    """Check ``encoding`` against what the server advertises, before any work is done.
+
+    Raises ValueError if the server cannot provide the encoding. Returns the
+    encoding to request, which drops parameters the server cannot parse but
+    already satisfies.
+    """
+    if capabilities.output_formats is None:
+        # Runtimes older than 1.13 read the entire Accept value as the output
+        # format, so any parameter fails the request after the endpoint has run.
+        # They never pass GPU arrays by reference, though, so gpu_transport=none
+        # can go unsaid.
+        if encoding.gpu_transport == "none":
+            encoding = replace(encoding, gpu_transport=None)
+        if encoding.params:
+            names = " or ".join(encoding.params)
+            raise ValueError(
+                "This Tesseract's runtime is older than 1.13 and cannot be asked "
+                f"for {names} per request. Rebuild it with a newer runtime, or "
+                f"leave {names} unset."
+            )
+        return encoding
+
+    for name, accepted in (
+        ("output_format", capabilities.output_formats),
+        ("gpu_transport", capabilities.gpu_transports),
+        ("compression", capabilities.compressions),
+    ):
+        value = getattr(encoding, name)
+        if value is not None and accepted is not None and value not in accepted:
+            raise ValueError(
+                f"This Tesseract does not accept {name}={value!r} "
+                f"(accepted: {accepted})"
+            )
+
+    if encoding.compression is not None and capabilities.compressions is None:
+        # Compression can only be requested through with_encoding, which checks
+        # first, so this points at the user's with_encoding call
+        warnings.warn(
+            "This Tesseract does not advertise which compressions it accepts. "
+            "Runtimes older than 1.14 ignore the requested compression and use "
+            "the one they were configured with.",
+            stacklevel=4,
+        )
+    return encoding
+
+
 class Tesseract:
     """A Tesseract.
 
@@ -138,6 +263,10 @@ class Tesseract:
     _stream_logs: BoolOrCallable = False
     _timeout: float | tuple[float, float] | None = None
     _binref_pool_enabled: bool = False
+    # Set on views created by with_encoding, which share their parent's client
+    # without owning it.
+    _encoding: _RequestedEncoding | None = None
+    _owns_client: bool = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError(
@@ -235,12 +364,12 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            gpu_transport: How GPU arrays leave the process, independently of ``output_format``
-                (which governs CPU arrays). ``none`` copies GPU arrays to the host and
-                serializes them like any CPU array; ``cuda_ipc`` exports them by reference
-                and requires the container to have GPU access. Resolved against
-                ``runtime_config`` with the precedence described in ``engine.serve``. This
-                value also governs how the client exports GPU *inputs* to the served Tesseract.
+            gpu_transport: GPU transport to enable on the served Tesseract and use for
+                this client's calls (see :meth:`with_encoding` to change it per call).
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
+                reference, which requires the container to have GPU access. Independent
+                of ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -473,14 +602,13 @@ class Tesseract:
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
-            gpu_transport: How GPU arrays leave the process, independently of
-                ``output_format`` (which governs CPU arrays). ``none`` copies GPU arrays
-                to the host and serializes them like any CPU array; ``cuda_ipc`` exports
-                them by reference. Unlike a container this needs nothing wired up: two
-                processes on one host already share an IPC namespace. Resolved against
-                ``runtime_config``, an explicit value winning. This also governs how the
-                client exports GPU *inputs* to the served Tesseract.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            gpu_transport: GPU transport to enable on the served Tesseract and use for
+                this client's calls (see :meth:`with_encoding` to change it per call).
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
+                reference, which needs no setup since processes on one host share an
+                IPC namespace. Independent of ``output_format``, which governs CPU
+                arrays. Resolved against ``runtime_config``, an explicit value winning.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -553,7 +681,7 @@ class Tesseract:
         if self._serve_context is None:
             # Nothing was served by us (e.g., from_url or from_tesseract_api), so
             # there is no container to stop, but an HTTP session is still ours to close
-            if isinstance(self._client, HTTPClient):
+            if isinstance(self._client, HTTPClient) and self._owns_client:
                 self._client.close()
             return
         self.teardown()
@@ -592,14 +720,15 @@ class Tesseract:
         output_path = self._spawn_config.get("output_path")
         input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
-        # The served container's gpu_transport also governs how the client
-        # exports GPU *inputs*, so mirror the resolved transport onto the client
-        # here, using the same precedence serve() applies to the container: the
-        # explicit kwarg wins, else a value from runtime_config, else "none". So
-        # client and server always agree on how device arrays cross the boundary.
+        # The output format and GPU transport configure the server, and are also
+        # what this client requests by default (with_encoding overrides them per
+        # call). Resolve the transport with the same precedence serve() applies
+        # to the container: the explicit kwarg wins, else a value from
+        # runtime_config. If neither sets it, the client does not ask, and gets
+        # the server's default of "none".
         runtime_config = self._spawn_config.get("runtime_config") or {}
         gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
-            "gpu_transport", "none"
+            "gpu_transport"
         )
         self._client = HTTPClient(
             self._serve_context.url,
@@ -642,7 +771,7 @@ class Tesseract:
         self._serve_context = None
         self._atexit_finalizer.detach()
 
-    @cached_property
+    @property
     @requires_client
     def openapi_schema(self) -> dict:
         """Get the OpenAPI schema of this Tesseract.
@@ -664,19 +793,68 @@ class Tesseract:
 
     @property
     @requires_client
-    def supported_gpu_transports(self) -> tuple[str, ...]:
-        """Device transports that can be used to exchange arrays with this Tesseract.
+    def server_capabilities(self) -> ServerCapabilities | None:
+        """The encodings this Tesseract's server accepts, read from its OpenAPI schema.
 
-        These are the ``gpu_transport`` values (e.g. ``cuda_ipc``) this client
-        uses to pass GPU arrays by reference instead of copying them to the host.
-        Tesseracts served without a GPU transport, and in-process Tesseracts
-        created via :meth:`from_tesseract_api` (which share memory with the
-        caller), support none.
+        A listed value can still fail for reasons the server cannot know about.
+        For example, ``cuda_ipc`` requires client and server to share a host and a GPU.
 
         Returns:
-            a tuple of supported device transport names, empty if none.
+            the advertised capabilities, or None for in-process Tesseracts created
+            via :meth:`from_tesseract_api`, which do not serialize arrays.
         """
-        return self._client.supported_gpu_transports
+        if isinstance(self._client, LocalClient):
+            return None
+        return self._client.server_capabilities
+
+    @requires_client
+    def with_encoding(
+        self,
+        *,
+        output_format: OutputFormat | None = None,
+        gpu_transport: str | None = None,
+        compression: Literal["none", "lz4"] | None = None,
+    ) -> Tesseract:
+        """Get a view of this Tesseract that requests a different encoding.
+
+        The view shares this Tesseract's connection and stays usable while this
+        Tesseract is served. Arguments left as None keep this Tesseract's setting.
+
+            >>> with Tesseract.from_image(
+            ...     "my_tesseract", gpu_transport="cuda_ipc"
+            ... ) as t:
+            ...     t.with_encoding(gpu_transport="none").apply(inputs)
+
+        Has no effect on in-process Tesseracts created via :meth:`from_tesseract_api`.
+
+        Args:
+            output_format: Format for CPU arrays in responses.
+            gpu_transport: How GPU arrays cross the boundary in either direction.
+                ``none`` copies them to the host, and ``cuda_ipc`` passes them by
+                reference.
+            compression: Compression for array buffers in responses (``none``
+                disables it).
+
+        Returns:
+            A Tesseract that uses the requested encoding for every call.
+
+        Raises:
+            ValueError: if the server does not accept a requested value, or runs
+                a runtime too old to be asked for it.
+        """
+        requested = _RequestedEncoding(output_format, gpu_transport, compression)
+        capabilities = self.server_capabilities
+        if capabilities is not None:
+            # Calls check again with the full encoding, but failing here points
+            # at the argument that caused it
+            _fit_encoding_to_server(requested, capabilities)
+
+        view = Tesseract.__new__(Tesseract)
+        view._client = self._client
+        view._owns_client = False
+        view._stream_logs = self._stream_logs
+        view._encoding = (self._encoding or _RequestedEncoding()).merge(requested)
+        return view
 
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
@@ -722,7 +900,9 @@ class Tesseract:
             dictionary with the results.
         """
         payload = {"inputs": inputs}
-        return self._client.run_tesseract("apply", payload, run_id, self._stream_logs)
+        return self._client.run_tesseract(
+            "apply", payload, run_id, self._stream_logs, encoding=self._encoding
+        )
 
     @requires_client
     def abstract_eval(self, abstract_inputs: dict) -> dict:
@@ -775,7 +955,7 @@ class Tesseract:
             "jac_outputs": jac_outputs,
         }
         return self._client.run_tesseract(
-            "jacobian", payload, run_id, self._stream_logs
+            "jacobian", payload, run_id, self._stream_logs, encoding=self._encoding
         )
 
     @requires_client
@@ -812,7 +992,11 @@ class Tesseract:
             "tangent_vector": tangent_vector,
         }
         return self._client.run_tesseract(
-            "jacobian_vector_product", payload, run_id, self._stream_logs
+            "jacobian_vector_product",
+            payload,
+            run_id,
+            self._stream_logs,
+            encoding=self._encoding,
         )
 
     @requires_client
@@ -849,7 +1033,11 @@ class Tesseract:
             "cotangent_vector": cotangent_vector,
         }
         return self._client.run_tesseract(
-            "vector_jacobian_product", payload, run_id, self._stream_logs
+            "vector_jacobian_product",
+            payload,
+            run_id,
+            self._stream_logs,
+            encoding=self._encoding,
         )
 
     @requires_client
@@ -1133,7 +1321,7 @@ def _encode_array(
 def _encode_payload(
     payload: dict | None,
     gpu_transport: str = "none",
-    output_format: OutputFormat = "json+base64",
+    output_format: OutputFormat | None = None,
     input_path: PathLike | None = None,
     binref_pool: BinrefWritePool | None = None,
 ) -> Iterator[dict | None]:
@@ -1298,9 +1486,8 @@ def _decode_array(
 
             arr = np.frombuffer(data, dtype=dtype)
     elif encoding == "cuda_ipc":
-        # Returns a fresh, client-owned device-array wrapper: the decode opens
-        # the IPC handle, copies device-to-device into our own memory, and
-        # closes the mapping before returning. The result exposes
+        # Returns a client-owned device-array wrapper. The decode copies
+        # device-to-device into our own memory, and the result exposes
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
@@ -1335,20 +1522,22 @@ class HTTPClient:
     # still expose the binref attributes the request/decode paths read.
     _input_path: Path | None = None
     _binref_pool: BinrefWritePool | None = None
-    _gpu_transport: str = "none"
+    _output_format: str | None = None
+    _gpu_transport: str | None = None
 
     def __init__(
         self,
         url: str,
         output_path: str | Path | None = None,
-        output_format: OutputFormat = "json+base64",
+        output_format: OutputFormat | None = None,
         timeout: float | tuple[float, float] | None = None,
         input_path: str | Path | None = None,
         experimental_binref_pool: bool = False,
-        gpu_transport: str = "none",
+        gpu_transport: str | None = None,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        # Requested by default, with None deferring to the server.
         self._output_format = output_format
         self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
@@ -1389,14 +1578,28 @@ class HTTPClient:
         return self._url
 
     @property
-    def supported_gpu_transports(self) -> tuple[str, ...]:
-        """Device transports this client uses for GPU arrays (empty if none)."""
-        if self._gpu_transport == "none":
-            return ()
-        return (self._gpu_transport,)
+    def default_encoding(self) -> _RequestedEncoding:
+        """What this client requests for calls that do not override it."""
+        return _RequestedEncoding(self._output_format, self._gpu_transport)
+
+    @cached_property
+    def openapi_schema(self) -> dict:
+        """The server's OpenAPI schema, fetched once per client."""
+        response = self._send(f"{self.url}/openapi.json", "GET", b"", {})
+        return self._decode_response(response, "openapi.json")
+
+    @cached_property
+    def server_capabilities(self) -> ServerCapabilities:
+        """The encodings the server advertises in its OpenAPI schema."""
+        return ServerCapabilities.from_openapi_schema(self.openapi_schema)
 
     def _send(
-        self, url: str, method: str, data: bytes, params: dict
+        self,
+        url: str,
+        method: str,
+        data: bytes,
+        params: dict,
+        headers: dict[str, str] | None = None,
     ) -> requests.Response:
         # Only forward timeout when set; omitting it is equivalent to None for
         # requests.Session, and avoids passing a kwarg that some session
@@ -1407,6 +1610,10 @@ class HTTPClient:
             "data": data,
             "params": params,
         }
+        # Per-request headers, rather than session state, so concurrent calls
+        # with different encodings cannot interfere.
+        if headers:
+            request_kwargs["headers"] = headers
         if self._timeout is not None:
             request_kwargs["timeout"] = self._timeout
         try:
@@ -1424,18 +1631,28 @@ class HTTPClient:
         method: str = "GET",
         payload: dict | None = None,
         run_id: str | None = None,
+        encoding: _RequestedEncoding | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
+        encoding = self.default_encoding.merge(encoding)
+        # Only parameters can trip up a server, and checking them costs a fetch
+        # of the OpenAPI schema on first use
+        if encoding.params:
+            encoding = _fit_encoding_to_server(encoding, self.server_capabilities)
+        accept = encoding.accept_header()
+        headers = {"Accept": accept} if accept is not None else None
 
         with _encode_payload(
             payload,
-            gpu_transport=self._gpu_transport,
-            output_format=self._output_format,
+            gpu_transport=encoding.gpu_transport or "none",
+            output_format=encoding.output_format,
             input_path=self._input_path,
             binref_pool=self._binref_pool,
         ) as encoded_payload:
-            response = self._send(url, method, orjson.dumps(encoded_payload), params)
+            response = self._send(
+                url, method, orjson.dumps(encoded_payload), params, headers
+            )
         return self._decode_response(response, endpoint)
 
     def _decode_response(self, response: requests.Response, endpoint: str) -> dict:
@@ -1515,6 +1732,7 @@ class HTTPClient:
         payload: dict | None = None,
         run_id: str | None = None,
         stream_logs: BoolOrCallable = False,
+        encoding: _RequestedEncoding | None = None,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -1525,20 +1743,15 @@ class HTTPClient:
                     in a directory suffixed with this id.
             stream_logs: If True, stream logs to stdout. If a callable, stream
                     logs to that callable.
+            encoding: Overrides this client's default encoding for this call.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
-        if endpoint in [
-            "openapi_schema",
-            "health",
-        ]:
-            method = "GET"
-        else:
-            method = "POST"
-
         if endpoint == "openapi_schema":
-            endpoint = "openapi.json"
+            return self.openapi_schema
+
+        method = "GET" if endpoint == "health" else "POST"
 
         # Set up log streaming if requested
         log_streamer = None
@@ -1564,7 +1777,7 @@ class HTTPClient:
             log_streamer.start()
 
         try:
-            return self._request(endpoint, method, payload, run_id)
+            return self._request(endpoint, method, payload, run_id, encoding)
         finally:
             if log_streamer is not None:
                 log_streamer.stop()
@@ -1604,21 +1817,13 @@ class LocalClient:
         # Allows external clients (e.g. tesseract-jax) to access module directly
         self.api_module = tesseract_api
 
-    @property
-    def supported_gpu_transports(self) -> tuple[str, ...]:
-        """Device transports this client supports.
-
-        Always empty: in-process Tesseracts share memory with the caller, so
-        arrays never need to be transported.
-        """
-        return ()
-
     def run_tesseract(
         self,
         endpoint: str,
         payload: dict | None = None,
         run_id: str | None = None,
         stream_logs: BoolOrCallable = False,
+        encoding: _RequestedEncoding | None = None,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -1627,6 +1832,8 @@ class LocalClient:
             payload: The payload to send to the endpoint.
             run_id: a string to identify the run.
             stream_logs: If True, stream logs to stdout. If a callable, stream logs to that callable.
+            encoding: Ignored, since arrays are passed in memory. Accepted so
+                both clients can be called the same way.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.

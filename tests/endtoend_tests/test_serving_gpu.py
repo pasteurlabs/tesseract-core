@@ -18,6 +18,7 @@ GPU-less CI runners skip them.
 """
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -91,6 +92,30 @@ def _forbid_host_copy_env() -> dict[str, str]:
     return {"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"}
 
 
+@contextmanager
+def _serve_cuda_ipc(image_name: str):
+    """Serve a GPU example with gpu_transport='cuda_ipc' and host copies forbidden."""
+    with Tesseract.from_image(
+        image_name,
+        gpus=["all"],
+        output_format="json+base64",
+        runtime_config={"gpu_transport": "cuda_ipc"},
+        environment=_forbid_host_copy_env(),
+    ) as t:
+        yield t
+
+
+def _assert_device_result(got, expected: np.ndarray) -> None:
+    """Assert a cuda_ipc result is a float32 device array holding ``expected``."""
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+
+    assert isinstance(got, IpcDeviceArray), (
+        f"expected a device array from cuda_ipc, got {type(got)}"
+    )
+    assert got.dtype == np.float32
+    np.testing.assert_allclose(got.copy_to_host(), expected, rtol=1e-5, atol=1e-5)
+
+
 @requires_cuda
 def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     """A GPU Tesseract with gpu_transport='cuda_ipc' returns correct device memory.
@@ -102,29 +127,17 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     wrapper exposing ``__cuda_array_interface__`` and ``__dlpack__``, read back
     here via its host-copy helper (no CuPy needed to inspect it).
     """
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
-
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)
     s = 3.0
-    expected = s * a + b
 
-    with Tesseract.from_image(
-        gpu_image_name,
-        gpus=["all"],
-        output_format="json+base64",
-        runtime_config={"gpu_transport": "cuda_ipc"},
-        environment=_forbid_host_copy_env(),
-    ) as t:
+    with _serve_cuda_ipc(gpu_image_name) as t:
         result = t.apply({"a": a, "b": b, "s": s})
 
     got = result["result"]
-    assert isinstance(got, IpcDeviceArray), (
-        f"expected a device array from cuda_ipc, got {type(got)}"
-    )
     assert hasattr(got, "__cuda_array_interface__")
     assert hasattr(got, "__dlpack__")
-    np.testing.assert_allclose(got.copy_to_host(), expected, rtol=1e-5, atol=1e-5)
+    _assert_device_result(got, s * a + b)
 
 
 @requires_cuda
@@ -134,16 +147,76 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
     The server releases the previously exported buffer at the start of each
     request, so back-to-back calls must not corrupt each other's results.
     """
-    with Tesseract.from_image(
-        gpu_image_name,
-        gpus=["all"],
-        output_format="json+base64",
-        runtime_config={"gpu_transport": "cuda_ipc"},
-        environment=_forbid_host_copy_env(),
-    ) as t:
+    with _serve_cuda_ipc(gpu_image_name) as t:
         for i in range(3):
             a = np.full(4, float(i), dtype=np.float32)
             b = np.zeros(4, dtype=np.float32)
             result = t.apply({"a": a, "b": b, "s": 2.0})
             got = result["result"].copy_to_host()
             np.testing.assert_allclose(got, 2.0 * a, rtol=1e-5, atol=1e-5)
+
+
+# The examples compute result = s * a + b, so d(result)/da = s * I and
+# d(result)/db = I. Gradient endpoints return device memory just like apply.
+_GRAD_INPUTS = {
+    "a": np.arange(6, dtype=np.float32),
+    "b": np.ones(6, dtype=np.float32),
+    "s": 3.0,
+}
+
+
+@requires_cuda
+def test_serve_cuda_ipc_abstract_eval(gpu_image_name):
+    with _serve_cuda_ipc(gpu_image_name) as t:
+        result = t.abstract_eval(
+            {
+                "a": {"shape": [6], "dtype": "float32"},
+                "b": {"shape": [6], "dtype": "float32"},
+                "s": 3.0,
+            }
+        )
+
+    assert tuple(result["result"]["shape"]) == (6,)
+    assert result["result"]["dtype"] == "float32"
+
+
+@requires_cuda
+def test_serve_cuda_ipc_jacobian(gpu_image_name):
+    with _serve_cuda_ipc(gpu_image_name) as t:
+        jac = t.jacobian(_GRAD_INPUTS, jac_inputs=["a", "b"], jac_outputs=["result"])
+
+    eye = np.eye(6, dtype=np.float32)
+    _assert_device_result(jac["result"]["a"], 3.0 * eye)
+    _assert_device_result(jac["result"]["b"], eye)
+
+
+@requires_cuda
+def test_serve_cuda_ipc_jacobian_vector_product(gpu_image_name):
+    tangent = {
+        "a": np.linspace(0, 1, 6, dtype=np.float32),
+        "b": np.full(6, 2.0, dtype=np.float32),
+    }
+    with _serve_cuda_ipc(gpu_image_name) as t:
+        jvp = t.jacobian_vector_product(
+            _GRAD_INPUTS,
+            jvp_inputs=["a", "b"],
+            jvp_outputs=["result"],
+            tangent_vector=tangent,
+        )
+
+    _assert_device_result(jvp["result"], 3.0 * tangent["a"] + tangent["b"])
+
+
+@requires_cuda
+def test_serve_cuda_ipc_vector_jacobian_product(gpu_image_name):
+    cotangent = np.linspace(0, 1, 6, dtype=np.float32)
+    with _serve_cuda_ipc(gpu_image_name) as t:
+        vjp = t.vector_jacobian_product(
+            _GRAD_INPUTS,
+            vjp_inputs=["a", "b"],
+            vjp_outputs=["result"],
+            cotangent_vector={"result": cotangent},
+        )
+
+    _assert_device_result(vjp["a"], 3.0 * cotangent)
+    _assert_device_result(vjp["b"], cotangent)
