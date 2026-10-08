@@ -6,7 +6,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import (
     BaseModel,
@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from tesseract_core.runtime.file_interactions import (
+    compression_type,
     gpu_transport_type,
     supported_format_type,
 )
@@ -47,7 +48,7 @@ class RuntimeConfig(BaseModel):
     output_path: str = "."
     output_format: supported_format_type = "json"
     output_file: str = ""
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
     mlflow_tracking_uri: str = ""
     mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)] = (
         Field(default_factory=dict)
