@@ -1782,3 +1782,116 @@ def test_HTTPClient_timeout_fires(free_port):
         shutdown.set()
         httpd.shutdown()
         server_thread.join(timeout=5)
+
+
+# ── Choosing a GPU transport, with the server stubbed out ───────────────
+
+
+def _client_offering(gpu_transports):
+    """An HTTPClient whose server offers ``gpu_transports``, without a server."""
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    client = HTTPClient("http://127.0.0.1:1")
+    client.__dict__["server_capabilities"] = ServerCapabilities(
+        output_formats=None, gpu_transports=gpu_transports, compressions=None
+    )
+    return client
+
+
+def test_offered_gpu_transport_is_used_unchecked_when_the_server_cannot_be_asked(
+    monkeypatch,
+):
+    # A runtime without the check route gives no answer, which is not a failure:
+    # the transport is used unchecked, as when it is requested.
+    import warnings
+
+    from tesseract_core.sdk.tesseract import _TransportCheck
+
+    client = _client_offering(("none", "cuda_ipc"))
+    monkeypatch.setattr(
+        client, "check_gpu_transport", lambda transport: _TransportCheck(None)
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert client.resolve_gpu_transport(None) == "cuda_ipc"
+
+
+def test_inconclusive_transport_check_is_run_again(monkeypatch):
+    # An error answer (a proxy's 502 while the server is busy, say) says nothing
+    # about whether the transport works, so it must not stick for the client's
+    # lifetime. A conclusive answer is kept.
+    from types import SimpleNamespace
+
+    import tesseract_core.sdk.tesseract as sdk
+
+    fake_ipc = SimpleNamespace(
+        start_transport_check=lambda: ({}, b"", object()),
+        finish_transport_check=lambda array, expected: None,
+    )
+    monkeypatch.setattr(sdk, "_import_cuda_ipc", lambda: fake_ipc)
+    answers = [
+        SimpleNamespace(status_code=502, ok=False, text="Bad Gateway", content=b""),
+        SimpleNamespace(status_code=200, ok=True, text="", content=b'{"ok": true}'),
+    ]
+    sent = []
+
+    def send(*args, **kwargs):
+        sent.append(args)
+        return answers[len(sent) - 1]
+
+    client = _client_offering(("none", "cuda_ipc"))
+    monkeypatch.setattr(client, "_send", send)
+
+    assert client.check_gpu_transport("cuda_ipc").usable is False
+    assert client.check_gpu_transport("cuda_ipc").usable is True
+    assert client.check_gpu_transport("cuda_ipc").usable is True
+    assert len(sent) == 2
+
+
+def test_transport_check_of_one_server_does_not_wait_for_another(monkeypatch):
+    # A check waits for the server to answer, which takes as long as whatever
+    # that server is busy with, so it must not hold up checks of other servers.
+    import threading
+
+    from tesseract_core.sdk.tesseract import _TransportCheck
+
+    busy, idle = _client_offering(("cuda_ipc",)), _client_offering(("cuda_ipc",))
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_check(transport):
+        entered.set()
+        release.wait(timeout=10)
+        return _TransportCheck(True), True
+
+    monkeypatch.setattr(busy, "_run_transport_check", slow_check)
+    monkeypatch.setattr(
+        idle, "_run_transport_check", lambda transport: (_TransportCheck(True), True)
+    )
+    waiting = threading.Thread(target=busy.check_gpu_transport, args=("cuda_ipc",))
+    waiting.start()
+    try:
+        assert entered.wait(timeout=10)
+        done = threading.Event()
+        threading.Thread(
+            target=lambda: (idle.check_gpu_transport("cuda_ipc"), done.set())
+        ).start()
+        assert done.wait(timeout=5), "the idle server's check waited for the busy one"
+    finally:
+        release.set()
+        waiting.join(timeout=10)
+
+
+def test_transport_fallback_warning_points_at_the_caller(monkeypatch):
+    from tesseract_core.sdk.tesseract import _TransportCheck
+
+    tess = Tesseract.from_url("http://127.0.0.1:1")
+    client = tess._client
+    client.__dict__.update(_client_offering(("none", "cuda_ipc")).__dict__)
+    monkeypatch.setattr(
+        client,
+        "check_gpu_transport",
+        lambda transport: _TransportCheck(False, "no shared GPU"),
+    )
+    with pytest.warns(UserWarning, match="no shared GPU") as record:
+        assert tess.resolve_gpu_transport() == "none"
+    assert record[0].filename == __file__

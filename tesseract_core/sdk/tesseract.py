@@ -914,9 +914,11 @@ class Tesseract:
         Whether a transport works depends on how both processes are set up
         (``cuda_ipc`` needs them on one host with the same GPU visible to both,
         and container isolation can get in the way), so it is found out by
-        exchanging a small GPU array with the server, once per connection.
-        Runtimes older than 1.15 cannot take part in this exchange, so a
-        transport requested from one is returned unchecked.
+        exchanging a small GPU array with the server, once per connection (and
+        again on the next call if the exchange reached no conclusion, such as
+        when the server answered with an error). Runtimes that predate this
+        exchange cannot take part in it, so a transport they offer, or that is
+        requested from them, is used unchecked.
 
         In-process Tesseracts created via :meth:`from_tesseract_api` return the
         ``gpu_transport`` they were created with unless a view requests ``none``.
@@ -1626,11 +1628,6 @@ def _decode_array(
     return arr
 
 
-# Guards each client's transport checks. Shared by all clients, since checks are
-# rare and short.
-_TRANSPORT_CHECK_LOCK = threading.Lock()
-
-
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
@@ -1640,6 +1637,9 @@ class HTTPClient:
     _binref_pool: BinrefWritePool | None = None
     _output_format: str | None = None
     _gpu_transport: str | None = None
+    # Guards the transport checks. Each instance gets its own in __init__, so a
+    # check waiting on a busy server never holds up checks of other servers.
+    _transport_lock: threading.Lock = threading.Lock()
 
     def __init__(
         self,
@@ -1658,6 +1658,7 @@ class HTTPClient:
         self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
+        self._transport_lock = threading.Lock()
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
@@ -1718,18 +1719,25 @@ class HTTPClient:
         """Find out whether ``gpu_transport`` works between this process and the server.
 
         Runs the check the first time it is asked for each transport and returns
-        the same answer after that.
+        the same answer after that, unless the check reached no conclusion (the
+        server answered with an error, or this process could not export GPU
+        memory, as when it runs out of it), in which case the next call checks
+        again.
         """
-        with _TRANSPORT_CHECK_LOCK:
-            if gpu_transport not in self._transport_checks:
-                self._transport_checks[gpu_transport] = self._run_transport_check(
-                    gpu_transport
-                )
-            return self._transport_checks[gpu_transport]
+        with self._transport_lock:
+            check = self._transport_checks.get(gpu_transport)
+            if check is None:
+                check, conclusive = self._run_transport_check(gpu_transport)
+                if conclusive:
+                    self._transport_checks[gpu_transport] = check
+            return check
 
-    def _run_transport_check(self, gpu_transport: str) -> _TransportCheck:
+    def _run_transport_check(self, gpu_transport: str) -> tuple[_TransportCheck, bool]:
+        """Run the check once, returning its result and whether it is conclusive."""
         if gpu_transport != "cuda_ipc":
-            return _TransportCheck(False, f"unknown gpu_transport {gpu_transport!r}")
+            return _TransportCheck(
+                False, f"unknown gpu_transport {gpu_transport!r}"
+            ), True
         try:
             cuda_ipc = _import_cuda_ipc()
             request, expected, exported = cuda_ipc.start_transport_check()
@@ -1738,7 +1746,7 @@ class HTTPClient:
                 False,
                 "this process could not export GPU memory "
                 f"({type(exc).__name__}: {exc})",
-            )
+            ), False
         # The server reads the exported array while answering, so it must stay
         # alive until the response is in. It is not in the per-request export
         # registry, so holding it here is what keeps it alive.
@@ -1750,16 +1758,16 @@ class HTTPClient:
         )
         del exported
         if response.status_code == requests.codes.not_found:
-            return _TransportCheck(None)
+            return _TransportCheck(None), True
         if not response.ok:
             return _TransportCheck(
                 False,
                 f"the Tesseract answered the check with error "
                 f"{response.status_code}: {response.text}",
-            )
+            ), False
         reply = from_json(response.content)
         if not reply.get("ok"):
-            return _TransportCheck(False, reply.get("reason", "no reason given"))
+            return _TransportCheck(False, reply.get("reason", "no reason given")), True
         try:
             cuda_ipc.finish_transport_check(reply.get("array"), expected)
         except Exception as exc:  # noqa: BLE001 - becomes the reason it cannot be used
@@ -1767,8 +1775,8 @@ class HTTPClient:
                 False,
                 "this process could not open GPU memory exported by the Tesseract "
                 f"({type(exc).__name__}: {exc})",
-            )
-        return _TransportCheck(True)
+            ), True
+        return _TransportCheck(True), True
 
     def current_encoding(
         self, overrides: RequestedEncoding | None
@@ -1800,9 +1808,11 @@ class HTTPClient:
             if candidate not in offered:
                 continue
             check = self.check_gpu_transport(candidate)
-            if check.usable:
+            # None: the server's runtime cannot be asked, so use the transport
+            # unchecked, as for a requested one.
+            if check.usable is not False:
                 return candidate
-            with _TRANSPORT_CHECK_LOCK:
+            with self._transport_lock:
                 warn = candidate not in self._transport_fallback_warned
                 self._transport_fallback_warned.add(candidate)
             if warn:
@@ -1810,7 +1820,7 @@ class HTTPClient:
                     f"The Tesseract at {self.url} offers gpu_transport="
                     f"{candidate!r}, but it does not work from this process, so GPU "
                     f"arrays are copied to the host instead: {check.reason}",
-                    stacklevel=3,
+                    stacklevel=4,
                 )
         return "none"
 
