@@ -54,10 +54,6 @@ Input and output schemas are defined as [Pydantic](https://docs.pydantic.dev/lat
 :end-before: def apply
 ```
 
-% invisible-code-block: python
-%
-% from pydantic import Field
-
 Field descriptions are optional but recommended — they appear in the auto-generated docs and schemas. You can also use default values, validators, and other Pydantic features (see [Pydantic docs](https://docs.pydantic.dev/latest/)).
 
 Below the schemas, you'll find the required endpoints:
@@ -97,7 +93,7 @@ Finally, set the name and version in `tesseract_config.yaml`:
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_config.yaml
 :language: yaml
-:lines: 1-3
+:end-before: build_config
 ```
 
 You're now ready to build your first Tesseract.
@@ -165,7 +161,7 @@ To test the Tesseract API directly from Python without building an image, which 
 ```python
 from tesseract_core import Tesseract
 
-tess = Tesseract.from_tesseract_api("tesseract_api.py")
+tess = Tesseract.from_tesseract_api("./tesseract_api.py")
 tess.test({
     "endpoint": "apply",
     "payload": {"inputs": {"name": "Ozzy"}},
@@ -182,6 +178,10 @@ Keeping a `test_cases/` directory next to each Tesseract and running every spec 
 ## Arrays in the schema
 
 N-dimensional arrays are central to scientific computing. Use the `tesseract_core.runtime.Array` type annotation to define them:
+
+% invisible-code-block: python
+%
+% from pydantic import Field
 
 ```python
 from tesseract_core.runtime import Array, Float32, Float64
