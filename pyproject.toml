@@ -81,6 +81,7 @@ dev = [
     "pytest-mock",
     "pytest-benchmark",
     "pytest-timeout",
+    "sybil",  # required to test docs snippets (tests/endtoend_tests/test_docs.py)
     "moto[server]",
     "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
     "typeguard",

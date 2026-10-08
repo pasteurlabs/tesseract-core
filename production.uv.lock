@@ -6312,6 +6312,33 @@ wheels = [
 ]
 
 [[package]]
+name = "sybil"
+version = "9.3.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.11'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/46/bae21847b8d761ddd6ede1811d32818342dbd482c32a2a5805c28d9b2f18/sybil-9.3.0.tar.gz", hash = "sha256:847d1d17b8a857c4bb3f8471b4a57b8affa939a60fbf507e70aa72ad79097c05", size = 89078, upload-time = "2025-12-02T09:29:09.302Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/08/cd3cf2a82570748cfb3142e795044197deff81ad3b70a0b9a9c22331e70a/sybil-9.3.0-py3-none-any.whl", hash = "sha256:0b108b980ab9fac774953042b07fcb5858aa19a38404d0cb42c30c93423ac0c1", size = 39286, upload-time = "2025-12-02T09:29:08.417Z" },
+]
+
+[[package]]
+name = "sybil"
+version = "10.1.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version == '3.13.*'",
+    "python_full_version == '3.12.*'",
+    "python_full_version == '3.11.*'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/03/50135b55ba14509654b2f624eaf7e318d654182ebe9f712fb74e98e418d0/sybil-10.1.0.tar.gz", hash = "sha256:062249c8886a0ab19e45d1c3afd5631ec806e7a95cf5153c96560f5e47756cbd", size = 82376, upload-time = "2026-06-13T09:40:44.584Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/fe/4094754188b52f8333ba24b377192918936597769a574a9dd8446f69e1f1/sybil-10.1.0-py3-none-any.whl", hash = "sha256:b3015f7e0ca3fe197ae67117c440710b62ea500078d4414ebd0ab804d12c9897", size = 40930, upload-time = "2026-06-13T09:40:43.139Z" },
+]
+
+[[package]]
 name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -6399,6 +6426,8 @@ dev = [
     { name = "sphinxcontrib-typer", version = "0.9.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "sphinxcontrib-typer", version = "0.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sphinxext-opengraph", extra = ["social-cards"] },
+    { name = "sybil", version = "9.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "sybil", version = "10.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "toml" },
     { name = "typeguard" },
     { name = "typer" },
@@ -6537,6 +6566,7 @@ requires-dist = [
     { name = "sphinxcontrib-typer", marker = "extra == 'docs'", specifier = ">=0.9.1" },
     { name = "sphinxext-opengraph", extras = ["social-cards"], marker = "extra == 'dev'" },
     { name = "sphinxext-opengraph", extras = ["social-cards"], marker = "extra == 'docs'" },
+    { name = "sybil", marker = "extra == 'dev'" },
     { name = "toml", marker = "extra == 'dev'" },
     { name = "typeguard", marker = "extra == 'dev'" },
     { name = "typer", specifier = ">=0.16" },
