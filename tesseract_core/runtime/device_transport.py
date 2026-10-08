@@ -64,12 +64,22 @@ class DeviceTransport(abc.ABC):
         (``cuda_ipc``) return ``None`` and ignore the session everywhere.
         """
 
+    def new_exports(self) -> Any:
+        """A fresh session to collect one message's exports, or ``None``.
+
+        A server passes it to :meth:`register` for each array of a response and
+        to :meth:`release` once the client is done with that response, so the
+        exports of concurrent requests are kept apart. ``None`` means the
+        transport keeps no per-message state.
+        """
+        return None
+
     @abc.abstractmethod
     def register(self, arr: Any, session: Any = None) -> Any:
         """Encode side: pin ``arr`` and return an opaque per-array handle.
 
-        Keeps the source allocation alive until :meth:`release`, exactly as the
-        cuda_ipc export registry does.
+        Keeps the source allocation alive until :meth:`release` is called with
+        the same ``session`` (see :meth:`new_exports`).
         """
 
     @abc.abstractmethod

@@ -718,7 +718,7 @@ def test_sdk_encode_structure():
         assert encoded["data"]["encoding"] == "cuda_ipc"
         assert encoded["shape"] == [32, 64]
         assert encoded["dtype"] == "float64"
-        assert ctx.exported_cuda_ipc is True
+        assert len(ctx.device_exports.pins) == 1
     finally:
         _close_encoding_context(ctx)
 

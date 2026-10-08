@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import collections
 import os
 import shutil
 import sys
@@ -1275,7 +1276,8 @@ class EncodingContext:
     binref_pool: BinrefWritePool | None = None
     written_files: list[Path] = field(default_factory=list)
     checked_out_slots: list[BinrefSlot] = field(default_factory=list)
-    exported_cuda_ipc: bool = False
+    # The cuda_ipc ExportGroup holding this request's exported arrays, if any.
+    device_exports: Any = None
 
 
 def _encode_binref(arr: Any, ctx: EncodingContext) -> dict:
@@ -1312,12 +1314,12 @@ def _close_encoding_context(ctx: EncodingContext) -> None:
                         errors.append(ex)
                 ctx.checked_out_slots.clear()
         finally:
-            if ctx.exported_cuda_ipc:
+            if ctx.device_exports is not None:
                 try:
-                    _import_cuda_ipc().release_pinned_ipc_exports()
+                    ctx.device_exports.release()
                 except Exception as ex:  # noqa: BLE001 - collected and re-raised below
                     errors.append(ex)
-                ctx.exported_cuda_ipc = False
+                ctx.device_exports = None
 
     if errors:
         if len(errors) == 1:
@@ -1400,8 +1402,10 @@ def _encode_array(
                 raise ValueError(
                     "EncodingContext is required when encoding is 'cuda_ipc'"
                 )
-            ctx.exported_cuda_ipc = True
-            return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+            cuda_ipc = _import_cuda_ipc()
+            if ctx.device_exports is None:
+                ctx.device_exports = cuda_ipc.ExportGroup()
+            return cuda_ipc.dump_cuda_ipc_arraydict(arr, group=ctx.device_exports)
         arr = _gpu_array_to_host(arr)
 
     if encoding == "binref":
@@ -1632,6 +1636,12 @@ def _decode_array(
     return arr
 
 
+# How a client and server agree when the server may release the device memory a
+# response exported (see tesseract_core.runtime.serve, whose names these mirror).
+_EXPORTS_HEADER = "Tesseract-Exports"
+_EXPORTS_DONE_HEADER = "Tesseract-Exports-Done"
+
+
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
@@ -1644,6 +1654,10 @@ class HTTPClient:
     # Guards the transport checks. Each instance gets its own in __init__, so a
     # check waiting on a busy server never holds up checks of other servers.
     _transport_lock: threading.Lock = threading.Lock()
+    # Ids of responses whose device exports this client has finished reading,
+    # not yet named to the server (see _EXPORTS_DONE_HEADER). None for
+    # instances built without __init__, which then do not acknowledge.
+    _done_exports: collections.deque[str] | None = None
 
     def __init__(
         self,
@@ -1663,6 +1677,7 @@ class HTTPClient:
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._transport_lock = threading.Lock()
+        self._done_exports = collections.deque()
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
@@ -1676,6 +1691,15 @@ class HTTPClient:
 
     def close(self) -> None:
         """Release resources held by the client (HTTP session, binref write pool)."""
+        if self._done_exports:
+            # Let the server release the exports of the last responses now
+            # rather than when it gives up waiting for this client.
+            try:
+                self._send(
+                    f"{self.url}/health", "GET", b"", {}, self._exports_done_headers()
+                )
+            except Exception:  # noqa: BLE001, S110 - best effort while closing
+                pass
         if self._binref_pool is not None:
             self._binref_pool.close()
             self._binref_pool = None
@@ -1881,7 +1905,14 @@ class HTTPClient:
         if encoding.params:
             encoding = _fit_encoding_to_server(encoding, self.server_capabilities)
         accept = encoding.accept_header()
-        headers = {"Accept": accept} if accept is not None else None
+        # Only a request for a GPU transport can get exports back, so only
+        # such requests need to say that this client names the ones it is done
+        # with (and any request can carry names still pending).
+        headers = {}
+        if encoding.gpu_transport not in (None, "none") or self._done_exports:
+            headers = self._exports_done_headers()
+        if accept is not None:
+            headers["Accept"] = accept
 
         with _encode_payload(
             payload,
@@ -1890,10 +1921,40 @@ class HTTPClient:
             input_path=self._input_path,
             binref_pool=self._binref_pool,
         ) as encoded_payload:
-            response = self._send(
-                url, method, orjson.dumps(encoded_payload), params, headers
-            )
-        return self._decode_response(response, endpoint)
+            try:
+                response = self._send(
+                    url, method, orjson.dumps(encoded_payload), params, headers or None
+                )
+            except Exception:
+                # The server never saw them, so name them again next time.
+                if headers.get(_EXPORTS_DONE_HEADER):
+                    self._done_exports.extend(headers[_EXPORTS_DONE_HEADER].split(","))
+                raise
+        if _EXPORTS_DONE_HEADER not in headers:
+            return self._decode_response(response, endpoint)
+        try:
+            return self._decode_response(response, endpoint)
+        finally:
+            # Decoding copied any device arrays out of the server's memory.
+            export_id = response.headers.get(_EXPORTS_HEADER)
+            if export_id:
+                self._done_exports.append(export_id)
+
+    def _exports_done_headers(self) -> dict[str, str]:
+        """Headers naming the responses this client is done with, as a dict to extend.
+
+        Sent even when there are none, so the server knows this client names
+        them and keeps its responses' exports until it does.
+        """
+        if self._done_exports is None:
+            return {}
+        done = []
+        while True:
+            try:
+                done.append(self._done_exports.popleft())
+            except IndexError:
+                break
+        return {_EXPORTS_DONE_HEADER: ",".join(done)}
 
     def _decode_response(self, response: requests.Response, endpoint: str) -> dict:
         if response.status_code == requests.codes.unprocessable_entity:

@@ -870,7 +870,9 @@ def encode_array(
         from tesseract_core.runtime.device_transport import get_transport
 
         transport = get_transport(device_transport)
-        return transport.descriptor(transport.register(arr))
+        return transport.descriptor(
+            transport.register(arr, context.get("device_exports"))
+        )
 
     # Host encoding: the data must reach the host. A GPU array survived
     # validation untouched (see validate_python_or_gpu_array), so materialise it

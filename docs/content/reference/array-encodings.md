@@ -202,3 +202,5 @@ A GPU transport the server offers may still not work from a given client. `cuda_
 transport = tess.resolve_gpu_transport()
 result = tess.with_encoding(gpu_transport=transport).apply(gpu_inputs)
 ```
+
+With `cuda_ipc`, a response hands the client references to the server's GPU memory, which the server keeps until the client has copied the arrays out. The server names each such response in a `Tesseract-Exports` response header, and the Python SDK names the responses it has decoded in a `Tesseract-Exports-Done` header on its next request (or when it closes), so any number of clients and threads can share one server. A raw HTTP client that never sends `Tesseract-Exports-Done` has the GPU memory of its earlier responses released by its next request, which is only safe if it makes one request at a time. Sending the header, empty until there is something to name, avoids that. Memory no client names is released after 5 minutes.

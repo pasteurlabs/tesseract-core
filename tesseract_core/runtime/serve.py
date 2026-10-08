@@ -1,7 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import collections
 import inspect
+import threading
+import time
 import uuid
 from collections.abc import Callable
 from functools import wraps
@@ -114,6 +117,7 @@ def create_response(
     encoding: NegotiatedEncoding,
     base_dir: str | None,
     binref_dir: str | None,
+    device_exports: Any = None,
 ) -> Response:
     """Create a response in the given (already negotiated) encoding."""
     if base_dir is None:
@@ -126,6 +130,7 @@ def create_response(
         binref_dir=binref_dir,
         compression=encoding.compression,
         gpu_transport=encoding.gpu_transport,
+        device_exports=device_exports,
     )
     # Name the format actually produced, which is not necessarily what the
     # client asked for: an Accept header may hold several media ranges.
@@ -134,6 +139,96 @@ def create_response(
         content=content,
         media_type=f"application/{encoding.output_format}",
     )
+
+
+# A response's device exports must stay alive until the client has copied them
+# out of the response, which only the client knows (see "Keeping exports alive"
+# in tesseract_core.runtime.cuda.ipc). The server names each response's exports
+# in the EXPORTS_HEADER response header, and the client names the ones it is done
+# with in the EXPORTS_DONE_HEADER of a later request. A client that sends that
+# header at all, even empty, acknowledges its responses this way. Header names
+# are mirrored in the SDK.
+EXPORTS_HEADER = "Tesseract-Exports"
+EXPORTS_DONE_HEADER = "Tesseract-Exports-Done"
+
+# How long a response's exports are kept for an acknowledging client that never
+# names them (because it crashed, say). Far longer than any live client takes
+# to decode a response it has received.
+EXPORTS_TIMEOUT_S = 300.0
+
+# Kept exports by id: the transport's session holding them, when they were kept,
+# and whether the client acknowledges.
+_PENDING_EXPORTS: collections.OrderedDict[str, tuple[Any, float, bool]] = (
+    collections.OrderedDict()
+)
+_PENDING_EXPORTS_LOCK = threading.Lock()
+
+
+def _keep_exports(exports: Any, acknowledged: bool) -> str | None:
+    """Keep a response's exports and return the id to send with it, if it has any."""
+    if not exports:
+        return None
+    export_id = uuid.uuid4().hex
+    with _PENDING_EXPORTS_LOCK:
+        _PENDING_EXPORTS[export_id] = (exports, time.monotonic(), acknowledged)
+    return export_id
+
+
+def _release_exports(transport: Any, done: list[str], unacknowledged: bool) -> None:
+    """Release the exports named in ``done`` and those kept too long.
+
+    With ``unacknowledged``, also release the exports of every client that does
+    not acknowledge its responses. A request from such a client is the only
+    sign that it is done with its previous response, which is sound only if it
+    makes one request at a time.
+    """
+    now = time.monotonic()
+    released = []
+    with _PENDING_EXPORTS_LOCK:
+        for export_id in done:
+            entry = _PENDING_EXPORTS.pop(export_id, None)
+            if entry is not None:
+                released.append(entry[0])
+        for export_id, (exports, kept_at, acknowledged) in list(
+            _PENDING_EXPORTS.items()
+        ):
+            if (unacknowledged and not acknowledged) or (
+                now - kept_at > EXPORTS_TIMEOUT_S
+            ):
+                del _PENDING_EXPORTS[export_id]
+                released.append(exports)
+    for exports in released:
+        transport.release(exports)
+
+
+class _ReleaseDoneExports:
+    """ASGI middleware releasing the exports a request's EXPORTS_DONE_HEADER names.
+
+    Runs for every route, so a client can name them on any request, e.g. a
+    health check when it closes.
+    """
+
+    def __init__(self, app: Any, transport_name: str) -> None:
+        self.app = app
+        self.transport_name = transport_name
+        self._header = EXPORTS_DONE_HEADER.lower().encode()
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            for name, value in scope["headers"]:
+                if name == self._header:
+                    if value:
+                        from tesseract_core.runtime.device_transport import (
+                            get_transport,
+                        )
+
+                        _release_exports(
+                            get_transport(self.transport_name),
+                            value.decode("latin-1").split(","),
+                            unacknowledged=False,
+                        )
+                    break
+        await self.app(scope, receive, send)
 
 
 def check_gpu_transport(request: dict) -> dict:
@@ -184,20 +279,28 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ]
 
         @wraps(endpoint_func)
-        async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
+        async def wrapper(
+            *args: Any,
+            accept: str,
+            run_id: str | None,
+            exports_done: str | None,
+            **kwargs: Any,
+        ):
             config = get_config()
             encoding = negotiate_encoding(accept)
 
-            # Release device buffers exported by the previous request's GPU
-            # transport. Releasing at the start of each request keeps every
-            # export alive long enough for a serial client to copy it out of the
-            # response before it is reclaimed. See cuda_ipc for the assumptions
-            # this relies on. Gated on a configured GPU transport so the default
-            # path never imports the CUDA machinery.
+            # Collect this response's device exports so they can be kept until
+            # the client is done with them, and release earlier ones (see
+            # _release_exports). Gated on a configured GPU transport so the
+            # default path never imports the CUDA machinery.
+            exports = None
+            acknowledged = exports_done is not None
             if config.gpu_transport != "none":
                 from tesseract_core.runtime.device_transport import get_transport
 
-                get_transport(config.gpu_transport).release()
+                transport = get_transport(config.gpu_transport)
+                _release_exports(transport, [], unacknowledged=not acknowledged)
+                exports = transport.new_exports()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())
@@ -212,12 +315,17 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # Print profiling stats inside start_run context
                 # so they go through stdio redirection to the log file
                 profiler.print_stats()
-            return create_response(
+            response = create_response(
                 result,
                 encoding,
                 base_dir=output_path,
                 binref_dir=rundir_name,
+                device_exports=exports,
             )
+            export_id = _keep_exports(exports, acknowledged)
+            if export_id is not None:
+                response.headers[EXPORTS_HEADER] = export_id
+            return response
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
@@ -239,10 +347,20 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 default=None,
                 annotation=Annotated[str | None, Query(include_in_schema=False)],
             )
+            exports_done = inspect.Parameter(
+                "exports_done",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=Header(
+                    default=None, alias=EXPORTS_DONE_HEADER, include_in_schema=False
+                ),
+                annotation=str | None,
+            )
             # Other header parameters common to computational endpoints
             # could be defined and appended here as well.
             new_params = original_sig.parameters.copy()
-            new_params.update({"accept": accept, "run_id": run_id})
+            new_params.update(
+                {"accept": accept, "run_id": run_id, "exports_done": exports_done}
+            )
             # Update the signature of the wrapper
             new_sig = original_sig.replace(parameters=list(new_params.values()))
             wrapper.__signature__ = new_sig
@@ -260,6 +378,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
 
     if config.gpu_transport != "none":
+        app.add_middleware(_ReleaseDoneExports, transport_name=config.gpu_transport)
+
         # Not a Tesseract endpoint, so it stays out of the schema clients read
         # endpoints from. Async like the endpoints above, so it runs on the event
         # loop between requests rather than alongside one.

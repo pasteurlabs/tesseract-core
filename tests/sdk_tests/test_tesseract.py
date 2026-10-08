@@ -1478,7 +1478,7 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
         binref_pool=mock_pool,
         written_files=[f1, f2],
         checked_out_slots=[mock_slot],
-        exported_cuda_ipc=True,
+        device_exports=mock_cuda_mod.ExportGroup(),
     )
 
     with pytest.raises(OSError, match="permission denied"):
@@ -1486,8 +1486,8 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
 
     assert not f2.exists()
     mock_pool.checkin.assert_called_once_with(mock_slot)
-    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
-    assert ctx.exported_cuda_ipc is False
+    mock_cuda_mod.ExportGroup.return_value.release.assert_called_once()
+    assert ctx.device_exports is None
 
 
 def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
@@ -1521,7 +1521,7 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
         binref_pool=mock_pool,
         written_files=[f1],
         checked_out_slots=[mock_slot],
-        exported_cuda_ipc=True,
+        device_exports=mock_cuda_mod.ExportGroup(),
     )
 
     exception_group_cls = getattr(builtins, "ExceptionGroup", None)
@@ -1533,8 +1533,8 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match="Multiple errors occurred"):
             _close_encoding_context(ctx)
 
-    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
-    assert ctx.exported_cuda_ipc is False
+    mock_cuda_mod.ExportGroup.return_value.release.assert_called_once()
+    assert ctx.device_exports is None
 
 
 def test_http_client_binref_payload(tmp_path):
@@ -1895,3 +1895,64 @@ def test_transport_fallback_warning_points_at_the_caller(monkeypatch):
     with pytest.warns(UserWarning, match="no shared GPU") as record:
         assert tess.resolve_gpu_transport() == "none"
     assert record[0].filename == __file__
+
+
+def _recording_client(gpu_transport, answers):
+    """An HTTPClient whose requests are recorded and answered from ``answers``."""
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    client = HTTPClient("http://127.0.0.1:1", gpu_transport=gpu_transport)
+    client.__dict__["server_capabilities"] = ServerCapabilities(
+        output_formats=("json",), gpu_transports=("none", "cuda_ipc"), compressions=None
+    )
+    sent = []
+
+    def request(**kwargs):
+        sent.append(kwargs.get("headers") or {})
+        answer = answers[len(sent) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return Mock(
+            status_code=200,
+            ok=True,
+            content=b"{}",
+            headers={"Tesseract-Exports": answer},
+        )
+
+    client._session.request = request
+    return client, sent
+
+
+def test_client_names_the_responses_it_has_decoded():
+    # The server keeps a response's GPU exports until the client says it is done
+    # with them, which it does on its next request, or when it closes.
+    client, sent = _recording_client("cuda_ipc", ["id1", "id2", ""])
+    client._request("apply", "POST", {"inputs": {}})
+    client._request("apply", "POST", {"inputs": {}})
+    client.close()
+    assert [headers.get("Tesseract-Exports-Done") for headers in sent] == [
+        "",
+        "id1",
+        "id2",
+    ]
+
+
+def test_client_without_a_gpu_transport_sends_no_export_names():
+    client, sent = _recording_client(None, [""])
+    client._request("apply", "POST", {"inputs": {}})
+    assert "Tesseract-Exports-Done" not in sent[0]
+
+
+def test_export_names_are_sent_again_after_a_failed_request():
+    client, sent = _recording_client(
+        "cuda_ipc", ["id1", RuntimeError("connection refused"), "id3"]
+    )
+    client._request("apply", "POST", {"inputs": {}})
+    with pytest.raises(RuntimeError, match="connection refused"):
+        client._request("apply", "POST", {"inputs": {}})
+    client._request("apply", "POST", {"inputs": {}})
+    assert [headers.get("Tesseract-Exports-Done") for headers in sent] == [
+        "",
+        "id1",
+        "id1",
+    ]
