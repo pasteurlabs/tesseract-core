@@ -319,6 +319,43 @@ def test_jacobian_output_shape_validation(input_shape, output_shape, jac_shape, 
             JacobianOutputSchema.model_validate(jac, context=ctx)
 
 
+def test_jacobian_output_validation_accepts_torch_gpu_tensor():
+    """GPU tensors are validated unconverted, and torch dtypes are not NumPy dtype names."""
+
+    class TorchDtype:
+        def __str__(self):
+            return "torch.float32"
+
+    class TorchCudaTensor:
+        shape = (5, 3)
+        dtype = TorchDtype()
+
+        @property
+        def __cuda_array_interface__(self):
+            return {
+                "shape": (5, 3),
+                "typestr": "<f4",
+                "data": (0, False),
+                "strides": None,
+                "version": 3,
+            }
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(3,), Float32]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(5,), Float32]]
+
+    _, JacobianOutputSchema = create_gradient_schema(
+        InputSchema, OutputSchema, "jacobian"
+    )
+    tensor = TorchCudaTensor()
+    result = JacobianOutputSchema.model_validate(
+        {"y": {"x": tensor}}, context={"input_keys": {"x"}, "output_keys": {"y"}}
+    )
+    assert result.root["y"]["x"] is tensor
+
+
 def test_create_jvp_schema():
     testoutput = {
         "testdiffarr": testinput["testdiffarr"],
