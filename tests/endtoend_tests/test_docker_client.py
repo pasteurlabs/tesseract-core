@@ -122,9 +122,9 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     assert docker_py_image_list is not None
 
     # Check that every image in image_list is also in docker_py_image_list
-    docker_py_image_ids = set(
+    docker_py_image_ids = {
         _strip_image_prefix(img.id) for img in docker_py_image_list if img
-    )
+    }
     for image in image_list:
         assert _strip_image_prefix(image.id) in docker_py_image_ids
 
@@ -441,7 +441,9 @@ def test_container_status_needs_a_reload_like_docker_py(docker_client):
         assert container.attrs["Config"]["Image"] == image_ref
     finally:
         subprocess.run(
-            [*get_config().docker_executable, "rm", "-f", cid], capture_output=True
+            [*get_config().docker_executable, "rm", "-f", cid],
+            capture_output=True,
+            check=False,
         )
 
     container.reload()

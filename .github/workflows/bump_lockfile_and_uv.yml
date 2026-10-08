@@ -31,7 +31,7 @@ jobs:
       - name: Update runtime dependencies
         run: |
           pip install toml packaging
-          python .github/workflows/update_runtime_deps.py pyproject.toml
+          python .github/scripts/update_runtime_deps.py pyproject.toml
 
       - name: Install pre-commit
         # uv provides the interpreter and puts pre-commit on PATH for the steps

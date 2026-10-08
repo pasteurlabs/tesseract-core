@@ -7,7 +7,7 @@
 # For "native", pin to $BUILDPLATFORM (the host platform BuildKit runs on) so the
 # base image manifest is re-resolved for the host architecture instead of reusing a
 # wrong-arch image that may already be in the local cache.
-ARG UV_VERSION=0.12.17
+ARG UV_VERSION=0.12.23
 ARG UV_URL="ghcr.io/astral-sh/uv:${UV_VERSION}"
 
 {% if config.build_config.target_platform.strip() == "native" %}
@@ -26,6 +26,7 @@ COPY --from=uv /uv /uvx /bin/
 
 ENV UV_LINK_MODE=copy
 
+{% if config.build_config.uses_base_image_python %}
 # Install Python if necessary
 RUN if [ ! -x "$(command -v python3)" ]; then \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -34,11 +35,28 @@ RUN if [ ! -x "$(command -v python3)" ]; then \
         python3-venv \
     && rm -rf /var/lib/apt/lists/*; \
 fi
+{% endif %}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
         git \
         ssh \
     && rm -rf /var/lib/apt/lists/*
+
+{% if config.build_config.requirements.provider == "conda" %}
+# Install conda if the base image lacks it. conda is only needed to create the
+# self-contained /python-env, so Miniforge stays out of the final image.
+ARG MINIFORGE_VERSION=26.7.2-0
+RUN if [ ! -x "$(command -v conda)" ]; then \
+    curl -fsSL -o /tmp/miniforge.sh \
+        "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-$(uname -m).sh" \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge \
+    && rm /tmp/miniforge.sh; \
+fi
+# Appended so that a conda provided by the base image takes precedence
+ENV PATH="$PATH:/opt/miniforge/bin"
+{% endif %}
 
 {% if config.build_config.extra_packages %}
 # Install extra packages
@@ -119,7 +137,7 @@ USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
-{%- if not config.build_config.effective_python_version %}
+{%- if config.build_config.uses_base_image_python %}
     && { [ -x "$(command -v python3)" ] || apt-get install -y --no-install-recommends python3; } \
 {%- endif %}
     && rm -rf /var/lib/apt/lists/*
@@ -144,10 +162,8 @@ LABEL ai.pasteurlabs.tesseract.metadata="{{ config.metadata | tojson | replace('
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
-COPY "entrypoint.sh" /tesseract/entrypoint.sh
-RUN chmod 555 /tesseract/entrypoint.sh
-COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
-RUN chmod 444 ${TESSERACT_API_PATH}
+COPY --chmod=555 "entrypoint.sh" /tesseract/entrypoint.sh
+COPY --chmod=444 "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 
@@ -161,8 +177,7 @@ ENV {{ key }}="{{ value | replace('\\', '\\\\') | replace('"', '\\"') }}"
 {% if config.build_config.package_data %}
 # Copy package data to image
 {% for source_path, target_path in config.build_config.package_data %}
-COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
-RUN chmod 777 {{ target_path }}
+COPY --chmod=777 ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 {% endfor %}
 {% endif %}
 
@@ -191,8 +206,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
-RUN mkdir -p /home/tesseract-user
-RUN chmod -R 777 /home/tesseract-user
+RUN mkdir -p -m 777 /home/tesseract-user
 USER 9999:9999
 ENV HOME=/home/tesseract-user
 
@@ -201,12 +215,15 @@ ENV HOME=/home/tesseract-user
 RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 {% endif %}
 
-# Make sure /tesseract, /home/tesseract-user, and /tmp are writable by non-root users,
-# especially important if some folders are created at build time and owned by 9999:9999.
+# Make /tesseract, /home/tesseract-user, and /tmp writable by any uid, since containers
+# usually run as the host user's uid rather than 9999. This also drops the sticky bit
+# from /tmp so that uid can rename or delete files created at build time.
+# Paths that set an explicit mode above are excluded here so they keep it.
 USER root
-RUN chmod -R 777 /tesseract && chmod 555 /tesseract/tesseract_api.py \
-    && chmod -R 777 /home/tesseract-user \
-    && chmod -R 777 /tmp
+RUN find /tesseract /home/tesseract-user /tmp \
+        \( -path /tesseract/entrypoint.sh -o -path /tesseract/tesseract_api.py \
+        -o -path /tesseract/input_data -o -path /tmp/passwd -o -path /tmp/group \) -prune \
+        -o ! -type l ! -perm 777 -exec chmod 777 {} +
 USER 9999:9999
 
 ENTRYPOINT ["/tesseract/entrypoint.sh", "tesseract-runtime"]

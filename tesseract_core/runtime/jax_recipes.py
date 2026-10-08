@@ -15,15 +15,39 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from pydantic import BaseModel
 
 from tesseract_core.runtime.array_encoding import _fast_tobytes
+from tesseract_core.runtime.cuda.ipc import has_cuda_array_interface
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     filter_func,
     flatten_with_paths,
     set_at_path,
 )
+
+
+def as_jax_array(x: Any) -> jax.Array:
+    """Convert an array to JAX, using DLPack for GPU inputs.
+
+    Existing JAX arrays are returned unchanged. Host inputs use ``asarray``
+    because decoded NumPy inputs can be read-only and cannot export DLPack.
+    """
+    if isinstance(x, jax.Array):
+        return x
+    if has_cuda_array_interface(x):
+        return jnp.from_dlpack(x)
+    return jnp.asarray(x)
+
+
+def as_jax_arrays(tree: Any) -> Any:
+    """Convert array leaves in a pytree to JAX, preserving non-array leaves."""
+    is_array = lambda x: (
+        isinstance(x, np.ndarray | np.generic) or has_cuda_array_interface(x)
+    )
+    return jax.tree.map(lambda x: as_jax_array(x) if is_array(x) else x, tree)
+
 
 _jax_vjp_cache: LRUCache | None = None
 
@@ -37,6 +61,65 @@ def _set_jax_vjp_cache_size(size: int) -> None:
     _jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
+def _is_accelerator_array(leaf: Any) -> bool:
+    """Whether ``leaf`` is a JAX array whose data lives off the host."""
+    return isinstance(leaf, jax.Array) and any(
+        d.platform != "cpu" for d in leaf.devices()
+    )
+
+
+def _as_bits(x: jax.Array) -> tuple[jax.Array, ...]:
+    """Reinterpret ``x`` as unsigned integers, so that comparing is bitwise."""
+    if jnp.issubdtype(x.dtype, jnp.complexfloating):
+        return (*_as_bits(jnp.real(x)), *_as_bits(jnp.imag(x)))
+    if x.dtype == jnp.bool_:
+        return (x.astype(jnp.uint8),)
+    return (jax.lax.bitcast_convert_type(x, jnp.dtype(f"uint{x.dtype.itemsize * 8}")),)
+
+
+@jax.jit
+def _bitwise_equal_jit(a: tuple, b: tuple) -> jax.Array:
+    result = jnp.bool_(True)
+    for x, y in zip(a, b, strict=True):
+        for xb, yb in zip(_as_bits(x), _as_bits(y), strict=True):
+            result &= jnp.all(xb == yb)
+    return result
+
+
+def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
+    """Whether two sequences of device arrays hold identical bytes.
+
+    Matches the byte comparison of host leaves, so ``-0.0`` and ``0.0`` differ
+    and a NaN equals itself.
+    """
+    return bool(_bitwise_equal_jit(a, b))
+
+
+class _DeviceLeaves:
+    """The accelerator arrays of a cache key, compared on the device.
+
+    They hash by dtype, shape and devices only. Keys whose arrays differ only in
+    contents therefore share a hash, and the cache's dict tells them apart with
+    ``__eq__``, which compares contents with :func:`_bitwise_equal`.
+    """
+
+    def __init__(self, arrays: tuple[jax.Array, ...]) -> None:
+        self.arrays = arrays
+        self._meta = tuple(
+            (a.dtype.str, a.shape, frozenset(a.devices())) for a in arrays
+        )
+
+    def __hash__(self) -> int:
+        return hash(self._meta)
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _DeviceLeaves)
+            and self._meta == other._meta
+            and _bitwise_equal(self.arrays, other.arrays)
+        )
+
+
 def _cache_key(tree: Any) -> Hashable:
     """Build an :class:`LRUCache` key from a pytree's structure and leaves.
 
@@ -44,6 +127,11 @@ def _cache_key(tree: Any) -> Hashable:
     identical bytes but different interpretations (e.g. ``int64[4]`` vs
     ``int64[2,2]``) don't collide. Non-array leaves contribute their type
     alongside their value; they must be hashable.
+
+    The bytes of JAX arrays on an accelerator are not hashed, since that would
+    copy them to the host on every call. Each leaves a placeholder at its
+    position, and together they form a single :class:`_DeviceLeaves` item at
+    the end of the key, so that one device comparison covers all of them.
 
     The key is returned as a tuple rather than collapsed with :func:`hash`,
     so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
@@ -60,11 +148,19 @@ def _cache_key(tree: Any) -> Hashable:
     # jax.PyTreeDef's __hash__ collides on dicts with different keys, so we
     # use its string form as the discriminator instead.
     items: list = [str(treedef)]
+    device_leaves = []
     for leaf in leaves:
-        if hasattr(leaf, "tobytes"):
-            items.append((leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(leaf))))
+        if _is_accelerator_array(leaf):
+            items.append(_DeviceLeaves)
+            device_leaves.append(leaf)
+        elif hasattr(leaf, "tobytes"):
+            items.append(
+                (leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(np.asarray(leaf))))
+            )
         else:
             items.append((type(leaf), leaf))
+    if device_leaves:
+        items.append(_DeviceLeaves(tuple(device_leaves)))
     return tuple(items)
 
 
@@ -80,9 +176,9 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     :func:`tesseract_core.runtime.experimental.set_jax_vjp_cache_size`),
     the forward pass is run via ``jax.vjp`` so the resulting backward
     function can be stashed and reused by a later :func:`jax_vjp` call.
-    Otherwise this is just ``apply_jit(inputs.model_dump())``.
+    Array inputs are converted to JAX before calling ``apply_jit``.
     """
-    inputs_dict = inputs.model_dump()
+    inputs_dict = as_jax_arrays(inputs.model_dump())
 
     if _jax_vjp_cache is None:
         return apply_jit(inputs_dict)
@@ -132,7 +228,8 @@ def jax_vjp(
     compilation happens internally on the first miss for a given
     (input shape/dtype, path subset) combination and is cached for reuse.
     """
-    inputs_dict = inputs.model_dump()
+    inputs_dict = as_jax_arrays(inputs.model_dump())
+    cotangent_vector = as_jax_arrays(cotangent_vector)
 
     # Use get (not pop) so the cached residuals can serve multiple sequential
     # vjp calls on the same inputs -- for example, when tesseract-jax's
@@ -172,10 +269,10 @@ def jax_jvp(
     """
     return _jvp_jit(
         apply_jit,
-        inputs.model_dump(),
+        as_jax_arrays(inputs.model_dump()),
         tuple(jvp_inputs),
         tuple(jvp_outputs),
-        tangent_vector,
+        as_jax_arrays(tangent_vector),
     )
 
 
@@ -191,7 +288,10 @@ def jax_jacobian(
     ``(input shape/dtype, jac_inputs, jac_outputs)`` combination.
     """
     return _jac_jit(
-        apply_jit, inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs)
+        apply_jit,
+        as_jax_arrays(inputs.model_dump()),
+        tuple(jac_inputs),
+        tuple(jac_outputs),
     )
 
 

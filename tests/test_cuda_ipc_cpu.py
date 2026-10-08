@@ -77,56 +77,6 @@ class FakeCudaArray:
             self.device = device
 
 
-class FakeDLPackCudaArray:
-    """Mimics a JAX-style array: DLPack-on-CUDA only, no ``__cuda_array_interface__``.
-
-    Backs ``__dlpack__`` with the real capsule machinery so the encode path reads
-    genuine ``DLManagedTensor`` metadata. The producer keeps ownership (as JAX
-    does), so consuming the capsule for metadata must not free anything real; the
-    ``mocked_cuda`` fixture stubs ``cuda_api.free`` regardless.
-    """
-
-    def __init__(
-        self,
-        shape: tuple[int, ...],
-        dtype: str,
-        data_ptr: int = 0x7000,
-        device: int = 0,
-        strides: tuple[int, ...] | None = None,
-    ) -> None:
-        self._ptr = data_ptr
-        self._device = device
-        self._shape = tuple(shape)
-        self._dtype = np.dtype(dtype)
-        self._strides = strides
-
-    def __dlpack_device__(self) -> tuple[int, int]:
-        from tesseract_core.runtime.cuda import dlpack
-
-        return (dlpack.DLDEVICE_CUDA, self._device)
-
-    def __dlpack__(self, stream: Any = None, **kwargs: Any) -> Any:
-        from tesseract_core.runtime.cuda import dlpack
-
-        capsule, _token = dlpack.make_dlpack_capsule(
-            self._ptr, self._device, self._shape, self._dtype
-        )
-        if self._strides is not None:
-            # make_dlpack_capsule always emits contiguous (strides=NULL); rebuild
-            # with explicit element strides to exercise the contiguity check.
-            import ctypes
-
-            managed_ptr = dlpack._pythonapi.PyCapsule_GetPointer(capsule, b"dltensor")
-            managed = ctypes.cast(
-                managed_ptr, ctypes.POINTER(dlpack._DLManagedTensor)
-            ).contents
-            strides_arr = (ctypes.c_int64 * len(self._strides))(*self._strides)
-            managed.dl_tensor.strides = strides_arr
-            # Keep the strides array alive for as long as the capsule may be read.
-            dlpack._BUNDLES[_token] = (*dlpack._BUNDLES[_token], strides_arr)
-        return capsule
-
-
 class _CuPyDevice:
     """Stand-in for ``cupy.ndarray.device`` (exposes ``.id``)."""
 
@@ -216,96 +166,77 @@ def test_dump_accepts_explicit_contiguous_strides(mocked_cuda):
     assert out["data"]["encoding"] == "cuda_ipc"
 
 
-# ── DLPack-only producers (JAX has no __cuda_array_interface__) ──────────
-
-
-def test_is_gpu_array_accepts_dlpack_cuda(mocked_cuda):
-    """A DLPack-on-CUDA producer counts as a GPU array even without CAI."""
-    arr = FakeDLPackCudaArray((3,), "float32")
-    assert not cuda_ipc.has_cuda_array_interface(arr)
-    assert cuda_ipc.is_gpu_array(arr)
-    # A plain host array is neither.
-    assert not cuda_ipc.is_gpu_array(np.zeros(3, dtype=np.float32))
-
-
-def test_dump_dlpack_only_array(mocked_cuda):
-    """A JAX-style DLPack-only array encodes via cuda_ipc without a CuPy bridge."""
-    arr = FakeDLPackCudaArray((4, 8), "float32", data_ptr=0x5000, device=2)
-    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
-
-    assert out["object_type"] == "array"
-    assert out["shape"] == [4, 8]
-    assert out["dtype"] == "float32"
-    unpacked = _unpack_cuda_ipc(out["data"])
-    assert out["data"]["encoding"] == "cuda_ipc"
-    # Device ordinal comes from __dlpack_device__.
-    assert unpacked["device"] == 2
-    # base = 0x5000 - 256; offset = data_ptr - base = 256 (fake alloc base).
-    assert unpacked["storage_offset"] == 256
-    assert mocked_cuda.calls["get_handle"] == [0x5000 - 256]
-
-
-def test_dump_dlpack_only_falls_back_to_staging(mocked_cuda):
-    """A VMM-backed DLPack-only array (JAX/XLA) takes the staging fallback path."""
-    mocked_cuda.reject_non_staging_ipc = True
-    arr = FakeDLPackCudaArray((4, 8), "float32", data_ptr=0x5000)  # nbytes 128
-    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
-
-    assert mocked_cuda.calls["stage"] == [(0x5000, 128)]
-    unpacked = _unpack_cuda_ipc(out["data"])
-    assert unpacked["storage_offset"] == 0
-    assert unpacked["storage_size"] == 128
-
-
-def test_dump_dlpack_only_rejects_non_contiguous(mocked_cuda):
-    """A non-contiguous DLPack-only array is rejected like a CAI one."""
-    # Transposed 3x4 float32: element strides (1, 4) -> byte strides (4, 16).
-    arr = FakeDLPackCudaArray((4, 3), "float32", strides=(1, 4))
-    with pytest.raises(ValueError, match="C-contiguous"):
-        cuda_ipc.dump_cuda_ipc_arraydict(arr)
-
-
-def test_validate_dlpack_only_array_passthrough(mocked_cuda):
-    """A DLPack-only array validates on shape/dtype and is returned unchanged."""
-    arr = FakeDLPackCudaArray((4, 8), "float32")
-    assert cuda_ipc.validate_cuda_array(arr, (None, 8), "float32") is arr
-
-
-def test_encode_array_exports_dlpack_only_gpu_leaf(mocked_cuda):
-    """A DLPack-only GPU leaf under cuda_ipc is exported by handle, not host-copied."""
-    out = array_encoding.encode_array(
-        FakeDLPackCudaArray((3,), "float32"),
-        _info(True, {"array_encoding": "base64", "device_transport": "cuda_ipc"}),
-        (None,),
-        "float32",
-    )
-    assert out["data"]["encoding"] == "cuda_ipc"
-
-
 # ── VMM staging fallback (legacy IPC reject) ────────────────────────────
 
 
 def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
-    """When the base pointer is rejected, encode stages into a fresh buffer.
+    """When legacy IPC rejects the allocation, encode stages into a fresh buffer.
 
     The staged handle uses offset 0 / size == the array's own nbytes, and the
-    staging buffer is registered for later free.
+    staging buffer is registered for a later release.
     """
-    # Reject the base pointer (VMM-backed) but let the staging buffer succeed,
+    # Reject the array's pointer (VMM-backed) but let the staging buffer succeed,
     # matching real behavior where the fresh cudaMalloc buffer is IPC-exportable.
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
 
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)  # nbytes = 4*8*4 = 128
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
-    # Staging was invoked on the array's own data pointer and byte count.
-    assert mocked_cuda.calls["stage"] == [(0x5000, 128)]
+    # Only the staging buffer's handle was taken.
+    assert mocked_cuda.calls["get_handle"] == [0xD000]
+    # The array's own bytes are copied into a fresh buffer.
+    assert mocked_cuda.calls["malloc"] == [128]
+    assert mocked_cuda.calls["memcpy_d2d"] == [(0xD000, 0x5000, 128)]
     # Payload reflects the staging buffer: offset 0, size == nbytes.
     unpacked = _unpack_cuda_ipc(out["data"])
     assert unpacked["storage_offset"] == 0
     assert unpacked["storage_size"] == 128
-    # Staging pointer registered for a later free.
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [0x9000]
+    # Staging buffer registered for a later release.
+    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
+        (0xD000, 0, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
+    ]
+
+
+def test_dump_synchronizes_before_returning_handle(mocked_cuda):
+    """The consumer reads from another process, so encode waits for the device."""
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))
+    assert mocked_cuda.calls["sync"] == [True]
+
+
+def test_dump_works_on_the_arrays_device(mocked_cuda, monkeypatch):
+    """Staging and synchronization run on the array's device, not the caller's."""
+    mocked_cuda.reject_foreign_ipc = True
+    seen = []
+
+    def record_active_device(name):
+        original = getattr(cuda_api, name)
+
+        def wrapper(*args):
+            seen.append((name, mocked_cuda.current_device))
+            return original(*args)
+
+        monkeypatch.setattr(cuda_api, name, wrapper)
+
+    record_active_device("malloc")
+    record_active_device("device_synchronize")
+
+    out = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", data_ptr=0x5000, device=_TorchDevice(index=1))
+    )
+
+    assert seen == [("malloc", 1), ("device_synchronize", 1), ("device_synchronize", 1)]
+    assert mocked_cuda.current_device == 0
+    cuda_ipc.release_pinned_ipc_exports()
+    assert cuda_ipc._STAGING_POOL.take(1, 16) == (
+        0xD000,
+        b"\x01" * cuda_api.IPC_HANDLE_SIZE,
+    )
+    assert _unpack_cuda_ipc(out["data"])["device"] == 1
+
+
+def test_dump_on_the_active_device_does_not_switch(mocked_cuda):
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))
+    assert mocked_cuda.calls["set_device"] == []
 
 
 # ── Export registry / ring-1 lifetime ───────────────────────────────────
@@ -321,13 +252,78 @@ def test_export_registry_pins_and_releases(mocked_cuda):
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 
-def test_release_frees_staging_buffers(mocked_cuda):
-    """Releasing exports frees every registered staging buffer."""
-    cuda_ipc._pin_cuda_ipc_staging_buffer(0xAAAA)
-    cuda_ipc._pin_cuda_ipc_staging_buffer(0xBBBB)
+def test_release_recycles_staging_buffers(mocked_cuda):
+    """Released staging buffers are reused, handle included, by the next export."""
+    mocked_cuda.reject_foreign_ipc = True
+    first = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", data_ptr=0x5000)
+    )
     cuda_ipc.release_pinned_ipc_exports()
-    assert mocked_cuda.calls["free"] == [0xAAAA, 0xBBBB]
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == []
+    assert mocked_cuda.calls["free"] == []
+
+    second = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", data_ptr=0x6000)
+    )
+
+    assert mocked_cuda.calls["malloc"] == [16]
+    assert mocked_cuda.calls["get_handle"] == [0xD000]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x6000, 16)
+    assert second["data"]["buffer"] == first["data"]["buffer"]
+
+
+def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
+    """Idle staging buffers beyond the pool's byte limit are freed, oldest first."""
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 16)
+    mocked_cuda.reject_foreign_ipc = True
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x6000))
+    cuda_ipc.release_pinned_ipc_exports()
+    assert mocked_cuda.calls["free"] == [0xD000]
+
+    # The next export reuses the pooled buffer, not the freed one.
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x7000))
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xE000, 0x7000, 16)
+    assert mocked_cuda.calls["malloc"] == [16, 16]
+
+
+def test_staging_pool_makes_room_for_a_new_size(mocked_cuda, monkeypatch):
+    """Releasing a buffer of a new size evicts idle buffers of other sizes to make room."""
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 64)
+    mocked_cuda.reject_foreign_ipc = True
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+    cuda_ipc.release_pinned_ipc_exports()
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((16,), "<f4", data_ptr=0x6000))
+    cuda_ipc.release_pinned_ipc_exports()
+    assert mocked_cuda.calls["free"] == [0xD000]
+
+    cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((16,), "<f4", data_ptr=0x7000))
+    assert mocked_cuda.calls["malloc"] == [16, 64]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xE000, 0x7000, 64)
+
+
+@pytest.mark.parametrize(
+    "fraction, expected", [(0.25, 1 << 30), (0.5, 2 << 30), (0, 0)]
+)
+def test_pool_limit_follows_runtime_config(mocked_cuda, fraction, expected):
+    """Each of the two pools gets half of ``cuda_ipc_pool_fraction`` of the device."""
+    from tesseract_core.runtime.config import override_config, update_config
+
+    with override_config():
+        update_config(cuda_ipc_pool_fraction=fraction)
+        assert cuda_ipc._pool_max_bytes(0) == expected  # fake device has 8 GiB
+
+
+def test_zero_pool_fraction_disables_reuse(mocked_cuda):
+    from tesseract_core.runtime.config import override_config, update_config
+
+    mocked_cuda.reject_foreign_ipc = True
+    with override_config():
+        update_config(cuda_ipc_pool_fraction=0)
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
+        cuda_ipc.release_pinned_ipc_exports()
+        assert mocked_cuda.calls["free"] == [0xD000]
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x6000))
+    assert mocked_cuda.calls["malloc"] == [16, 16]
 
 
 def test_client_request_releases_input_exports(mocked_cuda):
@@ -340,7 +336,7 @@ def test_client_request_releases_input_exports(mocked_cuda):
     i.e. until the response body is buffered -- so we assert it is still present
     when the (fake) request is dispatched, and gone once _request returns.
     """
-    from tesseract_core.sdk.tesseract import HTTPClient
+    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     seen_during_request = {}
 
@@ -363,6 +359,9 @@ def test_client_request_releases_input_exports(mocked_cuda):
     client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
+    client.server_capabilities = ServerCapabilities(
+        ("json+base64",), ("none", "cuda_ipc"), ("none",)
+    )
 
     arr = FakeCudaArray((3,), "<f4")
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
@@ -371,44 +370,6 @@ def test_client_request_releases_input_exports(mocked_cuda):
     # Pinned during the request (so the server can copy it out) ...
     assert arr in seen_during_request["pinned"]
     # ... and released once the request returned (no leak across calls).
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
-
-
-def test_client_request_exports_dlpack_only_input(mocked_cuda):
-    """The SDK client exports a JAX-style DLPack-only GPU input by reference.
-
-    A DLPack-only array (no ``__cuda_array_interface__``) reaching the client
-    encode path is detected as a GPU leaf, exported over cuda_ipc, and released
-    afterwards like a CAI array.
-    """
-    import orjson
-
-    from tesseract_core.sdk.tesseract import HTTPClient
-
-    encoded_payloads = {}
-    response = Mock(status_code=200, ok=True, content=b"{}")
-
-    class FakeSession:
-        def __init__(self) -> None:
-            self.headers = {}
-
-        def request(self, **kwargs):
-            encoded_payloads["data"] = orjson.loads(kwargs["data"])
-            return response
-
-    client = HTTPClient.__new__(HTTPClient)
-    client._url = "http://localhost:8000"
-    client._output_path = None
-    client._output_format = "json+base64"
-    client._gpu_transport = "cuda_ipc"
-    client._timeout = None
-    client._session = FakeSession()
-
-    arr = FakeDLPackCudaArray((3,), "float32")
-    client._request("apply", method="POST", payload={"a": arr})
-
-    assert encoded_payloads["data"]["a"]["data"]["encoding"] == "cuda_ipc"
-    # Released once the request returned (no leak across calls).
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 
@@ -421,7 +382,7 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     called.
     """
     from tesseract_core.sdk import tesseract as sdk
-    from tesseract_core.sdk.tesseract import HTTPClient
+    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     def _boom():
         raise AssertionError("release must not be called for a CPU-only payload")
@@ -448,6 +409,9 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
+    client.server_capabilities = ServerCapabilities(
+        ("json+base64",), ("none", "cuda_ipc"), ("none",)
+    )
 
     # Plain host array -> encodes as base64, pins nothing, releases nothing.
     client._request("apply", method="POST", payload={"a": np.zeros(3)})
@@ -555,6 +519,8 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     # Synchronised before the mapping was closed.
     assert mocked_cuda.calls["sync"] == [True]
     assert mocked_cuda.calls["close"] == [0x2000]
+    # The caller's active device is restored.
+    assert mocked_cuda.current_device == 0
     # Returned wrapper is framework-agnostic and correctly shaped.
     assert isinstance(out, cuda_ipc.IpcDeviceArray)
     assert out.shape == (4, 8)
@@ -568,12 +534,43 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     assert iface["typestr"] == np.dtype("float32").str
 
 
-def test_load_frees_owned_buffer_on_del(mocked_cuda):
-    """When no DLPack consumer adopts it, the wrapper frees its buffer on GC."""
+def test_load_reuses_owned_buffer_released_on_del(mocked_cuda):
+    """A decoded array's buffer is reused by the next decode of the same size."""
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    del out
+    import gc
+
+    gc.collect()
+    assert mocked_cuda.calls["free"] == []
+
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8]
+    assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x2000, 8)
+    # One sync after each copy, plus one before copying into the reused buffer.
+    assert mocked_cuda.calls["sync"] == [True] * 3
+
+
+def test_load_reuses_owned_buffer_released_by_dlpack_deleter(mocked_cuda):
+    """A buffer handed out via DLPack returns to the pool when its deleter runs."""
+    from tesseract_core.runtime.cuda import dlpack
+
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    out.__dlpack__()
+    # Nobody consumed the capsule, so dropping it runs the deleter.
+    dlpack.drop_unconsumed_bundle(out._state["dlpack_token"])
+    assert mocked_cuda.calls["free"] == []
+
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8]
+
+
+def test_owned_buffers_beyond_pool_limit_are_freed(mocked_cuda, monkeypatch):
+    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 0)
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     )
-    assert mocked_cuda.calls["free"] == []
     del out
     import gc
 
@@ -619,7 +616,7 @@ def test_load_frees_owned_buffer_on_open_failure(mocked_cuda, monkeypatch):
     assert mocked_cuda.calls["close"] == []
 
 
-def test_copy_to_host_reads_device_bytes(mocked_cuda):
+def test_copy_to_host_reads_device_bytes(mocked_cuda, allow_device_host_copy):
     """copy_to_host performs a device->host memcpy + sync and returns the bytes."""
     expected = np.arange(6, dtype=np.float32).reshape(2, 3)
     mocked_cuda.device_bytes = expected.tobytes()
@@ -740,7 +737,84 @@ def test_output_to_bytes_mixed_gpu_and_cpu_arrays(mocked_cuda):
     np.testing.assert_array_equal(decoded_cpu, np.arange(3, dtype=np.float32))
 
 
-def test_cuda_array_to_host_branches():
+def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
+    """The SDK client encodes mixed GPU and binref input arrays in a single request.
+
+    GPU leaves are exported by handle via cuda_ipc (without host copies), while host
+    leaves are written as .bin files to the input directory. Both the pinned GPU
+    allocations and the temporary disk files are released on context exit.
+    """
+    from tesseract_core.sdk.tesseract import _encode_payload
+
+    payload = {
+        "gpu": FakeCudaArray((3,), "<f4"),
+        "cpu": np.arange(3, dtype=np.float32),
+    }
+
+    bin_file = None
+    with _encode_payload(
+        payload,
+        gpu_transport="cuda_ipc",
+        input_path=tmp_path,
+        output_format="json+binref",
+    ) as encoded:
+        assert encoded["gpu"]["data"]["encoding"] == "cuda_ipc"
+        assert encoded["cpu"]["data"]["encoding"] == "binref"
+        bin_name = encoded["cpu"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+        # Pinned registry should track the exported allocation during context
+        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+
+    # Context exit should unlink disk files and release pinned allocations
+    assert not bin_file.exists()
+    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+
+
+def test_encode_array_cuda_ipc_missing_context_raises(mocked_cuda):
+    """_encode_array with encoding='cuda_ipc' on a GPU array requires EncodingContext."""
+    from tesseract_core.sdk.tesseract import _encode_array
+
+    gpu_arr = FakeCudaArray((3,), "<f4")
+    with pytest.raises(
+        ValueError, match="EncodingContext is required when encoding is 'cuda_ipc'"
+    ):
+        _encode_array(gpu_arr, encoding="cuda_ipc")
+
+
+def test_encode_payload_mixed_gpu_and_binref_cleanup_on_exception(
+    mocked_cuda, tmp_path
+):
+    """Context exit releases both CUDA IPC exports and binref files even on error."""
+    from tesseract_core.sdk.tesseract import _encode_payload
+
+    payload = {
+        "gpu": FakeCudaArray((3,), "<f4"),
+        "cpu": np.arange(3, dtype=np.float32),
+    }
+
+    bin_file = None
+    with (
+        pytest.raises(RuntimeError, match="simulated failure during request"),
+        _encode_payload(
+            payload,
+            gpu_transport="cuda_ipc",
+            input_path=tmp_path,
+            output_format="json+binref",
+        ) as encoded,
+    ):
+        bin_name = encoded["cpu"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+        raise RuntimeError("simulated failure during request")
+
+    # Context exit should unlink disk files and release pinned allocations despite the error
+    assert not bin_file.exists()
+    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+
+
+def test_cuda_array_to_host_branches(allow_device_host_copy):
     """cuda_array_to_host handles CuPy-, torch-, __array__-like, and rejects others."""
 
     class CupyLike:
@@ -766,6 +840,33 @@ def test_cuda_array_to_host_branches():
     assert cuda_ipc.cuda_array_to_host(ArrayLike()).tolist() == [5.0, 6.0]
     with pytest.raises(TypeError, match="Cannot copy GPU array"):
         cuda_ipc.cuda_array_to_host(object())
+
+
+def test_forbid_device_host_copy_blocks_implicit_copies(mocked_cuda):
+    """Implicit host copies raise in the runtime and SDK, explicit ones don't.
+
+    The flag is set by the autouse ``forbid_device_host_copy`` fixture.
+    """
+    from tesseract_core.sdk.tesseract import _encode_array
+
+    match = "TESSERACT_FORBID_DEVICE_HOST_COPY"
+    with pytest.raises(RuntimeError, match=match):
+        array_encoding.encode_array(
+            FakeCudaArray((3,), "<f4"),
+            _info(True, {"array_encoding": "base64"}),
+            (None,),
+            "float32",
+        )
+    with pytest.raises(RuntimeError, match=match):
+        _encode_array(FakeCudaArray((3,), "<f4"), encoding="base64")
+
+    mocked_cuda.device_bytes = np.arange(3, dtype=np.float32).tobytes()
+    decoded = cuda_ipc.load_cuda_ipc_arraydict(
+        _encoded((3,), "float32", device=0, offset=0, storage_size=12)
+    )
+    with pytest.raises(RuntimeError, match=match):
+        np.asarray(decoded)
+    np.testing.assert_array_equal(decoded.copy_to_host(), np.arange(3))
 
 
 # ── GPU-transport gating ────────────────────────────────────────────────

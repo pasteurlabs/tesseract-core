@@ -19,8 +19,8 @@ import os
 
 import jax
 import jax.numpy as jnp
-import matplotlib.animation as animation
 from animate import make_animation
+from matplotlib import animation
 
 from tesseract_core import Tesseract
 
@@ -91,7 +91,7 @@ with Tesseract.from_image("qp_solve") as qp_solve:
                 vjp_outputs=["x"],
                 cotangent_vector={"x": tangent_vector},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - stop the training loop on any Tesseract error
             print(f"Error in vector_jacobian_product: {e}")
             break
         vjp_G = output["G"]

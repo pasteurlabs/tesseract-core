@@ -9,7 +9,7 @@ import os
 import signal
 import sys
 import threading
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
@@ -149,7 +149,7 @@ class _EpsMap(Mapping):
     def __contains__(self, path: object) -> bool:
         return True
 
-    def __iter__(self) -> Iterable[str]:
+    def __iter__(self) -> Iterator[str]:
         return iter(self._overrides)
 
     def __len__(self) -> int:
@@ -299,9 +299,11 @@ def _start_debug_server(wait_for_client: bool, host: str, port: int) -> None:
     # those frozen modules, never in user code). Skip the validation check.
     os.environ.setdefault("PYDEVD_DISABLE_FILE_VALIDATION", "1")
 
-    import debugpy
+    # T100 flags debugpy as a leftover breakpoint; here attaching a debugger is the
+    # feature itself (`--debug`), not a stray trace.
+    import debugpy  # noqa: T100
 
-    debugpy.listen((host, port))
+    debugpy.listen((host, port))  # noqa: T100
     # Report the address actually bound. Callers that remap it (a container
     # publishing it on a different host port) report the reachable address
     # themselves; this is the only report when there is no remapping.
@@ -320,7 +322,7 @@ def _start_debug_server(wait_for_client: bool, host: str, port: int) -> None:
             file=sys.stderr,
             flush=True,
         )
-        debugpy.wait_for_client()
+        debugpy.wait_for_client()  # noqa: T100
         print("Debugger attached, resuming execution.", file=sys.stderr, flush=True)
 
 
@@ -459,6 +461,10 @@ def check_gradients(
     Finite difference approximations are sensitive to numerical precision. When finite differences
     are reported incorrectly as 0.0, it is likely that the chosen `eps` is too small, especially for
     inputs that do not use float64 precision.
+
+    \b
+    Differentiable fields that hold no array are skipped, such as an optional input that was left
+    out, or a string passed to an ``Array | str`` field.
     """  # noqa: D301
     config = get_config()
     api_module = get_tesseract_api()

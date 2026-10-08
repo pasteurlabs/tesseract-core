@@ -230,6 +230,8 @@ def load_cudart() -> Any:
 
     cudart.cudaSetDevice.argtypes = [ctypes.c_int]
     cudart.cudaSetDevice.restype = ctypes.c_int
+    cudart.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    cudart.cudaGetDevice.restype = ctypes.c_int
     cudart.cudaIpcGetMemHandle.argtypes = [
         ctypes.POINTER(CudaIpcMemHandle),
         ctypes.c_void_p,
@@ -251,7 +253,7 @@ def load_cudart() -> Any:
     # (see the ``_check`` helper in the api module).
     cudart.cudaGetLastError.argtypes = []
     cudart.cudaGetLastError.restype = ctypes.c_int
-    # Used by the VMM staging-buffer fallback (see api.stage_for_legacy_ipc).
+    # Used for decode's owned buffers and encode's VMM staging fallback.
     cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
     cudart.cudaMalloc.restype = ctypes.c_int
     cudart.cudaFree.argtypes = [ctypes.c_void_p]
@@ -263,8 +265,8 @@ def load_cudart() -> Any:
         ctypes.c_int,
     ]
     cudart.cudaMemcpy.restype = ctypes.c_int
-    # Used by decode to block until a device-to-device copy completes before the
-    # IPC mapping is closed.
+    # Used by encode to wait for pending device work before a handle leaves the
+    # process, and by decode to block until its device-to-device copy completes.
     cudart.cudaDeviceSynchronize.argtypes = []
     cudart.cudaDeviceSynchronize.restype = ctypes.c_int
     return cudart
@@ -273,11 +275,12 @@ def load_cudart() -> Any:
 def load_cuda_driver() -> Any:
     """Load the CUDA driver library (libcuda) and declare the signatures we call.
 
-    The driver API is only needed for ``cuMemGetAddressRange``, which recovers
-    the base pointer and size of the allocation backing a device pointer. This
-    is required because IPC handles reference the *whole* allocation, while a
-    given array may point partway into it (common with pooled allocators like
-    CuPy and PyTorch). Raises ``RuntimeError`` if libcuda cannot be found.
+    The driver API is needed for ``cuMemGetAddressRange``, which recovers the
+    base pointer and size of the allocation backing a device pointer. This is
+    required because IPC handles reference the *whole* allocation, while a given
+    array may point partway into it (common with pooled allocators like CuPy and
+    PyTorch). It also reports a device's total memory, which sizes the buffer
+    pools. Raises ``RuntimeError`` if libcuda cannot be found.
     """
     driver = None
     path = ctypes.util.find_library("cuda")
@@ -305,5 +308,13 @@ def load_cuda_driver() -> Any:
         ctypes.c_ulonglong,
     ]
     driver.cuMemGetAddressRange_v2.restype = ctypes.c_int
+    # CUdevice is an int.
+    driver.cuDeviceGet.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+    driver.cuDeviceGet.restype = ctypes.c_int
+    driver.cuDeviceTotalMem_v2.argtypes = [
+        ctypes.POINTER(ctypes.c_size_t),
+        ctypes.c_int,
+    ]
+    driver.cuDeviceTotalMem_v2.restype = ctypes.c_int
     driver.cuInit(0)
     return driver

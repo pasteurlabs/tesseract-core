@@ -240,17 +240,64 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
     thing under each way of setting it. Does not exercise the transport itself,
     which needs a GPU.
     """
-    tess = Tesseract.from_source(
+    with Tesseract.from_source(
         dummy_api_path, python_executable=sys.executable, **kwargs
-    )
-    runtime_config = tess._spawn_config["runtime_config"]
+    ) as tess:
+        runtime_config = tess._spawn_config["runtime_config"]
+        child = serving.runtime_config_to_env(runtime_config).get(
+            "TESSERACT_GPU_TRANSPORT"
+        )
+        client = tess._client.default_encoding.gpu_transport
 
-    child = serving.runtime_config_to_env(runtime_config).get("TESSERACT_GPU_TRANSPORT")
-    client = tess._spawn_config.get("gpu_transport") or runtime_config.get(
-        "gpu_transport", "none"
-    )
     assert child == expected
-    assert client == expected
+    # A client that does not ask gets the server's default of "none"
+    assert (client or "none") == expected
+
+
+@pytest.mark.parametrize(
+    ("gpu_transport", "expected"),
+    [("none", ("none",)), ("cuda_ipc", ("none", "cuda_ipc"))],
+)
+def test_server_capabilities_reflect_the_server(
+    dummy_api_path, gpu_transport, expected
+):
+    """A client that did not configure the server still sees what it accepts.
+
+    Only reads what the server advertises, since exercising the transport needs a GPU.
+    """
+    with Tesseract.from_source(dummy_api_path, gpu_transport=gpu_transport) as tess:
+        remote = Tesseract.from_url(tess._client.url)
+        for client in (tess, remote):
+            capabilities = client.server_capabilities
+            assert capabilities.gpu_transports == expected
+            assert capabilities.output_formats == ("json", "json+base64", "json+binref")
+            assert capabilities.compressions == ("none", "lz4")
+
+
+def test_with_encoding_applies_to_the_view_only(
+    dummy_api_path, sample_inputs, tmp_path
+):
+    """The response format is observable through the files json+binref leaves behind."""
+    with Tesseract.from_source(dummy_api_path, output_path=tmp_path) as tess:
+        tess.apply(sample_inputs)
+        assert list(tmp_path.rglob("*.bin")) == []
+
+        binref = tess.with_encoding(output_format="json+binref")
+        result = binref.apply(sample_inputs)
+        np.testing.assert_allclose(result["result"], [5.0, 8.0])
+        num_files = len(list(tmp_path.rglob("*.bin")))
+        assert num_files > 0
+
+        tess.apply(sample_inputs)
+        assert len(list(tmp_path.rglob("*.bin"))) == num_files
+
+        # Every parameter the server advertises can be requested explicitly
+        explicit = tess.with_encoding(gpu_transport="none", compression="lz4")
+        result = explicit.apply(sample_inputs)
+        np.testing.assert_allclose(result["result"], [5.0, 8.0])
+
+        with pytest.raises(ValueError, match="does not accept gpu_transport"):
+            tess.with_encoding(gpu_transport="cuda_ipc")
 
 
 def test_gpu_transport_rejects_an_unknown_value(dummy_api_path):
@@ -749,6 +796,7 @@ def test_removing_a_tesseract_does_not_kill_the_caller(dummy_api_path, tmp_path)
             text=True,
             start_new_session=True,
             timeout=120,
+            check=False,
         )
 
     as_shipped = run()
@@ -1113,11 +1161,10 @@ def test_host_credentials_are_reported_as_ignored(
         raise Built
 
     monkeypatch.setattr(venv_provision, "_build_pip_venv", build)
-    with caplog.at_level(logging.WARNING, logger="tesseract"):
-        with pytest.raises(Built):
-            venv_provision.resolve_python_executable(
-                dummy_tesseract_package / "tesseract_api.py"
-            )
+    with caplog.at_level(logging.WARNING, logger="tesseract"), pytest.raises(Built):
+        venv_provision.resolve_python_executable(
+            dummy_tesseract_package / "tesseract_api.py"
+        )
 
     assert "host_credentials" in caplog.text
 
@@ -1155,6 +1202,7 @@ def test_edits_to_a_local_package_need_no_rebuild(example_copy):
             for k, v in os.environ.items()
             if k not in venv_provision.SCRUBBED_IMPORT_VARS
         },
+        check=False,
     )
     assert result.stdout.strip() == "True", result.stderr
 
@@ -1267,7 +1315,12 @@ def test_a_rebuild_drops_packages_no_longer_declared(dummy_tesseract_package):
             for k, v in os.environ.items()
             if k not in venv_provision.SCRUBBED_IMPORT_VARS
         }
-        return subprocess.run([python, "-c", "import cowsay"], env=env).returncode == 0
+        return (
+            subprocess.run(
+                [python, "-c", "import cowsay"], env=env, check=False
+            ).returncode
+            == 0
+        )
 
     requirements.write_text("cowsay\n")
     assert has_cowsay(venv_provision.resolve_python_executable(api_path))

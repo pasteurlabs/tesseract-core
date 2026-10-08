@@ -34,6 +34,7 @@ class TestProfilerCLI:
                 **dict(__import__("os").environ),
                 "TESSERACT_API_PATH": str(api_path),
             },
+            check=False,
         )
 
         assert result.returncode == 0, result.stderr
@@ -54,6 +55,7 @@ class TestProfilerCLI:
                 "TESSERACT_API_PATH": str(api_path),
                 "TESSERACT_PROFILING": "1",
             },
+            check=False,
         )
 
         assert result.returncode == 0, result.stderr
@@ -78,6 +80,7 @@ class TestProfilerCLI:
                 "TESSERACT_API_PATH": str(api_path),
                 "TESSERACT_PROFILING": "1",
             },
+            check=False,
         )
 
         assert result.returncode == 0, result.stderr
@@ -145,6 +148,7 @@ class TestTracingCLI:
                 **dict(__import__("os").environ),
                 "TESSERACT_API_PATH": str(api_path),
             },
+            check=False,
         )
 
         assert result.returncode == 0, result.stderr
@@ -165,6 +169,7 @@ class TestTracingCLI:
                 "TESSERACT_API_PATH": str(api_path),
                 "TESSERACT_TRACING": "1",
             },
+            check=False,
         )
 
         assert result.returncode == 0, result.stderr

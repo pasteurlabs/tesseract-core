@@ -187,6 +187,7 @@ def _run(
         text=True,
         env=full_env,
         cwd=None if cwd is None else str(cwd),
+        check=False,
     )
     if result.returncode != 0:
         output = (result.stderr or result.stdout or "").strip()

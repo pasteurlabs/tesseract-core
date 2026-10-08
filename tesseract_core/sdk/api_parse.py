@@ -297,6 +297,14 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             return self.requirements.python_version
         return None
 
+    @property
+    def uses_base_image_python(self) -> bool:
+        """Whether /python-env uses the base image's Python instead of bundling its own."""
+        return (
+            isinstance(self.requirements, PipRequirements)
+            and self.requirements.python_version is None
+        )
+
     @model_validator(mode="after")
     def _validate_python_version_provider(self):
         if (
@@ -405,8 +413,6 @@ def generate_config_schema() -> dict:
 
 class ValidationError(Exception):
     """Raised when inputs needed to build a tesseract are invalid."""
-
-    pass
 
 
 def _get_func_argnames(func: ast.FunctionDef) -> tuple[str, ...]:

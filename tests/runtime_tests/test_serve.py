@@ -185,10 +185,19 @@ def test_apply_negotiates_the_best_offered_format(
     assert response.headers["content-type"].startswith("application/json")
 
 
-def test_unacceptable_output_format_is_rejected_before_running(
-    dummy_tesseract_module, monkeypatch
+@pytest.mark.parametrize(
+    "accept",
+    [
+        "application/json+nonsense",
+        # cuda_ipc is not enabled in the default config
+        "application/json+base64; gpu_transport=cuda_ipc",
+        "application/json+base64; compression=zstd",
+    ],
+)
+def test_unacceptable_encoding_is_rejected_before_running(
+    dummy_tesseract_module, monkeypatch, accept
 ):
-    """Format negotiation fails before the endpoint does any work."""
+    """Negotiation fails before the endpoint does any work."""
     calls = []
 
     def apply_that_records(inputs):
@@ -203,62 +212,107 @@ def test_unacceptable_output_format_is_rejected_before_running(
     response = client.post(
         "/apply",
         json={"inputs": model_to_json(test_inputs)},
-        headers={"Accept": "application/json+nonsense"},
+        headers={"Accept": accept},
     )
     assert response.status_code == 406, response.text
     assert calls == []
+    detail = response.json()["detail"]
+    assert detail["available_gpu_transports"] == ["none"]
+    assert detail["available_compressions"] == ["none", "lz4"]
 
 
-def test_apply_accept_gpu_transport_param_reaches_validation(dummy_tesseract_module):
-    """A gpu_transport Accept parameter is honoured (and validated) per request.
+@pytest.mark.parametrize(
+    ("media_range", "expected"),
+    [
+        ("application/json+base64", ("application/json+base64", {})),
+        (
+            "application/json+base64; gpu_transport=cuda_ipc; compression=lz4",
+            (
+                "application/json+base64",
+                {"gpu_transport": "cuda_ipc", "compression": "lz4"},
+            ),
+        ),
+        # No space after ';' parses the same
+        (
+            "application/json;compression=none",
+            ("application/json", {"compression": "none"}),
+        ),
+        # Case-insensitive type and names; quoted values are unwrapped
+        (
+            'Application/JSON+binref; Charset=utf-8; q=0.5; compression="lz4"',
+            (
+                "application/json+binref",
+                {"charset": "utf-8", "q": "0.5", "compression": "lz4"},
+            ),
+        ),
+    ],
+)
+def test_parse_media_range(media_range, expected):
+    from tesseract_core.runtime.serve import parse_media_range
 
-    With no transport configured, an Accept requesting ``gpu_transport=cuda_ipc``
-    is rejected -- proving the header parameter reaches ``output_to_bytes``'s
-    accepted-transport check rather than being silently ignored.
-    """
+    assert parse_media_range(media_range) == expected
+
+
+@pytest.mark.parametrize(
+    ("gpu_transport", "compression", "accept", "expected"),
+    [
+        # Without an Accept header, the configured defaults apply...
+        ("none", None, None, ("json", "none", None)),
+        ("none", "lz4", None, ("json", "none", "lz4")),
+        # ...except for the GPU transport, which is only used when requested.
+        ("cuda_ipc", None, None, ("json", "none", None)),
+        ("cuda_ipc", None, "application/json+base64", ("json+base64", "none", None)),
+        (
+            "cuda_ipc",
+            None,
+            "application/*; gpu_transport=cuda_ipc",
+            ("json", "cuda_ipc", None),
+        ),
+        # A range the server cannot produce falls through to the next one.
+        (
+            "none",
+            None,
+            "application/json+base64; gpu_transport=cuda_ipc, application/json+binref",
+            ("json+binref", "none", None),
+        ),
+        # Explicit "none" disables a configured compression.
+        (
+            "none",
+            "lz4",
+            "application/json+base64; compression=none",
+            ("json+base64", "none", None),
+        ),
+    ],
+)
+def test_negotiate_encoding(gpu_transport, compression, accept, expected):
     from tesseract_core.runtime.config import update_config
+    from tesseract_core.runtime.serve import negotiate_encoding
 
-    update_config(gpu_transport="none")
+    update_config(gpu_transport=gpu_transport, compression=compression)
+    assert tuple(negotiate_encoding(accept)) == expected
+
+
+def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):
+    """The server rejects by-reference inputs it has not been configured to accept.
+
+    Checked before the transport is touched, so this needs no GPU.
+    """
     client = TestClient(
         create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
     )
-    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
-    response = client.post(
-        "/apply",
-        json={"inputs": model_to_json(test_inputs)},
-        headers={"Accept": "application/json+base64; gpu_transport=cuda_ipc"},
+    inputs = model_to_json(
+        dummy_tesseract_module.InputSchema.model_validate(test_input)
     )
-    assert response.status_code >= 400
-
-
-def test_apply_accept_gpu_transport_param_overrides_config(dummy_tesseract_module):
-    """An Accept ``gpu_transport=none`` overrides a configured transport per request.
-
-    The dummy Tesseract returns host arrays, so opting the transport back to
-    ``none`` for this request must succeed and serialize normally, even though
-    the server is configured with cuda_ipc. Proves the header wins over config
-    when present.
-    """
-    from tesseract_core.runtime.config import update_config
-
-    update_config(gpu_transport="cuda_ipc")
-    try:
-        client = TestClient(
-            create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
-        )
-        test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
-        response = client.post(
-            "/apply",
-            json={"inputs": model_to_json(test_inputs)},
-            headers={"Accept": "application/json+base64; gpu_transport=none"},
-        )
-        assert response.status_code == 200, response.text
-        result = array_from_json(
-            response.json()["result"], Path(get_config().output_path)
-        )
-        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
-    finally:
-        update_config(gpu_transport="none")
+    inputs["a"] = {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float64",
+        # Well-formed descriptor for a handle that does not exist
+        "data": {"buffer": f"0:{'A' * 88}:0:24", "encoding": "cuda_ipc"},
+    }
+    response = client.post("/apply", json={"inputs": inputs})
+    assert response.status_code == 422, response.text
+    assert "not enabled" in response.text
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
@@ -326,12 +380,11 @@ def test_get_openapi_schema(http_client):
     assert "run_id" not in response.json()
 
 
-def test_openapi_schema_advertises_output_formats(dummy_tesseract_module):
-    """Clients can read which output formats this server accepts from openapi.json.
+def test_openapi_schema_advertises_encodings(dummy_tesseract_module):
+    """Clients can read which encodings this server accepts from openapi.json.
 
-    Output formats describe how *host* (CPU) arrays are serialized and are always
-    the same three; a configured GPU transport (``cuda_ipc``) is a separate axis
-    and never appears among the output formats.
+    A configured GPU transport is advertised separately and never appears among
+    the output formats, which are always the same three.
     """
     from tesseract_core.runtime.config import update_config
 
@@ -343,6 +396,7 @@ def test_openapi_schema_advertises_output_formats(dummy_tesseract_module):
         "json+base64",
         "json+binref",
     ]
+    assert schema["x-supported-gpu-transports"] == ["none"]
 
     update_config(gpu_transport="cuda_ipc")
     client = TestClient(create_rest_api(dummy_tesseract_module))
@@ -352,6 +406,7 @@ def test_openapi_schema_advertises_output_formats(dummy_tesseract_module):
         "json+base64",
         "json+binref",
     ]
+    assert schema["x-supported-gpu-transports"] == ["none", "cuda_ipc"]
 
 
 @pytest.mark.skipif(
@@ -438,7 +493,7 @@ def test_multiple_workers(tmpdir, free_port, serve_in_subprocess):
 
         # Check that not all pids are the same
         # (i.e. the requests were handled by different workers)
-        pids = set(response.json()["pid"] for response in responses)
+        pids = {response.json()["pid"] for response in responses}
         assert len(pids) > 1, "All requests were handled by the same worker"
 
 

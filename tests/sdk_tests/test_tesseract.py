@@ -1,3 +1,4 @@
+import builtins
 import functools
 import gc
 import os
@@ -18,9 +19,12 @@ from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
+    EncodingContext,
     HTTPClient,
+    _close_encoding_context,
     _decode_array,
     _encode_array,
+    _encode_payload,
     _tree_map,
 )
 from tests.sdk_tests.conftest import build_venv
@@ -502,42 +506,110 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     assert mock_serving["container"].removals == [True]
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
-    with pytest.raises(RuntimeError):
-        with t:
-            with t:
-                pass
+    with pytest.raises(RuntimeError), t, t:
+        pass
 
 
 @pytest.mark.parametrize(
-    ("kwargs", "expected"),
+    ("encoding", "expected"),
     [
-        ({}, ()),
-        ({"gpu_transport": "none"}, ()),
-        ({"gpu_transport": "cuda_ipc"}, ("cuda_ipc",)),
-        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, ("cuda_ipc",)),
+        ({}, None),
+        ({"output_format": "json+base64"}, "application/json+base64"),
+        # Opting out is sent too, since runtimes 1.13 and 1.14 otherwise fall
+        # back to the transport they were configured with
+        ({"gpu_transport": "none"}, "application/*; gpu_transport=none"),
+        ({"gpu_transport": "cuda_ipc"}, "application/*; gpu_transport=cuda_ipc"),
+        (
+            {"output_format": "json", "compression": "none"},
+            "application/json; compression=none",
+        ),
     ],
 )
-def test_supported_gpu_transports_served(mock_serving, mock_clients, kwargs, expected):
-    t = Tesseract.from_image("sometesseract:0.2.3", **kwargs)
+def test_accept_header(encoding, expected):
+    from tesseract_core.sdk.tesseract import _RequestedEncoding
 
-    # The transport is a property of the client, which only exists once served
-    with pytest.raises(RuntimeError, match="context manager"):
-        _ = t.supported_gpu_transports
-
-    with t:
-        assert t.supported_gpu_transports == expected
+    assert _RequestedEncoding(**encoding).accept_header() == expected
 
 
-def test_supported_gpu_transports_unserved(dummy_tesseract_module):
-    # A remote Tesseract is reached without any device transport configured
-    assert Tesseract.from_url("localhost").supported_gpu_transports == ()
+# What runtimes of each age advertise in their OpenAPI schema
+_SCHEMA_BEFORE_1_13 = {}
+_SCHEMA_1_13 = {"x-supported-output-formats": ["json", "json+base64", "json+binref"]}
+_SCHEMA_CURRENT = {
+    **_SCHEMA_1_13,
+    "x-supported-gpu-transports": ["none"],
+    "x-supported-compressions": ["none", "lz4"],
+}
 
+
+@pytest.mark.parametrize(
+    ("schema", "encoding", "expected"),
+    [
+        # Runtimes before 1.13 cannot parse parameters, but never pass GPU arrays
+        # by reference, so opting out needs no parameter
+        (
+            _SCHEMA_BEFORE_1_13,
+            {"output_format": "json+base64", "gpu_transport": "none"},
+            "application/json+base64",
+        ),
+        (_SCHEMA_BEFORE_1_13, {"gpu_transport": "cuda_ipc"}, ValueError),
+        (_SCHEMA_BEFORE_1_13, {"compression": "lz4"}, ValueError),
+        # Runtimes 1.13 and 1.14 parse parameters without advertising which
+        # values they accept, so the server gets the final say
+        (
+            _SCHEMA_1_13,
+            {"gpu_transport": "none"},
+            "application/*; gpu_transport=none",
+        ),
+        (
+            _SCHEMA_1_13,
+            {"gpu_transport": "cuda_ipc"},
+            "application/*; gpu_transport=cuda_ipc",
+        ),
+        (_SCHEMA_1_13, {"output_format": "msgpack"}, ValueError),
+        (_SCHEMA_CURRENT, {"gpu_transport": "cuda_ipc"}, ValueError),
+        (
+            _SCHEMA_CURRENT,
+            {"compression": "lz4"},
+            "application/*; compression=lz4",
+        ),
+    ],
+)
+def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expected):
+    from tesseract_core.sdk.tesseract import (
+        ServerCapabilities,
+        _fit_encoding_to_server,
+        _RequestedEncoding,
+    )
+
+    capabilities = ServerCapabilities.from_openapi_schema(schema)
+    requested = _RequestedEncoding(**encoding)
+    if expected is ValueError:
+        with pytest.raises(ValueError):
+            _fit_encoding_to_server(requested, capabilities)
+    else:
+        fitted = _fit_encoding_to_server(requested, capabilities)
+        assert fitted.accept_header() == expected
+
+
+def test_compression_warns_when_the_server_may_ignore_it():
+    from tesseract_core.sdk.tesseract import (
+        ServerCapabilities,
+        _fit_encoding_to_server,
+        _RequestedEncoding,
+    )
+
+    capabilities = ServerCapabilities.from_openapi_schema(_SCHEMA_1_13)
+    with pytest.warns(UserWarning, match="ignore the requested compression"):
+        _fit_encoding_to_server(_RequestedEncoding(compression="lz4"), capabilities)
+
+
+def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_module):
     # In-process Tesseracts share memory with the caller, so there is nothing to
     # transport -- even when a GPU transport is configured.
     local = Tesseract.from_tesseract_api(
         dummy_tesseract_module, gpu_transport="cuda_ipc"
     )
-    assert local.supported_gpu_transports == ()
+    assert local.server_capabilities is None
 
 
 @pytest.mark.parametrize(
@@ -701,6 +773,44 @@ def test_encode_array(encoding, expected_data):
     assert encoded["data"] == expected_data
 
 
+def test_encode_array_binref(tmp_path):
+    """_encode_array with encoding='binref' writes file and decodes properly."""
+    a = np.array([1.0, 2.0, 3.0], dtype="float32")
+    ctx = EncodingContext(input_dir=tmp_path)
+    encoded = _encode_array(a, encoding="binref", ctx=ctx)
+
+    assert encoded["shape"] == (3,)
+    assert encoded["dtype"] == "float32"
+    assert encoded["data"]["encoding"] == "binref"
+    assert len(ctx.written_files) == 1
+    assert ctx.written_files[0].exists()
+    assert encoded["data"]["buffer"].endswith(":0")
+
+    decoded = _decode_array(encoded, output_path=tmp_path)
+    np.testing.assert_array_equal(decoded, a, strict=True)
+    _close_encoding_context(ctx)
+    assert not ctx.written_files
+
+
+def test_encode_array_binref_missing_context_raises():
+    """_encode_array with encoding='binref' without ctx raises ValueError."""
+    a = np.array([1.0, 2.0, 3.0], dtype="float32")
+    with pytest.raises(
+        ValueError, match="EncodingContext is required when encoding is 'binref'"
+    ):
+        _encode_array(a, encoding="binref")
+
+
+def test_encode_array_binref_missing_input_dir_raises():
+    """_encode_array with encoding='binref' without input_dir or pool raises ValueError."""
+    a = np.array([1.0, 2.0, 3.0], dtype="float32")
+    ctx = EncodingContext()
+    with pytest.raises(
+        ValueError, match=r"EncodingContext\.input_dir or binref_pool is required"
+    ):
+        _encode_array(a, encoding="binref", ctx=ctx)
+
+
 @pytest.mark.parametrize(
     "encoded, expected",
     [
@@ -748,6 +858,12 @@ def test_decode_array_various_dtypes(dtype):
     # Verify equivalence
     np.testing.assert_array_equal(decoded, original, strict=True)
     assert decoded.dtype == original.dtype
+
+
+def test_encode_array_non_native_byte_order():
+    original = np.array([1.0, 2.0, 3.0], dtype=">f8")
+    decoded = _decode_array(_encode_array(original, encoding="base64"))
+    np.testing.assert_array_equal(decoded, original)
 
 
 @pytest.mark.parametrize("encoding", ["binref", "base64"])
@@ -828,6 +944,15 @@ def test_decode_array_binref_rejects_path_escape(tmp_path):
         encoded = _binref_encoded(bufferpath)
         with pytest.raises(ValueError, match="escapes output_path"):
             _decode_array(encoded, output_path=output_path)
+
+
+def test_decode_array_binref_rejects_short_buffer(tmp_path):
+    """A buffer too short for the declared array must not be padded with garbage."""
+    (tmp_path / "data.bin").write_bytes(np.zeros(2, dtype="float64").tobytes())
+    encoded = _binref_encoded("data.bin")
+    encoded["shape"] = (4,)
+    with pytest.raises(ValueError, match="too small"):
+        _decode_array(encoded, output_path=tmp_path)
 
 
 def test_decode_array_binref_rejects_missing_output_path():
@@ -1175,8 +1300,6 @@ def test_tree_map():
 class _ForeignDtype:
     """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
 
-    pass
-
 
 class _ForeignTensor:
     """Mimics a torch tensor: has .shape, a non-numpy dtype, and supports __array__."""
@@ -1218,6 +1341,200 @@ def test_tree_map_with_foreign_tensor():
 
     decoded = _decode_array(encoded["inputs"]["x"])
     np.testing.assert_array_equal(decoded, [4.0, 5.0])
+
+
+def test_encode_payload_binref(tmp_path):
+    """_encode_payload writes binref files and unlinks them on context exit."""
+    arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    payload = {"a": arr}
+
+    bin_file = None
+    with _encode_payload(
+        payload, output_format="json+binref", input_path=tmp_path
+    ) as encoded:
+        assert encoded["a"]["data"]["encoding"] == "binref"
+        bin_name = encoded["a"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+
+    # File should be cleaned up after context exit
+    assert not bin_file.exists()
+
+
+def test_encode_payload_cleanup_on_exception(tmp_path):
+    """_encode_payload unlinks created binref files even if an exception occurs."""
+    arr = np.array([1.0, 2.0], dtype=np.float32)
+    payload = {"a": arr}
+    bin_file = None
+
+    with (
+        pytest.raises(RuntimeError, match="simulated failure"),
+        _encode_payload(
+            payload, output_format="json+binref", input_path=tmp_path
+        ) as encoded,
+    ):
+        bin_name = encoded["a"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+        raise RuntimeError("simulated failure")
+
+    assert not bin_file.exists()
+
+
+def test_encode_payload_with_pool(tmp_path):
+    """_encode_payload properly checks out and checks in pool slots."""
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=2)
+    arr = np.array([10.0, 20.0], dtype=np.float32)
+    payload = {"x": arr}
+
+    try:
+        with _encode_payload(
+            payload, binref_pool=pool, output_format="json+binref"
+        ) as encoded:
+            assert encoded["x"]["data"]["encoding"] == "binref"
+            assert len(pool._free) == 0  # slot checked out
+        assert len(pool._free) == 1  # slot returned to pool
+    finally:
+        pool.close()
+
+
+def test_encode_payload_cleanup_on_exception_with_pool(tmp_path):
+    """_encode_payload returns pool slots even if an exception occurs."""
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=2)
+    arr = np.array([10.0, 20.0], dtype=np.float32)
+    payload = {"x": arr}
+
+    try:
+        with (
+            pytest.raises(RuntimeError, match="simulated pool failure"),
+            _encode_payload(payload, binref_pool=pool, output_format="json+binref"),
+        ):
+            assert len(pool._free) == 0  # slot checked out
+            raise RuntimeError("simulated pool failure")
+        assert len(pool._free) == 1  # slot returned to pool despite error
+    finally:
+        pool.close()
+
+
+def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
+    """EncodingContext.close resiliently cleans up all phases even if one fails."""
+    from tesseract_core.sdk.binref import BinrefSlot
+
+    f1 = tmp_path / "f1.bin"
+    f2 = tmp_path / "f2.bin"
+    f1.touch()
+    f2.touch()
+
+    mock_pool = MagicMock()
+    mock_slot = MagicMock(spec=BinrefSlot)
+
+    mock_cuda_mod = MagicMock()
+    monkeypatch.setattr(
+        "tesseract_core.sdk.tesseract._import_cuda_ipc",
+        lambda: mock_cuda_mod,
+    )
+
+    orig_unlink = Path.unlink
+
+    def failing_unlink(path_self, *args, **kwargs):
+        if path_self == f1:
+            raise OSError("permission denied")
+        return orig_unlink(path_self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+
+    ctx = EncodingContext(
+        input_dir=tmp_path,
+        binref_pool=mock_pool,
+        written_files=[f1, f2],
+        checked_out_slots=[mock_slot],
+        exported_cuda_ipc=True,
+    )
+
+    with pytest.raises(OSError, match="permission denied"):
+        _close_encoding_context(ctx)
+
+    assert not f2.exists()
+    mock_pool.checkin.assert_called_once_with(mock_slot)
+    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
+    assert ctx.exported_cuda_ipc is False
+
+
+def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
+    """_close_encoding_context accumulates multiple errors across phases."""
+    from tesseract_core.sdk.binref import BinrefSlot
+
+    f1 = tmp_path / "f1.bin"
+    f1.touch()
+
+    mock_pool = MagicMock()
+    mock_pool.checkin.side_effect = RuntimeError("pool checkin failed")
+    mock_slot = MagicMock(spec=BinrefSlot)
+
+    orig_unlink = Path.unlink
+
+    def failing_unlink(path_self, *args, **kwargs):
+        if path_self == f1:
+            raise OSError("unlink failed")
+        return orig_unlink(path_self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+
+    mock_cuda_mod = MagicMock()
+    monkeypatch.setattr(
+        "tesseract_core.sdk.tesseract._import_cuda_ipc",
+        lambda: mock_cuda_mod,
+    )
+
+    ctx = EncodingContext(
+        input_dir=tmp_path,
+        binref_pool=mock_pool,
+        written_files=[f1],
+        checked_out_slots=[mock_slot],
+        exported_cuda_ipc=True,
+    )
+
+    exception_group_cls = getattr(builtins, "ExceptionGroup", None)
+    if exception_group_cls is not None:
+        with pytest.raises(exception_group_cls) as exc_info:
+            _close_encoding_context(ctx)
+        assert len(exc_info.value.exceptions) == 2
+    else:
+        with pytest.raises(RuntimeError, match="Multiple errors occurred"):
+            _close_encoding_context(ctx)
+
+    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
+    assert ctx.exported_cuda_ipc is False
+
+
+def test_http_client_binref_payload(tmp_path):
+    """HTTPClient transmits payloads with binref encoding when output_format is json+binref."""
+    client = HTTPClient(
+        "http://localhost:8000",
+        output_format="json+binref",
+        input_path=tmp_path,
+    )
+    arr = np.array([1.0, 2.0], dtype=np.float32)
+
+    mock_resp = Mock(spec=requests.Response)
+    mock_resp.ok = True
+    mock_resp.status_code = 200
+    mock_resp.content = b'{"result": "ok"}'
+    client._session.request = Mock(return_value=mock_resp)
+
+    payload = {"disk": arr}
+    res = client._request("apply", method="POST", payload=payload)
+    assert res == {"result": "ok"}
+
+    sent_body = orjson.loads(client._session.request.call_args[1]["data"])
+    assert sent_body["disk"]["data"]["encoding"] == "binref"
+    bin_name = sent_body["disk"]["data"]["buffer"].split(":")[0]
+    # Verify file was cleaned up after request
+    assert not (tmp_path / bin_name).exists()
 
 
 def test_test_endpoint_success_local(dummy_tesseract_package):

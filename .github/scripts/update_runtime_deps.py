@@ -64,6 +64,7 @@ def update_requirements(tmpdir: str) -> str:
         cwd=tmpdir,
         capture_output=True,
         text=True,
+        check=False,
     )
 
     if res.returncode != 0:
@@ -90,8 +91,7 @@ def get_updated_bounds(pyproject_file: str, resolved_env: str) -> list[str]:
             # The same package may show up multiple times for different markers etc.
             # We want the highest version as the new upper bound.
             if pkg in new_upper_bounds:
-                if ver > new_upper_bounds[pkg]:
-                    new_upper_bounds[pkg] = ver
+                new_upper_bounds[pkg] = max(new_upper_bounds[pkg], ver)
             else:
                 new_upper_bounds[pkg] = ver
 

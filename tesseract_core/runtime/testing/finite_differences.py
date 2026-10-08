@@ -19,7 +19,13 @@ from pydantic import BaseModel
 from rich.progress import Progress
 
 from ..core import create_endpoints, get_input_schema, get_output_schema
-from ..tree_transforms import escape_dict_key, get_at_path, set_at_path, split_path
+from ..tree_transforms import (
+    escape_dict_key,
+    get_at_path,
+    is_arraylike,
+    set_at_path,
+    split_path,
+)
 
 GradientEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -46,11 +52,21 @@ class GradientCheckResult(NamedTuple):
     exception: str | None
 
 
+def _is_sequence(value: Any) -> bool:
+    """Check whether a value can be walked by a `[]` path part."""
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
 def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     """Expand a path pattern to a list of all matching paths in the given pytree.
 
     For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
     this function would return `["a.[0].{b}", "a.[1].{c}"]`.
+
+    Patterns come from the schema, so a union type (`Array | None`, `Array | str`,
+    `list | str`, `dict | str`) can hold something other than an array or container at
+    any point along a path. Such a path has no gradient to check, so it is skipped
+    rather than aborting the whole expansion.
     """
     parts = split_path(path_pattern)
 
@@ -59,17 +75,17 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     ) -> list[str]:
         """Recursively expand each part separately."""
         if not parts:
+            if not is_arraylike(current_inputs):
+                return []
             return [".".join(current_path)]
-
-        if current_inputs is None:
-            # An optional container (e.g. `list | None`) that was not supplied.
-            return []
 
         paths = []
         part = parts[0]
 
         if part == "[]":
             # sequence access
+            if not _is_sequence(current_inputs):
+                return []
             for i, _ in enumerate(current_inputs):
                 subpaths = _handle_part(
                     parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
@@ -77,6 +93,8 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
                 paths.extend(subpaths)
         elif part == "{}":
             # dictionary access
+            if not isinstance(current_inputs, Mapping):
+                return []
             for key in current_inputs:
                 subpaths = _handle_part(
                     parts[1:],
@@ -85,6 +103,8 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
                 )
                 paths.extend(subpaths)
         else:
+            if not isinstance(current_inputs, Mapping):
+                return []
             subpaths = _handle_part(
                 parts[1:], current_inputs[part], [*current_path, part]
             )
@@ -163,7 +183,7 @@ def _cached_function(*, key_fn: Callable) -> Callable:
             if key not in cache:
                 try:
                     cache[key] = fn(*args, **kwargs)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - cached and re-raised below
                     cache[key] = e
             if isinstance(cache[key], Exception):
                 raise cache[key]
@@ -611,7 +631,7 @@ def check_endpoint_gradients(
                         idx,
                         **grad_kwargs,
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - user endpoint code; reported as a failure
                     tb = traceback.extract_tb(e.__traceback__)
                     exc_info = f"{type(e).__name__}: '{e}' in file {tb[-1].filename}, line {tb[-1].lineno}"
                     failure = GradientCheckResult(

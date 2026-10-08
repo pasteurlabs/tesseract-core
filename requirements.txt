@@ -6,7 +6,7 @@ annotated-types==0.8.0
     # via pydantic
 certifi==2026.7.22
     # via requests
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
     # via requests
 colorama==0.4.6 ; sys_platform == 'win32'
     # via typer
@@ -18,7 +18,7 @@ markdown-it-py==3.0.0 ; python_full_version < '3.11'
     # via rich
 markdown-it-py==4.2.0 ; python_full_version >= '3.11'
     # via rich
-markupsafe==3.0.3
+markupsafe==3.0.4
     # via jinja2
 mdurl==0.1.2
     # via markdown-it-py
@@ -34,7 +34,7 @@ packaging==26.3
     # via tesseract-core
 pip==26.2.1
     # via tesseract-core
-pybase64==1.5.0
+pybase64==1.5.1
     # via tesseract-core
 pydantic==2.13.5
     # via tesseract-core
