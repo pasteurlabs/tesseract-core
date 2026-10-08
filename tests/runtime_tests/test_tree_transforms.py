@@ -773,7 +773,7 @@ class TestLRUCache:
         # Evicts Key(2), the least recently used.
         assert eq_calls(lambda: cache.put(Key(3), "c")) == 0
         assert eq_calls(lambda: cache.get(Key(2))) == 0
-        assert eq_calls(lambda: cache.put(Key(3), "d")) <= 2
+        assert eq_calls(lambda: cache.put(Key(3), "d")) == 1
         assert cache.get(Key(3)) == "d"
         assert cache.get(Key(1)) == "a"
 

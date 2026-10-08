@@ -14,6 +14,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float32, jax_recipes
@@ -490,3 +491,70 @@ class TestCacheWithDeviceArrays:
         assert miss is None
         for k in expected:
             np.testing.assert_allclose(np.asarray(got[k]), np.asarray(expected[k]))
+
+
+def _fmix32(h: int) -> int:
+    """Reference MurmurHash3 finalizer (fmix32 in smhasher's MurmurHash3.cpp)."""
+    h ^= h >> 16
+    h = (h * 0x85EBCA6B) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * 0xC2B2AE35) & 0xFFFFFFFF
+    return h ^ (h >> 16)
+
+
+def _fingerprint(*arrays: jax.Array) -> int:
+    return int(jax_recipes._fingerprint_jit(arrays))
+
+
+class TestFingerprint:
+    """The fingerprint that narrows cache lookups of device arrays."""
+
+    # MurmurHash3_x86_32 of empty input reduces to fmix32(seed), so its
+    # published empty-input vectors pin down the finalizer.
+    @pytest.mark.parametrize(
+        "seed,expected", [(0, 0x00000000), (1, 0x514E28B7), (0xFFFFFFFF, 0x81F16F39)]
+    )
+    def test_mix_matches_murmur3_vectors(self, seed, expected):
+        assert int(jax.jit(jax_recipes._mix)(jnp.uint32(seed))) == expected
+
+    def test_mix_matches_reference_and_wraps_in_uint32(self):
+        xs = np.random.default_rng(0).integers(0, 2**32, 10_000, dtype=np.uint64)
+        got = np.asarray(jax.jit(jax_recipes._mix)(jnp.asarray(xs.astype(np.uint32))))
+        assert got.dtype == np.uint32
+        assert [int(g) for g in got] == [_fmix32(int(x)) for x in xs]
+
+    def test_depends_only_on_contents(self):
+        a = np.arange(10, dtype=np.float32)
+        assert _fingerprint(jnp.asarray(a)) == _fingerprint(jnp.asarray(a.copy()))
+
+    @pytest.mark.parametrize(
+        "a,b",
+        [
+            # Each word is salted with its position.
+            (jnp.array([1.0, 2.0]), jnp.array([2.0, 1.0])),
+            # Bitwise, like __eq__.
+            (jnp.array([0.0]), jnp.array([-0.0])),
+            (jnp.array([1 + 2j]), jnp.array([2 + 1j])),
+            (jnp.array([True, False]), jnp.array([False, True])),
+        ],
+    )
+    def test_distinguishes(self, a, b):
+        assert _fingerprint(a) != _fingerprint(b)
+
+    def test_order_of_arrays_matters(self):
+        a, b = jnp.array([1.0]), jnp.array([2.0])
+        assert _fingerprint(a, b) != _fingerprint(b, a)
+
+    def test_sees_high_word_of_64_bit_values(self):
+        with jax.enable_x64(True):
+            a = jnp.array([1], dtype=jnp.uint64)
+            assert _fingerprint(a) != _fingerprint(a + (1 << 40))
+
+    def test_spreads_similar_inputs(self):
+        # With a well-mixed 32-bit hash, 2000 one-hot arrays collide with
+        # probability ~5e-4, so any collision points at poor mixing.
+        fps = {
+            _fingerprint(jnp.zeros(2000, dtype=jnp.float32).at[i].set(1.0))
+            for i in range(2000)
+        }
+        assert len(fps) == 2000

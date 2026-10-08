@@ -248,6 +248,11 @@ class LRUCache:
 
     All public methods are protected by a lock, so the cache is safe to use
     from multiple threads.
+
+    Unlike :func:`functools.lru_cache`, which memoizes the calls to a single
+    function, the cache stores and returns values explicitly: the JAX recipe
+    stores the VJP of a function while computing ``apply`` and returns it to a
+    later ``vjp`` call.
     """
 
     def __init__(self, maxsize: int = 1) -> None:
@@ -258,8 +263,8 @@ class LRUCache:
 
     # Every dict operation may call __eq__ on the keys that share the hash of the
     # key it looks up, and that can be costly: the JAX recipe's keys compare
-    # device arrays. So each method below does one lookup that can find a match,
-    # and moves an entry to the end by re-inserting it rather than with
+    # device arrays. So each method below looks the key up once, with pop, and
+    # marks an entry MRU by re-inserting it rather than with
     # OrderedDict.move_to_end, which would look the key up again.
 
     def put(self, key: Hashable, value: Any) -> None:
@@ -267,14 +272,12 @@ class LRUCache:
         if self._maxsize <= 0:
             return
         with self._lock:
-            size = len(self._cache)
-            self._cache.setdefault(key, value)
-            if len(self._cache) == size:
-                # The key was already present: replace its entry and mark it MRU.
-                del self._cache[key]
-                self._cache[key] = value
-            while len(self._cache) > self._maxsize:
+            self._cache.pop(key, _MISSING)
+            # Evicting first spares the insertion from comparing the key with
+            # an entry that is about to go.
+            while len(self._cache) >= self._maxsize:
                 del self._cache[next(iter(self._cache))]
+            self._cache[key] = value
 
     def get(self, key: Hashable) -> Any | None:
         """Return the value for *key* (marking it MRU), or ``None`` on a miss."""
