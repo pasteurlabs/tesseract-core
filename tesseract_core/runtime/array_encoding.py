@@ -25,6 +25,7 @@ from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.file_interactions import (
     available_gpu_transports,
+    compression_type,
     get_filesize,
     is_absolute_path,
     is_url,
@@ -100,7 +101,7 @@ class Base64ArrayData(BaseModel):
         ),
     ]
     encoding: Literal["base64"]
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
     model_config = ConfigDict(extra="forbid")
 
 
@@ -114,7 +115,7 @@ class BinrefArrayData(BaseModel):
 
     buffer: StrictStr = Field(pattern=r"^.+?(\:\d+(\:\d+)?)?$")
     encoding: Literal["binref"]
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
 
     model_config = ConfigDict(extra="forbid")
 

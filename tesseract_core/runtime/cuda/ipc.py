@@ -287,8 +287,6 @@ class _BufferPool:
 def _pool_max_bytes(device: int) -> int:
     """Cap on a :class:`_BufferPool`'s idle bytes on ``device``, set by ``cuda_ipc_pool_fraction``."""
     fraction = get_config().cuda_ipc_pool_fraction
-    if fraction == 0:
-        return 0
     return int(cuda_api.device_total_memory(device) * fraction / 2)
 
 
@@ -296,7 +294,6 @@ def _pool_max_bytes(device: int) -> int:
 # size, IPC handle). Released together with _CUDA_IPC_EXPORT_REGISTRY, but
 # returned to _STAGING_POOL instead of dropped.
 _CUDA_IPC_STAGING_BUFFERS: list[tuple[int, int, int, bytes]] = []
-_staging_lock = threading.Lock()
 
 # Idle staging buffers, each with its IPC handle, so reuse also saves the
 # cudaIpcGetMemHandle call.
@@ -318,8 +315,7 @@ def _stage_for_export(src_ptr: int, nbytes: int, device: int) -> bytes:
     except Exception:
         cuda_api.free(ptr)
         raise
-    with _staging_lock:
-        _CUDA_IPC_STAGING_BUFFERS.append((ptr, device, nbytes, handle))
+    _CUDA_IPC_STAGING_BUFFERS.append((ptr, device, nbytes, handle))
     return handle
 
 
@@ -330,8 +326,7 @@ def release_pinned_ipc_exports() -> None:
     above explains.
     """
     _CUDA_IPC_EXPORT_REGISTRY.clear()
-    with _staging_lock:
-        staging, _CUDA_IPC_STAGING_BUFFERS[:] = list(_CUDA_IPC_STAGING_BUFFERS), []
+    staging, _CUDA_IPC_STAGING_BUFFERS[:] = list(_CUDA_IPC_STAGING_BUFFERS), []
     for ptr, device, nbytes, handle in staging:
         _STAGING_POOL.put(ptr, device, nbytes, handle)
 
@@ -646,7 +641,7 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
         try:
             # Opening the IPC handle can fail too; if it does, we still own the
             # buffer obtained above and must free it (the except below).
-            base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
+            base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes)
             try:
                 # Copy only this array's own bytes out of the producer's (offset)
                 # mapping into the owned buffer, then block until the copy is done so
