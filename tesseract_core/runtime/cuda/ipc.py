@@ -83,7 +83,24 @@ def has_cuda_array_interface(obj: Any) -> bool:
     CUDA-aware Python libraries. It indicates the object holds data in
     GPU device memory.
     """
-    return hasattr(obj, "__cuda_array_interface__")
+    try:
+        return hasattr(obj, "__cuda_array_interface__")
+    except RuntimeError:
+        # PyTorch raises this rather than AttributeError for a CUDA tensor that
+        # requires grad, which is still a GPU array (see _without_autograd).
+        return True
+
+
+def _without_autograd(arr: Any) -> Any:
+    """``arr``, detached if it is a PyTorch tensor that requires grad.
+
+    Such a tensor refuses ``__cuda_array_interface__`` and ``.numpy()``.
+    Encoding only reads its values, so a detached view of the same memory
+    serves instead.
+    """
+    if getattr(arr, "requires_grad", False) and callable(getattr(arr, "detach", None)):
+        return arr.detach()
+    return arr
 
 
 FORBID_DEVICE_HOST_COPY_ENV = "TESSERACT_FORBID_DEVICE_HOST_COPY"
@@ -116,6 +133,7 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     fetches to host on conversion).
     """
     check_device_host_copy(f"a {type(arr).__name__} GPU array")
+    arr = _without_autograd(arr)
     get = getattr(arr, "get", None)
     if callable(get):  # CuPy
         return np.asarray(get())
@@ -173,6 +191,7 @@ def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
     The protocol carries no device ordinal, so it is read from the framework's
     ``.device`` attribute and defaults to 0.
     """
+    arr = _without_autograd(arr)
     iface = arr.__cuda_array_interface__
     shape = tuple(iface["shape"])
     dtype = np.dtype(iface["typestr"])  # e.g. "<f4", "|b1"

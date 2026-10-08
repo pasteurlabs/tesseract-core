@@ -778,6 +778,55 @@ def test_decode_to_torch_via_dlpack():
             producer.terminate()
 
 
+@requires_torch_cuda
+def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
+    """A CUDA tensor that requires grad encodes like any other.
+
+    PyTorch refuses ``__cuda_array_interface__`` and ``.numpy()`` on such a
+    tensor, which made the runtime fail on an endpoint output computed from a
+    parameter that requires grad, and the SDK on such an input, over cuda_ipc
+    and over host copies alike.
+    """
+    import pybase64
+    import torch
+
+    from tesseract_core.runtime.cuda.ipc import (
+        cuda_array_to_host,
+        dump_cuda_ipc_arraydict,
+        has_cuda_array_interface,
+        release_pinned_ipc_exports,
+    )
+    from tesseract_core.sdk.tesseract import (
+        EncodingContext,
+        _close_encoding_context,
+        _encode_array,
+    )
+
+    weight = torch.ones(1, device="cuda", requires_grad=True)
+    x = torch.arange(4, dtype=torch.float32, device="cuda") * weight
+    expected = np.arange(4, dtype=np.float32)
+    assert x.requires_grad
+    assert has_cuda_array_interface(x)
+    np.testing.assert_array_equal(cuda_array_to_host(x), expected)
+
+    try:
+        exported = dump_cuda_ipc_arraydict(x)
+        assert exported["data"]["encoding"] == "cuda_ipc"
+        assert exported["shape"] == [4]
+    finally:
+        release_pinned_ipc_exports()
+
+    host = _encode_array(x, encoding="base64")
+    np.testing.assert_array_equal(
+        np.frombuffer(pybase64.b64decode(host["data"]["buffer"]), np.float32), expected
+    )
+    ctx = EncodingContext()
+    try:
+        assert _encode_array(x, "cuda_ipc", ctx)["data"]["encoding"] == "cuda_ipc"
+    finally:
+        _close_encoding_context(ctx)
+
+
 @requires_cuda
 @requires_torch_cuda
 def test_decode_to_torch_via_cuda_array_interface():

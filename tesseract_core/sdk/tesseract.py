@@ -1330,6 +1330,30 @@ def _close_encoding_context(ctx: EncodingContext) -> None:
         )
 
 
+def _is_gpu_array(x: Any) -> bool:
+    """Whether ``x`` exposes ``__cuda_array_interface__``.
+
+    PyTorch raises RuntimeError rather than AttributeError for a CUDA tensor
+    that requires grad, which is still a GPU array.
+    """
+    try:
+        return hasattr(x, "__cuda_array_interface__")
+    except RuntimeError:
+        return True
+
+
+def _without_autograd(arr: Any) -> Any:
+    """``arr``, detached if it is a PyTorch tensor that requires grad.
+
+    Such a tensor refuses ``__cuda_array_interface__`` and ``.numpy()``.
+    Encoding only reads its values, so a detached view of the same memory
+    serves instead.
+    """
+    if getattr(arr, "requires_grad", False) and callable(getattr(arr, "detach", None)):
+        return arr.detach()
+    return arr
+
+
 def _gpu_array_to_host(arr: Any) -> np.ndarray:
     """Copy a GPU array to the host, for encodings that serialize its bytes."""
     # Import the runtime only when the flag is set or the array needs it, so a
@@ -1367,7 +1391,8 @@ def _encode_array(
     When ``encoding='binref'``, an :class:`EncodingContext` is required to write
     the buffer to the input directory or write pool and track the file/slot lifetime.
     """
-    if hasattr(arr, "__cuda_array_interface__"):
+    if _is_gpu_array(arr):
+        arr = _without_autograd(arr)
         if encoding == "cuda_ipc":
             if ctx is None:
                 raise ValueError(
@@ -1438,7 +1463,7 @@ def _encode_payload(
     )
 
     def _encode_leaf(x: Any) -> dict:
-        if hasattr(x, "__cuda_array_interface__") and gpu_transport != "none":
+        if _is_gpu_array(x) and gpu_transport != "none":
             return _encode_array(x, encoding=gpu_transport, ctx=ctx)
 
         # Host array (or GPU array when gpu_transport is "none")
@@ -1448,7 +1473,7 @@ def _encode_payload(
         return _encode_array(x, encoding="base64", ctx=ctx)
 
     def _is_leaf(x: Any) -> bool:
-        return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
+        return hasattr(x, "__array__") or _is_gpu_array(x)
 
     try:
         encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
