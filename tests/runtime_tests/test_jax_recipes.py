@@ -546,9 +546,20 @@ class TestFingerprint:
         assert _fingerprint(a, b) != _fingerprint(b, a)
 
     def test_sees_high_word_of_64_bit_values(self):
-        with jax.enable_x64(True):
+        # 64-bit arrays need JAX_ENABLE_X64, which is read at startup.
+        code = textwrap.dedent(
+            """
+            import jax.numpy as jnp
+            from tesseract_core.runtime import jax_recipes
+
+            fingerprint = lambda x: int(jax_recipes._fingerprint_jit((x,)))
             a = jnp.array([1], dtype=jnp.uint64)
-            assert _fingerprint(a) != _fingerprint(a + (1 << 40))
+            assert a.dtype == jnp.uint64
+            assert fingerprint(a) != fingerprint(a + (1 << 40))
+            """
+        )
+        env = {**os.environ, "JAX_ENABLE_X64": "1"}
+        subprocess.run([sys.executable, "-c", code], env=env, check=True)
 
     def test_spreads_similar_inputs(self):
         # With a well-mixed 32-bit hash, 2000 one-hot arrays collide with
