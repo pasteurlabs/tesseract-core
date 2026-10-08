@@ -45,7 +45,7 @@ DOC_PAGES = [
 ]
 
 _VOLATILE_CELL = re.compile(
-    r"(sha256:)?[0-9a-f]{12}"  # image / container IDs
+    r"(sha256:)?[0-9a-f]{12,}"  # image / container IDs
     r"|tesseract-[0-9a-z]{12}"  # container names
     r"|[0-9.]+:[0-9]+"  # host addresses
 )
@@ -121,10 +121,13 @@ def _parse_rich_table(text: str) -> tuple[list[str], set[tuple[str, ...]]]:
             else:
                 rows.append(row)
 
-    masked = {
-        tuple("<volatile>" if _VOLATILE_CELL.fullmatch(c) else c for c in row)
-        for row in rows
-    }
+    def normalize(cell):
+        if _VOLATILE_CELL.fullmatch(cell):
+            return "<volatile>"
+        # Podman qualifies unregistered image tags as localhost/<name>
+        return cell.replace("'localhost/", "'")
+
+    masked = {tuple(normalize(c) for c in row) for row in rows}
     return header, masked
 
 
