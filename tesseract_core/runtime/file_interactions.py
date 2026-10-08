@@ -34,6 +34,10 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 # it is clear to users that this means "disabled", not "unspecified".
 gpu_transport_type = Literal["none", "cuda_ipc"]
 
+# Compressions for array buffers. Disabled compression is ``None`` in the config
+# and in array payloads, and ``"none"`` in an Accept header.
+compression_type = Literal["lz4"]
+
 # Every output format is always available (none of them are experimental).
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
@@ -64,7 +68,7 @@ def available_gpu_transports() -> tuple[str, ...]:
 
 def available_compressions() -> tuple[str, ...]:
     """Output compressions the runtime accepts (``none`` disables compression)."""
-    return ("none", "lz4")
+    return ("none", *get_args(compression_type))
 
 
 def output_to_bytes(
@@ -72,7 +76,7 @@ def output_to_bytes(
     format: supported_format_type,
     base_dir: str | Path | None = None,
     binref_dir: str | Path | None = None,
-    compression: Literal["lz4"] | None = None,
+    compression: compression_type | None = None,
     gpu_transport: gpu_transport_type = "none",
 ) -> bytes:
     """Encode endpoint output to bytes.
