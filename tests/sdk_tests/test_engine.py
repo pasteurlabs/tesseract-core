@@ -1609,7 +1609,7 @@ def test_needs_docker(mocked_docker, monkeypatch):
     def raise_docker_error(*args, **kwargs):
         raise RuntimeError("No Docker")
 
-    monkeypatch.setattr(mocked_docker, "info", raise_docker_error)
+    monkeypatch.setattr(mocked_docker, "version", raise_docker_error)
 
     with pytest.raises(UserError):
         run_something_with_docker()
