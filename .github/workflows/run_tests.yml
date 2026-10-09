@@ -62,8 +62,7 @@ jobs:
         env:
           # Tests build environments in temp dirs. Keep those on the uv cache's
           # drive (RUNNER_TEMP) so uv hardlinks rather than copies on Windows.
-          TMP: ${{ runner.temp }}
-          TEMP: ${{ runner.temp }}
+          # Python's tempfile checks TMPDIR first on every OS.
           TMPDIR: ${{ runner.temp }}
         run: |
           # No typeguard here: it breaks coverage's branch mapping (gh#691).
