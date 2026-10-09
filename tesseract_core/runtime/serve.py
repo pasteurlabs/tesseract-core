@@ -316,13 +316,19 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # Print profiling stats inside start_run context
                 # so they go through stdio redirection to the log file
                 profiler.print_stats()
-            response = create_response(
-                result,
-                encoding,
-                base_dir=output_path,
-                binref_dir=rundir_name,
-                device_exports=exports,
-            )
+            try:
+                response = create_response(
+                    result,
+                    encoding,
+                    base_dir=output_path,
+                    binref_dir=rundir_name,
+                    device_exports=exports,
+                )
+            except BaseException:
+                # No client will read the exports of a response that failed.
+                if exports is not None:
+                    transport.release(exports)
+                raise
             export_id = _keep_exports(exports, acknowledged)
             if export_id is not None:
                 response.headers[EXPORTS_HEADER] = export_id

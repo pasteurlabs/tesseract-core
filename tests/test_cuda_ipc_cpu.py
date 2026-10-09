@@ -1389,3 +1389,58 @@ def test_server_keeps_response_exports_until_their_client_is_done(
         monkeypatch.setattr(serve, "EXPORTS_TIMEOUT_S", 0.0)
         apply(**{done: ""})
         assert len(second.pins) == 0
+
+
+def test_server_releases_exports_of_a_response_that_fails_to_encode(
+    mocked_cuda, tmp_path, monkeypatch
+):
+    """Exports made before an encoding error are released, not leaked.
+
+    Encoding fails after one array was exported. No client will read that
+    response, so its export group must go back to the transport.
+    """
+    import collections
+
+    from fastapi.testclient import TestClient
+
+    from tesseract_core.runtime import serve
+    from tesseract_core.runtime.config import override_config, update_config
+    from tesseract_core.runtime.core import load_module_from_path
+    from tesseract_core.runtime.device_transport import get_transport
+
+    def export_then_fail(*args, device_exports=None, **kwargs):
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4"), device_exports)
+        raise RuntimeError("encoding failed")
+
+    monkeypatch.setattr(serve, "_PENDING_EXPORTS", collections.OrderedDict())
+    monkeypatch.setattr(serve, "output_to_bytes", export_then_fail)
+    api_path = tmp_path / "tesseract_api.py"
+    api_path.write_text(_GPU_OUTPUT_API)
+
+    with override_config():
+        update_config(gpu_transport="cuda_ipc")
+        transport = get_transport("cuda_ipc")
+        released = []
+        release = transport.release
+
+        def record_release(session=None):
+            released.append(None if session is None else len(session.pins))
+            release(session)
+
+        monkeypatch.setattr(transport, "release", record_release)
+        client = TestClient(
+            serve.create_rest_api(load_module_from_path(api_path)),
+            raise_server_exceptions=False,
+        )
+        response = client.post(
+            "/apply",
+            json={"inputs": {"n": 4}},
+            headers={
+                "Accept": "application/json; gpu_transport=cuda_ipc",
+                serve.EXPORTS_DONE_HEADER: "",
+            },
+        )
+
+    assert response.status_code == 500
+    assert released == [1], "the failed response's exports were not released"
+    assert not serve._PENDING_EXPORTS
