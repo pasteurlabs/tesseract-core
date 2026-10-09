@@ -399,6 +399,40 @@ def test_logs_are_captured(dummy_api_path):
     assert "Uvicorn running" in tess.server_logs()
 
 
+def test_a_tesseract_can_print_what_the_default_encoding_cannot(tmp_path):
+    """Output is written as UTF-8, which is how it is read back.
+
+    In the platform's default encoding this `print` raises on Windows, and
+    fails the request it runs in.
+    """
+    api_path = _scratch_tesseract(
+        tmp_path,
+        textwrap.dedent(
+            """
+            from pydantic import BaseModel
+
+            class InputSchema(BaseModel):
+                name: str
+
+            class OutputSchema(BaseModel):
+                name: str
+
+            def apply(inputs: InputSchema) -> OutputSchema:
+                print("density \\N{GREEK SMALL LETTER RHO}")
+                return OutputSchema(name=inputs.name)
+            """
+        ),
+    )
+    lines = []
+
+    with Tesseract.from_source(
+        api_path, python_executable=sys.executable, stream_logs=lines.append
+    ) as tess:
+        tess.apply({"name": "x"})
+
+    assert "density \N{GREEK SMALL LETTER RHO}" in lines
+
+
 def test_stream_logs_without_output_path(dummy_api_path, sample_inputs):
     """Streaming must work without the caller specifying an output directory."""
     lines = []

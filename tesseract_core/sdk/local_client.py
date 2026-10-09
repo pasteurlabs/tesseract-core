@@ -330,6 +330,12 @@ def _runtime_env(
     # useless and startup failures look like hangs.
     env["PYTHONUNBUFFERED"] = "1"
 
+    # The child's output is read back as UTF-8. Left to itself Python writes it
+    # to a file in the platform's default encoding, which on Windows cannot
+    # represent everything a Tesseract may print, so a `print` would fail the
+    # request it runs in.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+
     return env
 
 
