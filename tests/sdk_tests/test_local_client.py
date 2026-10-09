@@ -145,6 +145,19 @@ def test_remove_is_idempotent(dummy_api_path):
         served.logs()
 
 
+def test_a_log_that_cannot_be_deleted_is_left_at_once(tmp_path):
+    """Only a file still held open is waited for; any other failure is final.
+
+    A directory stands in for a log that cannot be deleted, since unlinking one
+    fails on every platform.
+    """
+    started = time.monotonic()
+    local_client._unlink_once_released(tmp_path)
+
+    assert tmp_path.exists()
+    assert time.monotonic() - started < local_client._LOG_RELEASE_TIMEOUT
+
+
 # Nothing listens on port 1, so the health poll fails at once rather than
 # racing a Tesseract that may already have come up. These tests are about
 # what happens after the poll gives up, not about the poll.
