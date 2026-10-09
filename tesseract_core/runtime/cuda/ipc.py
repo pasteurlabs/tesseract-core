@@ -264,7 +264,7 @@ def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
 #   * Client: the SDK releases a request's group when the HTTP call returns. The
 #     server decodes the client's inputs *during* request handling, and
 #     :func:`load_cuda_ipc_arraydict` copies each input into server-owned memory
-#     and closes the mapping before the response is sent.
+#     and is done with the mapping before the response is sent.
 #
 #   * Server: a response's group must outlive the response, since the client
 #     copies the outputs out only once it has received it. The server keeps the
@@ -651,19 +651,50 @@ class IpcDeviceArray:
         )
 
 
+# IPC mappings open in this process, by device and handle: the mapped pointer
+# and how many decodes use it. CUDA maps an allocation into a process only once,
+# and several arrays can share one allocation, so decodes running at the same
+# time share one mapping. It is closed when the last of them is done, so no
+# mapping outlives the decodes, during which the producer keeps the memory.
+_MAPPINGS: dict[tuple[int, bytes], list[int]] = {}
+_MAPPINGS_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _mapped(handle_bytes: bytes, device: int) -> Iterator[int]:
+    """Map the allocation behind an IPC handle for the block, sharing open mappings."""
+    key = (device, handle_bytes)
+    with _MAPPINGS_LOCK:
+        entry = _MAPPINGS.get(key)
+        if entry is None:
+            entry = _MAPPINGS[key] = [
+                cuda_api.ipc_open_mem_handle(handle_bytes),
+                0,
+            ]
+        entry[1] += 1
+    try:
+        yield entry[0]
+    finally:
+        with _MAPPINGS_LOCK:
+            entry[1] -= 1
+            if entry[1] == 0:
+                del _MAPPINGS[key]
+                cuda_api.ipc_close_mem_handle(entry[0])
+
+
 def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     """Load a CUDA array from a JSON dict with a CUDA IPC handle.
 
     The calling process must share the IPC namespace with the producer
     (e.g. both run with --ipc=host on Docker) and see the same GPU.
 
-    Returns a caller-owned :class:`IpcDeviceArray`. Decoding opens the IPC
-    handle, copies the array's own bytes device-to-device into a ``cudaMalloc``
-    buffer owned by this process (reusing a released buffer of the same size if
-    there is one), synchronizes, and closes the mapping before returning. The
-    borrow of the producer's memory therefore lasts only for a single on-GPU
-    copy, so the producer is free to reuse or release the exported buffer as
-    soon as this call returns.
+    Returns a caller-owned :class:`IpcDeviceArray`. Decoding maps the IPC handle
+    (see :func:`_mapped`), copies the array's own bytes device-to-device into a
+    ``cudaMalloc`` buffer owned by this process (reusing a released buffer of
+    the same size if there is one), and synchronizes. The borrow of the
+    producer's memory therefore lasts only for a single on-GPU copy, so the
+    producer is free to reuse or release the exported buffer as soon as this
+    call returns.
 
     The result carries no framework dependency: it exposes both
     ``__cuda_array_interface__`` and ``__dlpack__`` so Torch/JAX/CuPy can adopt
@@ -712,8 +743,7 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
         try:
             # Opening the IPC handle can fail too; if it does, we still own the
             # buffer obtained above and must free it (the except below).
-            base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes)
-            try:
+            with _mapped(handle_bytes, device) as base_ptr:
                 # Copy only this array's own bytes out of the producer's (offset)
                 # mapping into the owned buffer, then block until the copy is done so
                 # we never unmap mid-copy.
@@ -721,9 +751,6 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
                     owned_ptr, base_ptr + storage_offset, nbytes
                 )
                 cuda_api.device_synchronize()
-            finally:
-                # Only reached once the mapping was opened; always unmap it.
-                cuda_api.ipc_close_mem_handle(base_ptr)
         except Exception:
             cuda_api.free(owned_ptr)
             raise

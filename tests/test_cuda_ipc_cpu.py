@@ -1444,3 +1444,25 @@ def test_server_releases_exports_of_a_response_that_fails_to_encode(
     assert response.status_code == 500
     assert released == [1], "the failed response's exports were not released"
     assert not serve._PENDING_EXPORTS
+
+
+def test_concurrent_decodes_of_one_allocation_share_its_mapping(mocked_cuda):
+    """CUDA maps an allocation into a process only once.
+
+    Two arrays from one allocation, decoded at the same time, must share a
+    single mapping, which closes when the last of them is done. Opening it
+    twice failed with "resource already mapped".
+    """
+    handle = b"\x01" * 64
+    with cuda_ipc._mapped(handle, 0) as first:
+        with cuda_ipc._mapped(handle, 0) as second:
+            assert first == second
+        assert mocked_cuda.calls["close"] == []
+    assert mocked_cuda.calls["open"] == [(handle, 0)]
+    assert mocked_cuda.calls["close"] == [first]
+    assert not cuda_ipc._MAPPINGS
+
+    # A later decode maps it afresh.
+    with cuda_ipc._mapped(handle, 0):
+        pass
+    assert len(mocked_cuda.calls["open"]) == 2
