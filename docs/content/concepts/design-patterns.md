@@ -4,22 +4,7 @@ This page provides guidance on common questions around Tesseract design: what sh
 
 ## When to use a Tesseract
 
-Tesseracts are most useful when you need to:
-
-- **Share software across teams** — Package your code so others can use it without understanding implementation details
-- **Combine heterogeneous software** — Integrate components written in different languages/frameworks into a unified pipeline
-- **Deploy to diverse hardware** — Run the same component on different machines (local, cloud, HPC) without modification
-- **Enable gradient-based optimization** — Expose derivatives for use in optimization or calibration workflows, and mix differentiation strategies (finite differences, analytic adjoints, automatic differentiation) across components in the same pipeline
-- **Ensure reproducibility** — Capture dependencies and environment in a container for consistent execution
-
-## When NOT to use a Tesseract
-
-Tesseracts add overhead that isn't always justified:
-
-- **Single-user, single-environment workflows** — If you're the only one running the code on a single machine, the containerization overhead may not be worth it
-- **Sub-second latency requirements** — Tesseracts are designed for compute kernels that run for at least several seconds; for very fast operations, the container and HTTP overhead becomes significant
-- **Tightly coupled iterations** — If your inner loop calls a function millions of times, that function shouldn't be a Tesseract; instead, wrap the entire loop
-- **Simple scripts** — A quick data transformation script that won't be reused doesn't need Tesseract packaging
+{doc}`/content/concepts/when-to-use` covers when a Tesseract is worth its process boundary, and when a `jax.custom_vjp`, a `torch.autograd.Function`, or a rewrite is the better answer. The same reasoning shapes how you split a problem into Tesseracts. If an inner loop calls a function millions of times, that function shouldn't be a Tesseract. Wrap the entire loop instead.
 
 ## How granular should Tesseracts be?
 

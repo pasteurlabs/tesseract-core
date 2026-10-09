@@ -6,9 +6,27 @@ This page covers strategies for interactive development and debugging of Tessera
 
 ## Running Tesseracts without containerization
 
-While developing a Tesseract, the process of building and rebuilding the
-tesseract image for quick local tests can be very time-consuming. The fastest and most
-convenient way to speed this up is to run the code directly in your local Python environment using `tesseract-runtime`.
+While developing a Tesseract, building and rebuilding its image for quick local tests is slow, and you rarely need to.
+There are three ways to run a `tesseract_api.py` without a container:
+
+- `Tesseract.from_source` serves it from a separate process in its own environment, which behaves most like a container.
+- `tesseract-runtime` runs it from the command line in your current environment.
+- `Tesseract.from_tesseract_api` imports it into your Python process, which is the fastest and works with Python debuggers.
+
+### Serving in a separate process
+
+`Tesseract.from_source` builds an environment for the Tesseract from its `tesseract_config.yaml` on first use (this needs [uv](https://docs.astral.sh/uv/getting-started/installation/)), reuses it while the requirements are unchanged, and serves the Tesseract from that environment:
+
+```python
+from tesseract_core import Tesseract
+
+with Tesseract.from_source("/path/to/your/tesseract_api.py") as tess:
+    result = tess.apply(inputs={"name": "Tessie"})
+```
+
+Because the Tesseract does not share an interpreter with the caller, this is the right choice when its dependencies conflict with yours, or when a JAX-based Tesseract is called from JAX code (nesting JAX inside one process can deadlock). Pass `python_executable` to use an interpreter you have already set up instead.
+
+### Using `tesseract-runtime`
 
 ```{seealso}
 Running without containers is also useful as a deployment option in environments where Docker is unavailable. See <project:#running-without-containers>.
@@ -16,7 +34,7 @@ Running without containers is also useful as a deployment option in environments
 
 To set up local development:
 
-1. Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
+1. Install the Tesseract runtime: `pip install tesseract-core[runtime]` (see <project:#installation-runtime>).
 2. Install your Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
 3. Set the `TESSERACT_API_PATH` environment variable:
    ```bash
@@ -35,7 +53,7 @@ $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 
 This enables fast iteration cycles—edit your code, run, and see results immediately without rebuilding containers.
 
-## Using the Python SDK for local development
+### Importing into the current process
 
 Another approach for rapid iteration is using the Python SDK's `Tesseract.from_tesseract_api()` method, which loads your Tesseract API directly without containerization:
 

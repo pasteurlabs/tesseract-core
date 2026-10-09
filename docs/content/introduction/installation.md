@@ -3,9 +3,9 @@
 ## Basic installation
 
 ```{note}
-Before proceeding, make sure you have:
-- A working installation of Docker ([Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Docker Engine](#installation-docker))
-- Python 3.10+, ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/)
+Tesseract Core needs Python 3.10+, ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
+To run a Tesseract in its own environment with `Tesseract.from_source`, you also need [uv](https://docs.astral.sh/uv/getting-started/installation/) (or conda, for Tesseracts that declare conda requirements).
+Docker is only needed to [build and run container images](#installation-docker).
 ```
 
 Install Tesseract Core via `pip`:
@@ -17,14 +17,20 @@ $ pip install tesseract-core
 Then, verify the installation:
 
 ```bash
-$ tesseract list
+$ tesseract --version
 ```
 
-If the output is an empty table, that's expected — the CLI is working correctly, you just don't have any Tesseracts built yet.
+To use Tesseracts from JAX or PyTorch programs, install [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) or [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) alongside it:
+
+```bash
+$ pip install tesseract-jax    # or tesseract-torch
+```
 
 (installation-docker)=
 
-## Installing Docker
+## Installing Docker (for container images)
+
+Building a Tesseract into a container image with `tesseract build`, and running it with `tesseract run`, `tesseract serve`, or `Tesseract.from_image`, requires a container engine. You can skip this section until you want to share or deploy a Tesseract as an image.
 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need, including the Docker Engine CLI, Docker Compose, and Docker Buildx.
 It is available for Windows, macOS, and Linux (Debian- and Fedora-based distros).
@@ -60,7 +66,7 @@ $ echo "export TESSERACT_DOCKER_EXECUTABLE=podman" >> ~/.bashrc
 
 ## Runtime installation
 
-Installing the Tesseract Runtime directly (without Docker) is useful for debugging during Tesseract creation and for non-containerized deployment (see {ref}`running-without-containers`). To install it:
+The Tesseract Runtime is what serves a Tesseract's endpoints. `Tesseract.from_source` installs it into the Tesseract's own environment for you, so you only need it in your current environment to call `tesseract-runtime` directly, for example to {doc}`check gradients </content/how-to/check-gradients>`, debug, or deploy without containers (see {ref}`running-without-containers`). To install it:
 
 ```bash
 $ pip install tesseract-core[runtime]
@@ -78,7 +84,7 @@ Some shells treat `[` and `]` as special characters. If the command above fails,
 
 ### Windows support
 
-Tesseract is natively supported on Windows with [Docker Desktop](https://www.docker.com/products/docker-desktop/). No additional setup beyond Docker Desktop and Python is required.
+Tesseract is natively supported on Windows. `Tesseract.from_source` needs only Python and uv, and building container images additionally needs [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```{tip}
 For GPU-accelerated workloads or maximum performance, consider using the [Windows Subsystem for Linux (WSL)](https://docs.microsoft.com/en-us/windows/wsl/) instead. WSL provides direct access to Linux-native Docker Engine (avoiding Docker Desktop's virtualization overhead) and GPU passthrough via NVIDIA Container Toolkit.

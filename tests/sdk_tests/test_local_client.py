@@ -353,6 +353,18 @@ def test_endpoints_over_subprocess(dummy_api_path, sample_inputs):
         assert "test" in tess.available_endpoints
 
 
+def test_config_metadata_reaches_the_schema(dummy_api_path):
+    """As in an image, the config's name, version and description describe the Tesseract."""
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable
+    ) as tess:
+        info = tess.openapi_schema["info"]
+
+    assert info["title"] == "unit_vectoradd"
+    assert info["version"] == "1.2.3"
+    assert info["description"].strip() == "Simple tesseract that adds two vectors."
+
+
 def test_runs_in_a_different_process(dummy_tesseract_package, sample_inputs):
     """The whole point: the Tesseract must not share our interpreter."""
     api_path = dummy_tesseract_package / "tesseract_api.py"
