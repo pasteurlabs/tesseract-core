@@ -1469,11 +1469,7 @@ def _encode_payload(
     )
 
     def _encode_leaf(x: Any) -> dict:
-        if (
-            _is_gpu_array(x)
-            and gpu_transport != "none"
-            and _import_cuda_ipc().is_c_contiguous(_without_autograd(x))
-        ):
+        if _is_gpu_array(x) and gpu_transport != "none":
             return _encode_array(x, encoding=gpu_transport, ctx=ctx)
 
         # Host array (or GPU array when gpu_transport is "none")

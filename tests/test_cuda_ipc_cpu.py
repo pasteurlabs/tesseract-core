@@ -1262,9 +1262,24 @@ def test_dtype_without_numpy_equivalent_is_refused(mocked_cuda):
         cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "|V2"))
 
 
-def test_non_contiguous_arrays_are_not_exportable():
-    assert cuda_ipc.is_c_contiguous(FakeCudaArray((3, 2), "<f4"))
-    assert not cuda_ipc.is_c_contiguous(FakeCudaArray((3, 2), "<f4", strides=(4, 12)))
+def test_strided_arrays_are_copied_on_the_device_by_their_framework():
+    # cuda_ipc moves a flat byte range, so a strided array is first made
+    # contiguous by the framework that made it, never through the host.
+    contiguous = FakeCudaArray((3, 2), "<f4")
+    assert cuda_ipc._contiguous_on_device(contiguous) is contiguous
+
+    class TorchLike(FakeCudaArray):
+        def contiguous(self):
+            return contiguous
+
+    class CuPyLike(FakeCudaArray):
+        def copy(self, order="K"):
+            assert order == "C"
+            return contiguous
+
+    for cls in (TorchLike, CuPyLike):
+        strided = cls((3, 2), "<f4", strides=(4, 12))
+        assert cuda_ipc._contiguous_on_device(strided) is contiguous
 
 
 def test_release_while_the_pool_lock_is_held_does_not_wait(mocked_cuda):

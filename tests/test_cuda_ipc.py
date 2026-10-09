@@ -382,26 +382,47 @@ def test_encode_requires_cuda_array():
         dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
 
 
-@requires_cuda
-def test_encode_rejects_non_contiguous():
-    """Non-contiguous (strided/transposed) arrays are rejected, not corrupted.
+# Returns a strided view of 2*x, so the server's output is not contiguous.
+_STRIDED_OUTPUT_API_CODE = """
+import cupy
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
 
-    cuda_ipc transfers a flat contiguous byte range; a strided source would be
-    silently misread, so encoding must refuse it.
+class InputSchema(BaseModel):
+    x: Array[(None,), Float32]
+
+class OutputSchema(BaseModel):
+    y: Array[(None,), Float32]
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    pairs = cupy.stack([cupy.asarray(inputs.x)] * 2, axis=1) * 2.0
+    return OutputSchema(y=pairs[:, 0])
+"""
+
+
+@requires_cuda
+def test_strided_arrays_cross_on_the_device(free_port, serve_in_subprocess):
+    """Strided GPU arrays are copied on the device, never through the host.
+
+    cuda_ipc moves a flat byte range, so the exporter makes a contiguous copy
+    with the array's own framework first. Host copies are forbidden throughout
+    (see ``forbid_device_host_copy``), so both a strided input and a strided
+    output must stay on the GPU.
     """
-    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.sdk.tesseract import Tesseract
 
     strided = cupy.arange(100, dtype=cupy.float32)[::2]
     assert strided.__cuda_array_interface__["strides"] is not None
-    with pytest.raises(ValueError, match="C-contiguous"):
-        dump_cuda_ipc_arraydict(strided)
-
-    transposed = cupy.arange(12, dtype=cupy.float32).reshape(3, 4).T
-    with pytest.raises(ValueError, match="C-contiguous"):
-        dump_cuda_ipc_arraydict(transposed)
-
-    # A contiguous copy of the same data encodes fine.
-    dump_cuda_ipc_arraydict(cupy.ascontiguousarray(strided))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_STRIDED_OUTPUT_API_CODE)
+        server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc"}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            tess = Tesseract.from_url(url).with_encoding(gpu_transport="cuda_ipc")
+            result = tess.apply({"x": strided})
+            np.testing.assert_array_equal(
+                result["y"].copy_to_host(), cupy.asnumpy(strided) * 2.0
+            )
 
 
 @requires_cuda
@@ -828,8 +849,8 @@ def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
 
 
 @requires_torch_cuda
-def test_empty_and_non_contiguous_torch_tensors_are_encoded(allow_device_host_copy):
-    """Empty tensors cross by an empty descriptor, non-contiguous ones as host copies."""
+def test_empty_and_non_contiguous_torch_tensors_are_encoded():
+    """Empty tensors cross by an empty descriptor, non-contiguous ones by a device copy."""
     import torch
 
     from tesseract_core.sdk.tesseract import _encode_payload
@@ -840,7 +861,7 @@ def test_empty_and_non_contiguous_torch_tensors_are_encoded(allow_device_host_co
         {"e": empty, "t": transposed}, gpu_transport="cuda_ipc"
     ) as out:
         assert out["e"]["data"] == {"buffer": "0::0:0", "encoding": "cuda_ipc"}
-        assert out["t"]["data"]["encoding"] == "base64"
+        assert out["t"]["data"]["encoding"] == "cuda_ipc"
         assert list(out["t"]["shape"]) == [3, 2]
 
 

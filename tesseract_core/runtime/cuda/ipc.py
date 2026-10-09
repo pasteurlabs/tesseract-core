@@ -69,7 +69,6 @@ __all__ = [
     "dump_cuda_ipc_arraydict",
     "finish_transport_check",
     "has_cuda_array_interface",
-    "is_c_contiguous",
     "load_cuda_ipc_arraydict",
     "release_pinned_ipc_exports",
     "start_transport_check",
@@ -186,12 +185,33 @@ class _CudaArrayInfo(NamedTuple):
         return self.strides == tuple(expected)
 
 
-def is_c_contiguous(arr: Any) -> bool:
-    """Whether a GPU array's memory is row-major contiguous, as cuda_ipc needs.
+def _contiguous_on_device(arr: Any) -> Any:
+    """``arr``, or a row-major copy of it on the same device if it is strided.
 
-    Encoders send other GPU arrays as host copies instead.
+    cuda_ipc moves a flat byte range, so a strided GPU array is first copied on
+    the device by the framework that made it: PyTorch's ``.contiguous()`` or
+    CuPy's ``.copy(order="C")``. An array that offers neither is rejected rather
+    than copied through the host, so GPU data never silently leaves the device.
     """
-    return _read_cuda_array_info(arr).is_c_contiguous()
+    info = _read_cuda_array_info(arr)
+    if info.is_c_contiguous():
+        return arr
+    for make_copy in (lambda: arr.contiguous(), lambda: arr.copy(order="C")):
+        try:
+            copy = make_copy()
+        except (AttributeError, TypeError):
+            continue
+        if (
+            has_cuda_array_interface(copy)
+            and _read_cuda_array_info(copy).is_c_contiguous()
+        ):
+            return copy
+    raise ValueError(
+        "cuda_ipc encoding requires a C-contiguous array; got one with "
+        f"strides {info.strides}, and {type(arr).__name__} offers no way to copy "
+        "it on the device (.contiguous() or .copy(order='C')). Make a "
+        "contiguous copy first."
+    )
 
 
 def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
@@ -478,13 +498,8 @@ def _dump_cuda_ipc_arraydict(arr: Any, *, group: ExportGroup, pin: bool) -> Arra
             f"(object with __cuda_array_interface__), got {type(arr).__name__}"
         )
 
+    arr = _contiguous_on_device(_without_autograd(arr))
     info = _read_cuda_array_info(arr)
-    if not info.is_c_contiguous():
-        raise ValueError(
-            "cuda_ipc encoding requires a C-contiguous array; got one with "
-            f"strides {info.strides}. Make a contiguous copy first (e.g. "
-            "cupy.ascontiguousarray / torch.Tensor.contiguous)."
-        )
 
     if info.dtype.kind == "V":
         raise TypeError(
