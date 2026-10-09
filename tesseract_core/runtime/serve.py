@@ -146,7 +146,10 @@ def create_response(
 # in tesseract_core.runtime.cuda.ipc). The server names each response's exports
 # in the EXPORTS_HEADER response header, and the client names the ones it is done
 # with in the EXPORTS_DONE_HEADER of a later request. A client that sends that
-# header at all, even empty, acknowledges its responses this way. Header names
+# header at all, even empty, acknowledges its responses this way. For clients
+# that do not (older SDKs, raw HTTP), a request is the only sign that they are
+# done, so each of their requests releases the exports of all of them, which is
+# safe only for a single such client making one request at a time. Header names
 # are mirrored in the SDK.
 EXPORTS_HEADER = "Tesseract-Exports"
 EXPORTS_DONE_HEADER = "Tesseract-Exports-Done"
@@ -177,10 +180,8 @@ def _keep_exports(exports: Any, acknowledged: bool) -> str | None:
 def _release_exports(transport: Any, done: list[str], unacknowledged: bool) -> None:
     """Release the exports named in ``done`` and those kept too long.
 
-    With ``unacknowledged``, also release the exports of every client that does
-    not acknowledge its responses. A request from such a client is the only
-    sign that it is done with its previous response, which is sound only if it
-    makes one request at a time.
+    With ``unacknowledged``, also release those of every client that does not
+    acknowledge its responses.
     """
     now = time.monotonic()
     released = []

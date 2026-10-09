@@ -120,14 +120,13 @@ def _deleter(managed_ptr: int | None) -> None:
 
 
 def drop_abandoned_capsules() -> None:
-    """Let go of the owners of capsules that were dropped without being consumed.
+    """Drop the bundles of capsules that were discarded without being consumed.
 
-    A capsule a framework refused, or that was never passed to one, has no
-    consumer to call the deleter, so its bundle would keep the owner alive for
-    good. Capsules without a destructor are used because a destructor would run
-    Python code from inside the consumer's error handling; instead, a capsule
-    that is still unconsumed and that nothing but its bundle references is
-    dropped here, which callers do before each export and decode.
+    No consumer calls the deleter of a capsule a framework refused or never
+    received, so its bundle would keep the owner alive for good. Capsules carry
+    no destructor, because one would run Python code inside the consumer's
+    error handling. Instead, callers run this before each export and decode,
+    and it drops every unconsumed capsule that only its bundle references.
     """
     for address in list(_UNCONSUMED):
         bundle = _BUNDLES.get(address)

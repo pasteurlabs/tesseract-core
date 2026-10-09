@@ -103,7 +103,8 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
 
     Mirrors the ring-1 server contract: the exported arrays are pinned by
     ``dump_cuda_ipc_arraydict`` and kept alive here until the consumer signals
-    it is done (which, for the real server, is the next request's release).
+    it is done (which, for the real server, is the client acknowledging the
+    response).
     """
     try:
         import cupy  # noqa: F401
@@ -548,7 +549,8 @@ def _ring1_server(req_q, resp_q):
 
     At the START of each request it releases the previous request's exports and
     churns the allocator (to force reuse of any freed block), then produces and
-    exports a fresh output. This is exactly what the serve wrapper does.
+    exports a fresh output. This is what the serve wrapper does for clients
+    that do not acknowledge their responses.
     """
     try:
         import cupy
@@ -804,9 +806,8 @@ def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
     """A CUDA tensor that requires grad encodes like any other.
 
     PyTorch refuses ``__cuda_array_interface__`` and ``.numpy()`` on such a
-    tensor, which made the runtime fail on an endpoint output computed from a
-    parameter that requires grad, and the SDK on such an input, over cuda_ipc
-    and over host copies alike.
+    tensor, so both the runtime (for outputs) and the SDK (for inputs) detach
+    it first, over cuda_ipc and over host copies alike.
     """
     import pybase64
     import torch
@@ -890,8 +891,8 @@ def test_export_from_a_thread_that_made_no_cuda_call():
 def test_dlpack_capsule_keeps_its_array_alive_and_can_be_made_twice():
     """A capsule outlives the array it came from, and each __dlpack__ call works.
 
-    Dropping the array before consuming its capsule used to free the buffer and
-    the capsule's struct under the consumer.
+    Dropping the array before consuming its capsule must not free the buffer
+    or the capsule's struct under the consumer.
     """
     import gc
 

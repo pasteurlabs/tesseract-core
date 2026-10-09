@@ -839,7 +839,7 @@ class Tesseract:
             ...     t.with_encoding(gpu_transport="none").apply(inputs)
 
         In-process Tesseracts created via :meth:`from_tesseract_api` pass arrays in
-        memory, so only ``gpu_transport`` means anything for them: it is what
+        memory, so only ``gpu_transport`` affects them. It is what
         :meth:`resolve_gpu_transport` returns, which tells integrations such as
         Tesseract-JAX whether to hand the endpoints GPU arrays as they are.
 
@@ -898,28 +898,25 @@ class Tesseract:
     def resolve_gpu_transport(self) -> str:
         """Get the GPU transport that calls through this Tesseract should use for GPU arrays.
 
-        For integrations that pass GPU arrays, such as Tesseract-JAX and
-        Tesseract-Torch, so that GPU arrays stay on the device whenever that
-        works and are copied to the host otherwise:
+        Integrations that pass GPU arrays, such as Tesseract-JAX and
+        Tesseract-Torch, use this to keep GPU arrays on the device whenever that
+        works and copy them to the host otherwise:
 
             >>> transport = tess.resolve_gpu_transport()
             >>> tess.with_encoding(gpu_transport=transport).apply(gpu_inputs)
 
-        If this Tesseract requests a GPU transport, either through
-        :meth:`with_encoding` or the ``gpu_transport`` it was created with, that
-        transport is returned once it is known to work. Otherwise this returns
-        ``cuda_ipc`` if the server offers it and it works from this process, and
-        ``none`` if not, with a warning if the server offers it but it does not
-        work.
+        A GPU transport this Tesseract requests, through :meth:`with_encoding`
+        or the ``gpu_transport`` it was created with, is returned once it is
+        known to work. Otherwise this returns ``cuda_ipc`` if the server offers
+        it and it works from this process, and ``none`` if not, with a warning
+        if the server offers it but it does not work.
 
         Whether a transport works depends on how both processes are set up
-        (``cuda_ipc`` needs them on one host with the same GPU visible to both,
-        and container isolation can get in the way), so it is found out by
-        exchanging a small GPU array with the server, once per connection (and
-        again on the next call if the exchange reached no conclusion, such as
-        when the server answered with an error). Runtimes that predate this
-        exchange cannot take part in it, so a transport they offer, or that is
-        requested from them, is used unchecked.
+        (``cuda_ipc`` needs one host and a GPU visible to both), so it is found
+        out by exchanging a small GPU array with the server once per connection,
+        and again on the next call if the exchange was inconclusive. A transport
+        offered by or requested from a runtime that predates this exchange is
+        used unchecked.
 
         In-process Tesseracts created via :meth:`from_tesseract_api` return the
         ``gpu_transport`` they were created with unless a view requests ``none``.
@@ -1447,7 +1444,7 @@ def _encode_payload(
     Yields the encoded payload (or None for an empty payload). When a
     ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
     reference (keeping the data on-device), which pins each exported allocation
-    in a process-global registry on the runtime side. Host arrays (and GPU
+    in the request's export group. Host arrays (and GPU
     arrays when ``gpu_transport`` is ``none``) are encoded according to
     ``output_format`` (``binref`` files when ``output_format == "json+binref"``
     and ``input_path`` is set, else ``base64``).
@@ -1607,7 +1604,7 @@ def _decode_array(
         # device-to-device into our own memory, and the result exposes
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
-        # this returns (it holds it until the next request).
+        # this returns (it holds it until this client acknowledges the response).
         #
         # cuda_ipc is strictly opt-in, so reaching here means the caller asked
         # for it. If this client has no usable CUDA context (no driver, no
@@ -1771,9 +1768,8 @@ class HTTPClient:
                 "this process could not export GPU memory "
                 f"({type(exc).__name__}: {exc})",
             ), False
-        # The server reads the exported array while answering, so it must stay
-        # alive until the response is in. It is not in the per-request export
-        # registry, so holding it here is what keeps it alive.
+        # The server reads the exported array while answering, and no export
+        # group pins it, so this reference must outlive the response.
         response = self._send(
             f"{self.url}/check_gpu_transport",
             "POST",
@@ -1895,7 +1891,7 @@ class HTTPClient:
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
-        encoding = self.default_encoding.merge(encoding)
+        encoding = self.current_encoding(encoding)
         # Only parameters can trip up a server, and checking them costs a fetch
         # of the OpenAPI schema on first use
         if encoding.params:
@@ -1926,15 +1922,14 @@ class HTTPClient:
                 if headers.get(_EXPORTS_DONE_HEADER):
                     self._done_exports.extend(headers[_EXPORTS_DONE_HEADER].split(","))
                 raise
-        if _EXPORTS_DONE_HEADER not in headers:
-            return self._decode_response(response, endpoint)
         try:
             return self._decode_response(response, endpoint)
         finally:
             # Decoding copied any device arrays out of the server's memory.
-            export_id = response.headers.get(_EXPORTS_HEADER)
-            if export_id:
-                self._done_exports.append(export_id)
+            if _EXPORTS_DONE_HEADER in headers:
+                export_id = response.headers.get(_EXPORTS_HEADER)
+                if export_id:
+                    self._done_exports.append(export_id)
 
     def _exports_done_headers(self) -> dict[str, str]:
         """Headers naming the responses this client is done with, as a dict to extend.

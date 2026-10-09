@@ -5,7 +5,7 @@
 
 These run on ordinary (GPU-less) CI runners. They cover the Python
 *orchestration* around CUDA IPC -- payload assembly, base/offset arithmetic,
-device-ordinal detection, shape/dtype validation, the export registry, the
+device-ordinal detection, shape/dtype validation, export groups, the
 serve-side release hook, the ``--ipc=host`` wiring, and the CLI guard -- by
 
   * feeding fake objects that expose ``__cuda_array_interface__`` (no device
@@ -192,7 +192,7 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     assert unpacked["storage_offset"] == 0
     assert unpacked["storage_size"] == 128
     # Staging buffer registered for a later release.
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
+    assert cuda_ipc._DEFAULT_EXPORTS.staging == [
         (0xD000, 0, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
     ]
 
@@ -245,13 +245,13 @@ def test_dump_on_the_active_device_does_not_switch(mocked_cuda):
 
 
 def test_export_registry_pins_and_releases(mocked_cuda):
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
     arr = FakeCudaArray((3,), "<f4")
     cuda_ipc.dump_cuda_ipc_arraydict(arr)
     # The source array is retained so its (would-be) GPU memory stays valid.
-    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    assert arr in cuda_ipc._DEFAULT_EXPORTS.pins
     cuda_ipc.release_pinned_ipc_exports()
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 def test_release_recycles_staging_buffers(mocked_cuda):
@@ -333,9 +333,9 @@ def test_client_request_releases_input_exports(mocked_cuda, monkeypatch):
 
     Encoding a GPU input pins it in the request's own export group, so that
     concurrent requests do not release each other's inputs. If _request does
-    not release afterward each call's inputs leak. The pin must survive long
-    enough for the server to decode -- i.e. until the response body is
-    buffered -- so we assert it is still present when the (fake) request is
+    not release afterward each call's inputs leak. The pin must survive until
+    the server has decoded the inputs, i.e. until the response body is
+    buffered, so we assert it is still present when the (fake) request is
     dispatched, and gone once _request returns.
     """
     from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
@@ -374,7 +374,7 @@ def test_client_request_releases_input_exports(mocked_cuda, monkeypatch):
     # ... and released once the request returned (no leak across calls).
     assert len(groups) == 1
     assert len(groups[0]) == 0
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 def test_client_request_cpu_only_payload_skips_release(monkeypatch):
@@ -382,20 +382,17 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
 
     Nothing gets pinned, so _request must not import/call the cuda_ipc runtime
     for cleanup -- otherwise a base install (no runtime extra) would spuriously
-    fail on an all-CPU payload. Guard by making the release helper explode if
-    called.
+    fail on an all-CPU payload. Guard by making the runtime import explode.
     """
     from tesseract_core.sdk import tesseract as sdk
     from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     def _boom():
-        raise AssertionError("release must not be called for a CPU-only payload")
+        raise AssertionError(
+            "the cuda_ipc runtime must not be used for a CPU-only payload"
+        )
 
-    monkeypatch.setattr(
-        sdk,
-        "_import_cuda_ipc",
-        lambda: types.SimpleNamespace(release_pinned_ipc_exports=_boom),
-    )
+    monkeypatch.setattr(sdk, "_import_cuda_ipc", _boom)
 
     response = Mock(status_code=200, ok=True, content=b"{}")
 
@@ -797,7 +794,7 @@ def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path, monkeypatch)
     # Context exit should unlink disk files and release pinned allocations
     assert not bin_file.exists()
     assert len(groups[0]) == 0
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 def test_encode_array_cuda_ipc_missing_context_raises(mocked_cuda):
@@ -1224,16 +1221,16 @@ def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
     assert payload["data"]["encoding"] == "cuda_ipc"
     assert _unpack_cuda_ipc(payload["data"])["storage_offset"] == 256
     # register pinned the source array; release drops it.
-    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    assert arr in cuda_ipc._DEFAULT_EXPORTS.pins
     transport.release()
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 # ── Empty arrays, dtypes without a NumPy equivalent, finalizers in the pool ──
 
 
 def test_empty_array_crosses_without_a_handle(mocked_cuda):
-    """An empty array has no memory to share; frameworks give it a null pointer."""
+    """An empty array, which frameworks give a null pointer, crosses without a handle."""
     from tesseract_core.runtime.array_encoding import CudaIpcArrayData
 
     out = cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((0, 3), "<f4", data_ptr=0))
@@ -1337,8 +1334,8 @@ def test_server_keeps_response_exports_until_their_client_is_done(
 ):
     """A response's exports outlive other clients' requests, until named or expired.
 
-    Releasing them at the start of the next request, whoever made it, let one
-    client's request free the outputs another client had not read yet.
+    Otherwise one client's request could free outputs another client has not
+    read yet.
     """
     import collections
 
@@ -1382,7 +1379,7 @@ def test_server_keeps_response_exports_until_their_client_is_done(
         assert first_id not in serve._PENDING_EXPORTS
 
         # A client that does not acknowledge has its earlier exports released
-        # by its next request, as before, but not those of clients that do.
+        # by its next request, but not those of clients that do.
         _, legacy = apply()
         apply()
         assert len(legacy.pins) == 0
