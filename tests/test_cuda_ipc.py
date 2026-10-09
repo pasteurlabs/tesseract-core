@@ -103,7 +103,8 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
 
     Mirrors the ring-1 server contract: the exported arrays are pinned by
     ``dump_cuda_ipc_arraydict`` and kept alive here until the consumer signals
-    it is done (which, for the real server, is the next request's release).
+    it is done (which, for the real server, is the client acknowledging the
+    response).
     """
     try:
         import cupy  # noqa: F401
@@ -382,26 +383,47 @@ def test_encode_requires_cuda_array():
         dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
 
 
-@requires_cuda
-def test_encode_rejects_non_contiguous():
-    """Non-contiguous (strided/transposed) arrays are rejected, not corrupted.
+# Returns a strided view of 2*x, so the server's output is not contiguous.
+_STRIDED_OUTPUT_API_CODE = """
+import cupy
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
 
-    cuda_ipc transfers a flat contiguous byte range; a strided source would be
-    silently misread, so encoding must refuse it.
+class InputSchema(BaseModel):
+    x: Array[(None,), Float32]
+
+class OutputSchema(BaseModel):
+    y: Array[(None,), Float32]
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    pairs = cupy.stack([cupy.asarray(inputs.x)] * 2, axis=1) * 2.0
+    return OutputSchema(y=pairs[:, 0])
+"""
+
+
+@requires_cuda
+def test_strided_arrays_cross_on_the_device(free_port, serve_in_subprocess):
+    """Strided GPU arrays are copied on the device, never through the host.
+
+    cuda_ipc moves a flat byte range, so the exporter makes a contiguous copy
+    with the array's own framework first. Host copies are forbidden throughout
+    (see ``forbid_device_host_copy``), so both a strided input and a strided
+    output must stay on the GPU.
     """
-    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.sdk.tesseract import Tesseract
 
     strided = cupy.arange(100, dtype=cupy.float32)[::2]
     assert strided.__cuda_array_interface__["strides"] is not None
-    with pytest.raises(ValueError, match="C-contiguous"):
-        dump_cuda_ipc_arraydict(strided)
-
-    transposed = cupy.arange(12, dtype=cupy.float32).reshape(3, 4).T
-    with pytest.raises(ValueError, match="C-contiguous"):
-        dump_cuda_ipc_arraydict(transposed)
-
-    # A contiguous copy of the same data encodes fine.
-    dump_cuda_ipc_arraydict(cupy.ascontiguousarray(strided))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_STRIDED_OUTPUT_API_CODE)
+        server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc"}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            tess = Tesseract.from_url(url).with_encoding(gpu_transport="cuda_ipc")
+            result = tess.apply({"x": strided})
+            np.testing.assert_array_equal(
+                result["y"].copy_to_host(), cupy.asnumpy(strided) * 2.0
+            )
 
 
 @requires_cuda
@@ -527,7 +549,8 @@ def _ring1_server(req_q, resp_q):
 
     At the START of each request it releases the previous request's exports and
     churns the allocator (to force reuse of any freed block), then produces and
-    exports a fresh output. This is exactly what the serve wrapper does.
+    exports a fresh output. This is what the serve wrapper does for clients
+    that do not acknowledge their responses.
     """
     try:
         import cupy
@@ -718,7 +741,7 @@ def test_sdk_encode_structure():
         assert encoded["data"]["encoding"] == "cuda_ipc"
         assert encoded["shape"] == [32, 64]
         assert encoded["dtype"] == "float64"
-        assert ctx.exported_cuda_ipc is True
+        assert len(ctx.device_exports.pins) == 1
     finally:
         _close_encoding_context(ctx)
 
@@ -776,6 +799,121 @@ def test_decode_to_torch_via_dlpack():
         producer.join(timeout=_TIMEOUT)
         if producer.is_alive():
             producer.terminate()
+
+
+@requires_torch_cuda
+def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
+    """A CUDA tensor that requires grad encodes like any other.
+
+    PyTorch refuses ``__cuda_array_interface__`` and ``.numpy()`` on such a
+    tensor, so both the runtime (for outputs) and the SDK (for inputs) detach
+    it first, over cuda_ipc and over host copies alike.
+    """
+    import pybase64
+    import torch
+
+    from tesseract_core.runtime.cuda.ipc import (
+        cuda_array_to_host,
+        dump_cuda_ipc_arraydict,
+        has_cuda_array_interface,
+        release_pinned_ipc_exports,
+    )
+    from tesseract_core.sdk.tesseract import (
+        EncodingContext,
+        _close_encoding_context,
+        _encode_array,
+    )
+
+    weight = torch.ones(1, device="cuda", requires_grad=True)
+    x = torch.arange(4, dtype=torch.float32, device="cuda") * weight
+    expected = np.arange(4, dtype=np.float32)
+    assert x.requires_grad
+    assert has_cuda_array_interface(x)
+    np.testing.assert_array_equal(cuda_array_to_host(x), expected)
+
+    try:
+        exported = dump_cuda_ipc_arraydict(x)
+        assert exported["data"]["encoding"] == "cuda_ipc"
+        assert exported["shape"] == [4]
+    finally:
+        release_pinned_ipc_exports()
+
+    host = _encode_array(x, encoding="base64")
+    np.testing.assert_array_equal(
+        np.frombuffer(pybase64.b64decode(host["data"]["buffer"]), np.float32), expected
+    )
+    ctx = EncodingContext()
+    try:
+        assert _encode_array(x, "cuda_ipc", ctx)["data"]["encoding"] == "cuda_ipc"
+    finally:
+        _close_encoding_context(ctx)
+
+
+@requires_torch_cuda
+def test_empty_and_non_contiguous_torch_tensors_are_encoded():
+    """Empty tensors cross by an empty descriptor, non-contiguous ones by a device copy."""
+    import torch
+
+    from tesseract_core.sdk.tesseract import _encode_payload
+
+    empty = torch.empty(0, 3, device="cuda")
+    transposed = torch.arange(6, dtype=torch.float32, device="cuda").reshape(2, 3).T
+    with _encode_payload(
+        {"e": empty, "t": transposed}, gpu_transport="cuda_ipc"
+    ) as out:
+        assert out["e"]["data"] == {"buffer": "0::0:0", "encoding": "cuda_ipc"}
+        assert out["t"]["data"]["encoding"] == "cuda_ipc"
+        assert list(out["t"]["shape"]) == [3, 2]
+
+
+@requires_torch_cuda
+def test_export_from_a_thread_that_made_no_cuda_call():
+    """The driver call resolving the allocation needs a current context on the thread."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import torch
+
+    from tesseract_core.runtime.cuda.ipc import (
+        dump_cuda_ipc_arraydict,
+        release_pinned_ipc_exports,
+    )
+
+    x = torch.ones(16, device="cuda")
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            exported = pool.submit(dump_cuda_ipc_arraydict, x).result()
+        assert exported["data"]["encoding"] == "cuda_ipc"
+    finally:
+        release_pinned_ipc_exports()
+
+
+@requires_torch_cuda
+def test_dlpack_capsule_keeps_its_array_alive_and_can_be_made_twice():
+    """A capsule outlives the array it came from, and each __dlpack__ call works.
+
+    Dropping the array before consuming its capsule must not free the buffer
+    or the capsule's struct under the consumer.
+    """
+    import gc
+
+    import torch
+
+    from tesseract_core.runtime.cuda.ipc import _device_array_from_bytes
+
+    data = bytes(range(16))
+    array = _device_array_from_bytes(data, 0)
+    capsule = array.__dlpack__()
+    del array
+    gc.collect()
+    _device_array_from_bytes(b"\xff" * 16, 0)  # would reuse a freed buffer
+    assert torch.from_dlpack(capsule).cpu().numpy().tobytes() == data
+
+    array = _device_array_from_bytes(data, 0)
+    first, second = torch.from_dlpack(array), torch.from_dlpack(array)
+    assert first.data_ptr() == second.data_ptr()
+    with pytest.raises((BufferError, RuntimeError)):
+        np.from_dlpack(array)  # NumPy refuses device memory
+    assert array.copy_to_host().tobytes() == data
 
 
 @requires_cuda
@@ -1052,3 +1190,111 @@ def test_tesseract_api_cuda_ipc_mixed_http(framework, free_port, serve_in_subpro
                 pybase64.b64decode(payload["cpu"]["data"]["buffer"]), dtype=np.float32
             )
             np.testing.assert_allclose(cpu, x + 1.0, rtol=1e-6)
+
+
+# ── Test 7: choosing a GPU transport by checking it works ───────────────
+
+
+# Doubles x with CuPy, or with NumPy where the server has no GPU.
+_DOUBLE_API_CODE = """
+import {module} as xp
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
+
+class InputSchema(BaseModel):
+    x: Array[(None,), Float32]
+
+class OutputSchema(BaseModel):
+    y: Array[(None,), Float32]
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    return OutputSchema(y=xp.asarray(inputs.x) * 2.0)
+"""
+
+
+@requires_cuda
+def test_resolve_gpu_transport_uses_cuda_ipc_when_it_works(
+    free_port, serve_in_subprocess
+):
+    """A client that did not ask for a transport uses cuda_ipc once it checked it works.
+
+    A plain ``from_url`` client has no transport of its own, so this is the
+    case where the client has to find out by itself. Host copies are forbidden
+    throughout (see ``forbid_device_host_copy``), so the call stays on the GPU.
+    """
+    import warnings
+
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE.format(module="cupy"))
+
+        server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc"}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            remote = Tesseract.from_url(url)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                transport = remote.resolve_gpu_transport()
+            assert transport == "cuda_ipc"
+            explicit = remote.with_encoding(gpu_transport="cuda_ipc")
+            assert explicit.resolve_gpu_transport() == "cuda_ipc"
+            disabled = remote.with_encoding(gpu_transport="none")
+            assert disabled.resolve_gpu_transport() == "none"
+
+            x = cupy.arange(4, dtype=cupy.float32)
+            result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
+            np.testing.assert_allclose(
+                result["y"].copy_to_host(), cupy.asnumpy(x) * 2.0, rtol=1e-6
+            )
+
+
+@requires_cuda
+def test_resolve_gpu_transport_falls_back_when_cuda_ipc_does_not_work(
+    free_port, serve_in_subprocess, allow_device_host_copy
+):
+    """A server that offers cuda_ipc but cannot use it gets host copies instead.
+
+    Hiding the GPU from the server stands in for every reason the check can
+    fail, e.g. a server on another host or in another IPC namespace. A client
+    that asked for cuda_ipc gets an error rather than a silent host copy.
+    """
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
+
+        server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc", "CUDA_VISIBLE_DEVICES": ""}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            remote = Tesseract.from_url(url)
+            with pytest.warns(UserWarning, match="copied to the host instead"):
+                transport = remote.resolve_gpu_transport()
+            assert transport == "none"
+
+            # CuPy refuses to convert implicitly, so this takes an explicit copy
+            x = cupy.arange(4, dtype=cupy.float32)
+            result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
+            np.testing.assert_allclose(result["y"], cupy.asnumpy(x) * 2.0, rtol=1e-6)
+
+            with pytest.raises(RuntimeError, match="does not work between"):
+                remote.with_encoding(gpu_transport="cuda_ipc").resolve_gpu_transport()
+
+
+@requires_cuda
+def test_requested_gpu_transport_is_unchecked_without_the_check_route(
+    free_port, serve_in_subprocess
+):
+    """A server that cannot take part in the check leaves a requested transport unchecked.
+
+    Runtimes from before the check have no route for it, like this server
+    without a GPU transport, so asking it gives no answer rather than a failure.
+    """
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
+        with serve_in_subprocess(api_path, free_port) as url:
+            check = HTTPClient(url).check_gpu_transport("cuda_ipc")
+            assert check.usable is None

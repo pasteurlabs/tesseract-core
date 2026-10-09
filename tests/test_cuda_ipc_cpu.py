@@ -5,7 +5,7 @@
 
 These run on ordinary (GPU-less) CI runners. They cover the Python
 *orchestration* around CUDA IPC -- payload assembly, base/offset arithmetic,
-device-ordinal detection, shape/dtype validation, the export registry, the
+device-ordinal detection, shape/dtype validation, export groups, the
 serve-side release hook, the ``--ipc=host`` wiring, and the CLI guard -- by
 
   * feeding fake objects that expose ``__cuda_array_interface__`` (no device
@@ -192,7 +192,7 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     assert unpacked["storage_offset"] == 0
     assert unpacked["storage_size"] == 128
     # Staging buffer registered for a later release.
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
+    assert cuda_ipc._DEFAULT_EXPORTS.staging == [
         (0xD000, 0, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
     ]
 
@@ -235,21 +235,23 @@ def test_dump_works_on_the_arrays_device(mocked_cuda, monkeypatch):
 
 
 def test_dump_on_the_active_device_does_not_switch(mocked_cuda):
+    # The device is still set once, to make its context current on this thread
+    # (a fresh thread has none), but nothing switches or needs restoring.
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))
-    assert mocked_cuda.calls["set_device"] == []
+    assert mocked_cuda.calls["set_device"] == [0]
 
 
 # ── Export registry / ring-1 lifetime ───────────────────────────────────
 
 
 def test_export_registry_pins_and_releases(mocked_cuda):
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
     arr = FakeCudaArray((3,), "<f4")
     cuda_ipc.dump_cuda_ipc_arraydict(arr)
     # The source array is retained so its (would-be) GPU memory stays valid.
-    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    assert arr in cuda_ipc._DEFAULT_EXPORTS.pins
     cuda_ipc.release_pinned_ipc_exports()
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 def test_release_recycles_staging_buffers(mocked_cuda):
@@ -326,15 +328,15 @@ def test_zero_pool_fraction_disables_reuse(mocked_cuda):
     assert mocked_cuda.calls["malloc"] == [16, 16]
 
 
-def test_client_request_releases_input_exports(mocked_cuda):
+def test_client_request_releases_input_exports(mocked_cuda, monkeypatch):
     """HTTPClient._request must release the GPU inputs it pinned while encoding.
 
-    Regression test: the client shares the process-global export registry with
-    the server, and encoding a GPU input pins it there. If _request does not
-    release afterward the registry grows without bound across calls (each call's
-    inputs leaked). The pin must survive long enough for the server to decode --
-    i.e. until the response body is buffered -- so we assert it is still present
-    when the (fake) request is dispatched, and gone once _request returns.
+    Encoding a GPU input pins it in the request's own export group, so that
+    concurrent requests do not release each other's inputs. If _request does
+    not release afterward each call's inputs leak. The pin must survive until
+    the server has decoded the inputs, i.e. until the response body is
+    buffered, so we assert it is still present when the (fake) request is
+    dispatched, and gone once _request returns.
     """
     from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
@@ -349,7 +351,7 @@ def test_client_request_releases_input_exports(mocked_cuda):
         def request(self, **kwargs):
             # The input must still be pinned here: a real server has not yet
             # decoded and copied it out.
-            seen_during_request["pinned"] = list(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY)
+            seen_during_request["pinned"] = list(groups[0].pins)
             return response
 
     client = HTTPClient.__new__(HTTPClient)
@@ -363,14 +365,16 @@ def test_client_request_releases_input_exports(mocked_cuda):
         ("json+base64",), ("none", "cuda_ipc"), ("none",)
     )
 
+    groups = _record_export_groups(monkeypatch)
     arr = FakeCudaArray((3,), "<f4")
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
     client._request("apply", method="POST", payload={"a": arr})
 
     # Pinned during the request (so the server can copy it out) ...
     assert arr in seen_during_request["pinned"]
     # ... and released once the request returned (no leak across calls).
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert len(groups) == 1
+    assert len(groups[0]) == 0
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 def test_client_request_cpu_only_payload_skips_release(monkeypatch):
@@ -378,20 +382,17 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
 
     Nothing gets pinned, so _request must not import/call the cuda_ipc runtime
     for cleanup -- otherwise a base install (no runtime extra) would spuriously
-    fail on an all-CPU payload. Guard by making the release helper explode if
-    called.
+    fail on an all-CPU payload. Guard by making the runtime import explode.
     """
     from tesseract_core.sdk import tesseract as sdk
     from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
 
     def _boom():
-        raise AssertionError("release must not be called for a CPU-only payload")
+        raise AssertionError(
+            "the cuda_ipc runtime must not be used for a CPU-only payload"
+        )
 
-    monkeypatch.setattr(
-        sdk,
-        "_import_cuda_ipc",
-        lambda: types.SimpleNamespace(release_pinned_ipc_exports=_boom),
-    )
+    monkeypatch.setattr(sdk, "_import_cuda_ipc", _boom)
 
     response = Mock(status_code=200, ok=True, content=b"{}")
 
@@ -552,18 +553,27 @@ def test_load_reuses_owned_buffer_released_on_del(mocked_cuda):
 
 
 def test_load_reuses_owned_buffer_released_by_dlpack_deleter(mocked_cuda):
-    """A buffer handed out via DLPack returns to the pool when its deleter runs."""
-    from tesseract_core.runtime.cuda import dlpack
+    """A buffer handed out via DLPack returns to the pool once its capsule is gone.
+
+    The capsule keeps the array alive even after the array's last other
+    reference is dropped, so the buffer is reused only after both are gone.
+    """
+    import gc
 
     encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
-    out.__dlpack__()
-    # Nobody consumed the capsule, so dropping it runs the deleter.
-    dlpack.drop_unconsumed_bundle(out._state["dlpack_token"])
-    assert mocked_cuda.calls["free"] == []
-
+    capsule = out.__dlpack__()
+    del out
+    gc.collect()
     cuda_ipc.load_cuda_ipc_arraydict(encoded)
-    assert mocked_cuda.calls["malloc"] == [8]
+    assert mocked_cuda.calls["malloc"] == [8, 8]
+
+    # Nobody consumed the capsule, so destroying it runs the deleter.
+    del capsule
+    gc.collect()
+    assert mocked_cuda.calls["free"] == []
+    cuda_ipc.load_cuda_ipc_arraydict(encoded)
+    assert mocked_cuda.calls["malloc"] == [8, 8]
 
 
 def test_owned_buffers_beyond_pool_limit_are_freed(mocked_cuda, monkeypatch):
@@ -737,7 +747,20 @@ def test_output_to_bytes_mixed_gpu_and_cpu_arrays(mocked_cuda):
     np.testing.assert_array_equal(decoded_cpu, np.arange(3, dtype=np.float32))
 
 
-def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
+def _record_export_groups(monkeypatch):
+    """Record the ExportGroups created from now on."""
+    groups = []
+    init = cuda_ipc.ExportGroup.__init__
+
+    def recording_init(self):
+        init(self)
+        groups.append(self)
+
+    monkeypatch.setattr(cuda_ipc.ExportGroup, "__init__", recording_init)
+    return groups
+
+
+def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path, monkeypatch):
     """The SDK client encodes mixed GPU and binref input arrays in a single request.
 
     GPU leaves are exported by handle via cuda_ipc (without host copies), while host
@@ -746,6 +769,7 @@ def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
     """
     from tesseract_core.sdk.tesseract import _encode_payload
 
+    groups = _record_export_groups(monkeypatch)
     payload = {
         "gpu": FakeCudaArray((3,), "<f4"),
         "cpu": np.arange(3, dtype=np.float32),
@@ -763,12 +787,14 @@ def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
         bin_name = encoded["cpu"]["data"]["buffer"].split(":")[0]
         bin_file = tmp_path / bin_name
         assert bin_file.exists()
-        # Pinned registry should track the exported allocation during context
-        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+        # This request's group tracks the exported allocation during context
+        assert len(groups) == 1
+        assert len(groups[0].pins) == 1
 
     # Context exit should unlink disk files and release pinned allocations
     assert not bin_file.exists()
-    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+    assert len(groups[0]) == 0
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
 
 
 def test_encode_array_cuda_ipc_missing_context_raises(mocked_cuda):
@@ -783,11 +809,12 @@ def test_encode_array_cuda_ipc_missing_context_raises(mocked_cuda):
 
 
 def test_encode_payload_mixed_gpu_and_binref_cleanup_on_exception(
-    mocked_cuda, tmp_path
+    mocked_cuda, tmp_path, monkeypatch
 ):
     """Context exit releases both CUDA IPC exports and binref files even on error."""
     from tesseract_core.sdk.tesseract import _encode_payload
 
+    groups = _record_export_groups(monkeypatch)
     payload = {
         "gpu": FakeCudaArray((3,), "<f4"),
         "cpu": np.arange(3, dtype=np.float32),
@@ -806,12 +833,12 @@ def test_encode_payload_mixed_gpu_and_binref_cleanup_on_exception(
         bin_name = encoded["cpu"]["data"]["buffer"].split(":")[0]
         bin_file = tmp_path / bin_name
         assert bin_file.exists()
-        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+        assert len(groups[0].pins) == 1
         raise RuntimeError("simulated failure during request")
 
     # Context exit should unlink disk files and release pinned allocations despite the error
     assert not bin_file.exists()
-    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+    assert len(groups[0]) == 0
 
 
 def test_cuda_array_to_host_branches(allow_device_host_copy):
@@ -927,11 +954,16 @@ def test_output_to_bytes_splits_host_encoding_and_device_transport(monkeypatch):
         "array_encoding": "base64",
         "compression": None,
         "device_transport": "cuda_ipc",
+        "device_exports": None,
     }
 
     # Default gpu_transport leaves device_transport unset (None).
     file_interactions.output_to_bytes({"y": 1}, "json")
-    assert captured["context"] == {"array_encoding": "json", "device_transport": None}
+    assert captured["context"] == {
+        "array_encoding": "json",
+        "device_transport": None,
+        "device_exports": None,
+    }
 
 
 # ── libcudart discovery (wheel-installed CUDA) ──────────────────────────
@@ -1189,6 +1221,248 @@ def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
     assert payload["data"]["encoding"] == "cuda_ipc"
     assert _unpack_cuda_ipc(payload["data"])["storage_offset"] == 256
     # register pinned the source array; release drops it.
-    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    assert arr in cuda_ipc._DEFAULT_EXPORTS.pins
     transport.release()
-    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._DEFAULT_EXPORTS.pins == []
+
+
+# ── Empty arrays, dtypes without a NumPy equivalent, finalizers in the pool ──
+
+
+def test_empty_array_crosses_without_a_handle(mocked_cuda):
+    """An empty array, which frameworks give a null pointer, crosses without a handle."""
+    from tesseract_core.runtime.array_encoding import CudaIpcArrayData
+
+    out = cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((0, 3), "<f4", data_ptr=0))
+    assert out["data"]["buffer"] == "0::0:0"
+    assert mocked_cuda.calls["get_handle"] == []
+    CudaIpcArrayData(**out["data"])  # the wire schema accepts it
+
+    decoded = cuda_ipc.load_cuda_ipc_arraydict(out)
+    assert decoded.shape == (0, 3)
+    assert decoded.dtype == np.float32
+    assert mocked_cuda.calls["open"] == []
+    assert mocked_cuda.calls["malloc"] == []
+    assert decoded.copy_to_host().shape == (0, 3)
+
+
+def test_descriptor_without_a_handle_must_be_for_an_empty_array(mocked_cuda):
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=0)
+    encoded["data"]["buffer"] = "0::0:0"
+    with pytest.raises(ValueError, match="no handle"):
+        cuda_ipc.load_cuda_ipc_arraydict(encoded)
+
+
+def test_dtype_without_numpy_equivalent_is_refused(mocked_cuda):
+    # PyTorch describes bfloat16 as a 2-byte void dtype.
+    with pytest.raises(TypeError, match="no NumPy equivalent"):
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "|V2"))
+
+
+def test_strided_arrays_are_copied_on_the_device_by_their_framework():
+    # cuda_ipc moves a flat byte range, so a strided array is first made
+    # contiguous by the framework that made it, never through the host.
+    contiguous = FakeCudaArray((3, 2), "<f4")
+    assert cuda_ipc._contiguous_on_device(contiguous) is contiguous
+
+    class TorchLike(FakeCudaArray):
+        def contiguous(self):
+            return contiguous
+
+    class CuPyLike(FakeCudaArray):
+        def copy(self, order="K"):
+            assert order == "C"
+            return contiguous
+
+    for cls in (TorchLike, CuPyLike):
+        strided = cls((3, 2), "<f4", strides=(4, 12))
+        assert cuda_ipc._contiguous_on_device(strided) is contiguous
+
+
+def test_release_while_the_pool_lock_is_held_does_not_wait(mocked_cuda):
+    """A finalizer run by a GC pass inside take() or put() must not deadlock.
+
+    The buffer it hands back joins the pool at the next take() or put().
+    """
+    import threading
+
+    pool = cuda_ipc._BufferPool()
+
+    def finalizer_inside_the_pool():
+        with pool._lock:
+            pool.release(0xA000, 0, 8)
+
+    worker = threading.Thread(target=finalizer_inside_the_pool, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), "release() waited for the pool's own lock"
+    assert pool.take(0, 8) == (0xA000, None)
+
+
+# ── Keeping a response's exports until its client is done with them ─────────
+
+_GPU_OUTPUT_API = '''
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
+
+
+class _GpuArray:
+    """A GPU array's metadata surface, as the mocked CUDA runtime expects."""
+
+    def __init__(self, n):
+        self.__cuda_array_interface__ = {
+            "shape": (n,), "typestr": "<f4", "data": (0x1000, False),
+            "strides": None, "version": 3,
+        }
+
+
+class InputSchema(BaseModel):
+    n: int
+
+
+class OutputSchema(BaseModel):
+    y: Array[(None,), Float32]
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    return {"y": _GpuArray(inputs.n)}
+'''
+
+
+def test_server_keeps_response_exports_until_their_client_is_done(
+    mocked_cuda, tmp_path, monkeypatch
+):
+    """A response's exports outlive other clients' requests, until named or expired.
+
+    Otherwise one client's request could free outputs another client has not
+    read yet.
+    """
+    import collections
+
+    from fastapi.testclient import TestClient
+
+    from tesseract_core.runtime import serve
+    from tesseract_core.runtime.config import override_config, update_config
+    from tesseract_core.runtime.core import load_module_from_path
+
+    monkeypatch.setattr(serve, "_PENDING_EXPORTS", collections.OrderedDict())
+    api_path = tmp_path / "tesseract_api.py"
+    api_path.write_text(_GPU_OUTPUT_API)
+    done = serve.EXPORTS_DONE_HEADER
+
+    with override_config():
+        update_config(gpu_transport="cuda_ipc")
+        client = TestClient(serve.create_rest_api(load_module_from_path(api_path)))
+
+        def apply(**headers):
+            response = client.post(
+                "/apply",
+                json={"inputs": {"n": 4}},
+                headers={
+                    "Accept": "application/json; gpu_transport=cuda_ipc",
+                    **headers,
+                },
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["y"]["data"]["encoding"] == "cuda_ipc"
+            export_id = response.headers[serve.EXPORTS_HEADER]
+            return export_id, serve._PENDING_EXPORTS[export_id][0]
+
+        first_id, first = apply(**{done: ""})
+        assert len(first.pins) == 1
+        # Another acknowledging client's request leaves them alone ...
+        _, second = apply(**{done: ""})
+        assert len(first.pins) == 1
+        # ... and naming them, on any request, releases them.
+        client.get("/health", headers={done: first_id})
+        assert len(first.pins) == 0
+        assert first_id not in serve._PENDING_EXPORTS
+
+        # A client that does not acknowledge has its earlier exports released
+        # by its next request, but not those of clients that do.
+        _, legacy = apply()
+        apply()
+        assert len(legacy.pins) == 0
+        assert len(second.pins) == 1
+
+        # Exports nobody names are released once kept too long.
+        monkeypatch.setattr(serve, "EXPORTS_TIMEOUT_S", 0.0)
+        apply(**{done: ""})
+        assert len(second.pins) == 0
+
+
+def test_server_releases_exports_of_a_response_that_fails_to_encode(
+    mocked_cuda, tmp_path, monkeypatch
+):
+    """Exports made before an encoding error are released, not leaked.
+
+    Encoding fails after one array was exported. No client will read that
+    response, so its export group must go back to the transport.
+    """
+    import collections
+
+    from fastapi.testclient import TestClient
+
+    from tesseract_core.runtime import serve
+    from tesseract_core.runtime.config import override_config, update_config
+    from tesseract_core.runtime.core import load_module_from_path
+    from tesseract_core.runtime.device_transport import get_transport
+
+    def export_then_fail(*args, device_exports=None, **kwargs):
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4"), device_exports)
+        raise RuntimeError("encoding failed")
+
+    monkeypatch.setattr(serve, "_PENDING_EXPORTS", collections.OrderedDict())
+    monkeypatch.setattr(serve, "output_to_bytes", export_then_fail)
+    api_path = tmp_path / "tesseract_api.py"
+    api_path.write_text(_GPU_OUTPUT_API)
+
+    with override_config():
+        update_config(gpu_transport="cuda_ipc")
+        transport = get_transport("cuda_ipc")
+        released = []
+        release = transport.release
+
+        def record_release(session=None):
+            released.append(None if session is None else len(session.pins))
+            release(session)
+
+        monkeypatch.setattr(transport, "release", record_release)
+        client = TestClient(
+            serve.create_rest_api(load_module_from_path(api_path)),
+            raise_server_exceptions=False,
+        )
+        response = client.post(
+            "/apply",
+            json={"inputs": {"n": 4}},
+            headers={
+                "Accept": "application/json; gpu_transport=cuda_ipc",
+                serve.EXPORTS_DONE_HEADER: "",
+            },
+        )
+
+    assert response.status_code == 500
+    assert released == [1], "the failed response's exports were not released"
+    assert not serve._PENDING_EXPORTS
+
+
+def test_concurrent_decodes_of_one_allocation_share_its_mapping(mocked_cuda):
+    """CUDA maps an allocation into a process only once.
+
+    Two arrays from one allocation, decoded at the same time, must share a
+    single mapping, which closes when the last of them is done. Opening it
+    twice failed with "resource already mapped".
+    """
+    handle = b"\x01" * 64
+    with cuda_ipc._mapped(handle, 0) as first:
+        with cuda_ipc._mapped(handle, 0) as second:
+            assert first == second
+        assert mocked_cuda.calls["close"] == []
+    assert mocked_cuda.calls["open"] == [(handle, 0)]
+    assert mocked_cuda.calls["close"] == [first]
+    assert not cuda_ipc._MAPPINGS
+
+    # A later decode maps it afresh.
+    with cuda_ipc._mapped(handle, 0):
+        pass
+    assert len(mocked_cuda.calls["open"]) == 2

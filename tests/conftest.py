@@ -766,11 +766,11 @@ def mocked_cuda(monkeypatch):
     ):
         monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
-    # Each test starts with empty export registries and buffer pools, and must
-    # not leave fake pointers behind for the next one.
+    # Each test starts with an empty default export group and buffer pools, and
+    # must not leave fake pointers behind for the next one.
     def _reset() -> None:
-        cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-        cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+        cuda_ipc._DEFAULT_EXPORTS.pins.clear()
+        cuda_ipc._DEFAULT_EXPORTS.staging.clear()
 
     _reset()
     monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())

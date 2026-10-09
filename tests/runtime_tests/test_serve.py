@@ -315,6 +315,31 @@ def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):
     assert "not enabled" in response.text
 
 
+def test_check_gpu_transport_route(dummy_tesseract_module):
+    """Clients check a GPU transport at a route that exists only when one is enabled.
+
+    It stays out of the schema clients read endpoints from, and answers requests
+    it cannot serve without touching the GPU, so this needs no GPU.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    assert client.post("/check_gpu_transport", json={}).status_code == 404
+
+    update_config(gpu_transport="cuda_ipc")
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    assert "/check_gpu_transport" not in client.get("/openapi.json").json()["paths"]
+
+    reply = client.post("/check_gpu_transport", json={"gpu_transport": "none"})
+    assert reply.json()["ok"] is False
+    assert "not enabled" in reply.json()["reason"]
+
+    malformed = {"gpu_transport": "cuda_ipc", "array": {"dtype": "float32"}}
+    reply = client.post("/check_gpu_transport", json=malformed)
+    assert reply.json()["ok"] is False
+    assert "expected a uint8 array" in reply.json()["reason"]
+
+
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
     """Test we can get a Jacobian endpoint from generated API."""
     test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)

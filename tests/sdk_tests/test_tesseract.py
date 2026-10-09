@@ -529,9 +529,9 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     ],
 )
 def test_accept_header(encoding, expected):
-    from tesseract_core.sdk.tesseract import _RequestedEncoding
+    from tesseract_core.sdk.tesseract import RequestedEncoding
 
-    assert _RequestedEncoding(**encoding).accept_header() == expected
+    assert RequestedEncoding(**encoding).accept_header() == expected
 
 
 # What runtimes of each age advertise in their OpenAPI schema
@@ -579,13 +579,13 @@ _SCHEMA_CURRENT = {
 )
 def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expected):
     from tesseract_core.sdk.tesseract import (
+        RequestedEncoding,
         ServerCapabilities,
         _fit_encoding_to_server,
-        _RequestedEncoding,
     )
 
     capabilities = ServerCapabilities.from_openapi_schema(schema)
-    requested = _RequestedEncoding(**encoding)
+    requested = RequestedEncoding(**encoding)
     if expected is ValueError:
         with pytest.raises(ValueError):
             _fit_encoding_to_server(requested, capabilities)
@@ -615,6 +615,27 @@ def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_modul
         dummy_tesseract_module, gpu_transport="cuda_ipc"
     )
     assert local.server_capabilities is None
+
+
+def test_in_process_gpu_transport_is_the_one_it_was_created_with(
+    dummy_tesseract_module,
+):
+    # Integrations hand an in-process Tesseract GPU arrays as they are only if it
+    # was created to accept them, since only its creator knows whether the
+    # endpoints can handle them.
+    default = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert default.resolve_gpu_transport() == "none"
+    with pytest.raises(ValueError, match="does not accept gpu_transport='cuda_ipc'"):
+        default.with_encoding(gpu_transport="cuda_ipc")
+
+    enabled = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert enabled.resolve_gpu_transport() == "cuda_ipc"
+    assert enabled.current_encoding.gpu_transport == "cuda_ipc"
+    disabled = enabled.with_encoding(gpu_transport="none")
+    assert disabled.resolve_gpu_transport() == "none"
+    assert disabled.current_encoding.gpu_transport == "none"
 
 
 @pytest.mark.parametrize(
@@ -1457,7 +1478,7 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
         binref_pool=mock_pool,
         written_files=[f1, f2],
         checked_out_slots=[mock_slot],
-        exported_cuda_ipc=True,
+        device_exports=mock_cuda_mod.ExportGroup(),
     )
 
     with pytest.raises(OSError, match="permission denied"):
@@ -1465,8 +1486,8 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
 
     assert not f2.exists()
     mock_pool.checkin.assert_called_once_with(mock_slot)
-    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
-    assert ctx.exported_cuda_ipc is False
+    mock_cuda_mod.ExportGroup.return_value.release.assert_called_once()
+    assert ctx.device_exports is None
 
 
 def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
@@ -1500,7 +1521,7 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
         binref_pool=mock_pool,
         written_files=[f1],
         checked_out_slots=[mock_slot],
-        exported_cuda_ipc=True,
+        device_exports=mock_cuda_mod.ExportGroup(),
     )
 
     exception_group_cls = getattr(builtins, "ExceptionGroup", None)
@@ -1512,8 +1533,8 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match="Multiple errors occurred"):
             _close_encoding_context(ctx)
 
-    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
-    assert ctx.exported_cuda_ipc is False
+    mock_cuda_mod.ExportGroup.return_value.release.assert_called_once()
+    assert ctx.device_exports is None
 
 
 def test_http_client_binref_payload(tmp_path):
@@ -1761,3 +1782,177 @@ def test_HTTPClient_timeout_fires(free_port):
         shutdown.set()
         httpd.shutdown()
         server_thread.join(timeout=5)
+
+
+# ── Choosing a GPU transport, with the server stubbed out ───────────────
+
+
+def _client_offering(gpu_transports):
+    """An HTTPClient whose server offers ``gpu_transports``, without a server."""
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    client = HTTPClient("http://127.0.0.1:1")
+    client.__dict__["server_capabilities"] = ServerCapabilities(
+        output_formats=None, gpu_transports=gpu_transports, compressions=None
+    )
+    return client
+
+
+def test_offered_gpu_transport_is_used_unchecked_when_the_server_cannot_be_asked(
+    monkeypatch,
+):
+    # A runtime without the check route gives no answer, which is not a failure:
+    # the transport is used unchecked, as when it is requested.
+    import warnings
+
+    from tesseract_core.sdk.tesseract import _TransportCheck
+
+    client = _client_offering(("none", "cuda_ipc"))
+    monkeypatch.setattr(
+        client, "check_gpu_transport", lambda transport: _TransportCheck(None)
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert client.resolve_gpu_transport(None) == "cuda_ipc"
+
+
+def test_inconclusive_transport_check_is_run_again(monkeypatch):
+    # An error answer (a proxy's 502 while the server is busy, say) says nothing
+    # about whether the transport works, so it must not stick for the client's
+    # lifetime. A conclusive answer is kept.
+    from types import SimpleNamespace
+
+    import tesseract_core.sdk.tesseract as sdk
+
+    fake_ipc = SimpleNamespace(
+        start_transport_check=lambda: ({}, b"", object()),
+        finish_transport_check=lambda array, expected: None,
+    )
+    monkeypatch.setattr(sdk, "_import_cuda_ipc", lambda: fake_ipc)
+    answers = [
+        SimpleNamespace(status_code=502, ok=False, text="Bad Gateway", content=b""),
+        SimpleNamespace(status_code=200, ok=True, text="", content=b'{"ok": true}'),
+    ]
+    sent = []
+
+    def send(*args, **kwargs):
+        sent.append(args)
+        return answers[len(sent) - 1]
+
+    client = _client_offering(("none", "cuda_ipc"))
+    monkeypatch.setattr(client, "_send", send)
+
+    assert client.check_gpu_transport("cuda_ipc").usable is False
+    assert client.check_gpu_transport("cuda_ipc").usable is True
+    assert client.check_gpu_transport("cuda_ipc").usable is True
+    assert len(sent) == 2
+
+
+def test_transport_check_of_one_server_does_not_wait_for_another(monkeypatch):
+    # A check waits for the server to answer, which takes as long as whatever
+    # that server is busy with, so it must not hold up checks of other servers.
+    import threading
+
+    from tesseract_core.sdk.tesseract import _TransportCheck
+
+    busy, idle = _client_offering(("cuda_ipc",)), _client_offering(("cuda_ipc",))
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_check(transport):
+        entered.set()
+        release.wait(timeout=10)
+        return _TransportCheck(True), True
+
+    monkeypatch.setattr(busy, "_run_transport_check", slow_check)
+    monkeypatch.setattr(
+        idle, "_run_transport_check", lambda transport: (_TransportCheck(True), True)
+    )
+    waiting = threading.Thread(target=busy.check_gpu_transport, args=("cuda_ipc",))
+    waiting.start()
+    try:
+        assert entered.wait(timeout=10)
+        done = threading.Event()
+        threading.Thread(
+            target=lambda: (idle.check_gpu_transport("cuda_ipc"), done.set())
+        ).start()
+        assert done.wait(timeout=5), "the idle server's check waited for the busy one"
+    finally:
+        release.set()
+        waiting.join(timeout=10)
+
+
+def test_transport_fallback_warning_points_at_the_caller(monkeypatch):
+    from tesseract_core.sdk.tesseract import _TransportCheck
+
+    tess = Tesseract.from_url("http://127.0.0.1:1")
+    client = tess._client
+    client.__dict__.update(_client_offering(("none", "cuda_ipc")).__dict__)
+    monkeypatch.setattr(
+        client,
+        "check_gpu_transport",
+        lambda transport: _TransportCheck(False, "no shared GPU"),
+    )
+    with pytest.warns(UserWarning, match="no shared GPU") as record:
+        assert tess.resolve_gpu_transport() == "none"
+    assert record[0].filename == __file__
+
+
+def _recording_client(gpu_transport, answers):
+    """An HTTPClient whose requests are recorded and answered from ``answers``."""
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    client = HTTPClient("http://127.0.0.1:1", gpu_transport=gpu_transport)
+    client.__dict__["server_capabilities"] = ServerCapabilities(
+        output_formats=("json",), gpu_transports=("none", "cuda_ipc"), compressions=None
+    )
+    sent = []
+
+    def request(**kwargs):
+        sent.append(kwargs.get("headers") or {})
+        answer = answers[len(sent) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return Mock(
+            status_code=200,
+            ok=True,
+            content=b"{}",
+            headers={"Tesseract-Exports": answer},
+        )
+
+    client._session.request = request
+    return client, sent
+
+
+def test_client_names_the_responses_it_has_decoded():
+    # The server keeps a response's GPU exports until the client says it is done
+    # with them, which it does on its next request, or when it closes.
+    client, sent = _recording_client("cuda_ipc", ["id1", "id2", ""])
+    client._request("apply", "POST", {"inputs": {}})
+    client._request("apply", "POST", {"inputs": {}})
+    client.close()
+    assert [headers.get("Tesseract-Exports-Done") for headers in sent] == [
+        "",
+        "id1",
+        "id2",
+    ]
+
+
+def test_client_without_a_gpu_transport_sends_no_export_names():
+    client, sent = _recording_client(None, [""])
+    client._request("apply", "POST", {"inputs": {}})
+    assert "Tesseract-Exports-Done" not in sent[0]
+
+
+def test_export_names_are_sent_again_after_a_failed_request():
+    client, sent = _recording_client(
+        "cuda_ipc", ["id1", RuntimeError("connection refused"), "id3"]
+    )
+    client._request("apply", "POST", {"inputs": {}})
+    with pytest.raises(RuntimeError, match="connection refused"):
+        client._request("apply", "POST", {"inputs": {}})
+    client._request("apply", "POST", {"inputs": {}})
+    assert [headers.get("Tesseract-Exports-Done") for headers in sent] == [
+        "",
+        "id1",
+        "id1",
+    ]
