@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -49,6 +50,12 @@ logger = logging.getLogger("tesseract")
 
 # How long to give a child process to exit on SIGTERM before escalating.
 _TERMINATE_TIMEOUT = 10.0
+
+# How long to give a stopped child to let go of its log file before leaving it.
+_LOG_RELEASE_TIMEOUT = 2.0
+
+# The Windows error for touching a file another process has open.
+_ERROR_SHARING_VIOLATION = 32
 
 
 def parent_watch_pipe() -> tuple[int | None, int | None]:
@@ -132,6 +139,29 @@ def _stop_process(process: subprocess.Popen, *, force: bool) -> None:
         process.send_signal(sig)
 
 
+def _unlink_once_released(path: Path) -> None:
+    """Delete a stopped child's log file, waiting for it to be let go of.
+
+    Windows refuses to delete a file another process still holds open, and the
+    process we stop there is not the one holding it: the console script, like a
+    venv's `python.exe`, is a launcher that runs the interpreter as a child of
+    its own. That child dies with the launcher, but a few milliseconds later,
+    so a delete issued as soon as the launcher is gone fails.
+    """
+    deadline = time.monotonic() + _LOG_RELEASE_TIMEOUT
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except OSError as ex:
+            still_open = getattr(ex, "winerror", None) == _ERROR_SHARING_VIOLATION
+            if not still_open or time.monotonic() > deadline:
+                # Harmless to leave: it is in a temp directory.
+                logger.debug("Could not remove log file %s", path)
+                return
+        time.sleep(0.01)
+
+
 @dataclass
 class TesseractProcess:
     """A ``tesseract-runtime serve`` process running on the local host.
@@ -200,13 +230,7 @@ class TesseractProcess:
             except OSError:
                 pass
             self.parent_pipe_write_fd = None
-        try:
-            self.log_path.unlink(missing_ok=True)
-        except OSError:
-            # Windows refuses to delete a file another process still holds open,
-            # and a just-killed child may not have released it yet. Harmless to
-            # leave: it is in a temp directory.
-            logger.debug("Could not remove log file %s", self.log_path)
+        _unlink_once_released(self.log_path)
 
     def logs(self) -> bytes:
         """Everything the process has written to stdout and stderr so far.
