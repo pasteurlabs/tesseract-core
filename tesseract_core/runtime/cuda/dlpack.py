@@ -119,6 +119,18 @@ def _deleter(managed_ptr: int | None) -> None:
         pass
 
 
+def _capsule_refcount(bundle: tuple) -> int:
+    """The reference count of the capsule in ``bundle``, as this helper sees it."""
+    capsule = bundle[3]
+    return sys.getrefcount(capsule)
+
+
+# _capsule_refcount of a capsule that only its bundle references. Measured with
+# the same helper rather than hard-coded, since how many references
+# sys.getrefcount reports for a local varies across Python versions.
+_BUNDLE_ONLY_REFCOUNT = _capsule_refcount((None, None, None, object()))
+
+
 def drop_abandoned_capsules() -> None:
     """Drop the bundles of capsules that were discarded without being consumed.
 
@@ -133,12 +145,10 @@ def drop_abandoned_capsules() -> None:
         if bundle is None:
             _UNCONSUMED.discard(address)
             continue
-        capsule = bundle[3]
-        if not _capsule_is_valid(capsule, _DLTENSOR):
+        if not _capsule_is_valid(bundle[3], _DLTENSOR):
             # Consumed: the consumer calls the deleter when it is done.
             _UNCONSUMED.discard(address)
-        elif sys.getrefcount(capsule) <= 3:
-            # Referenced only by the bundle, this local and the call's argument.
+        elif _capsule_refcount(bundle) <= _BUNDLE_ONLY_REFCOUNT:
             _UNCONSUMED.discard(address)
             _BUNDLES.pop(address, None)
 
