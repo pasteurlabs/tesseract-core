@@ -1713,7 +1713,8 @@ class HTTPClient:
             data = _tree_map(
                 decode_with_path,
                 data,
-                is_leaf=lambda x: type(x) is dict and "shape" in x,
+                # Not by the keys a dict has: an output may have its own "shape".
+                is_leaf=lambda x: type(x) is dict and x.get("object_type") == "array",
             )
 
             for path in set(mapped_paths):
