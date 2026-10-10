@@ -587,6 +587,21 @@ def test_jvp_tangent_vector_shape_validation():
         InputSchema.model_validate(wrong_shape_input)
 
 
+def test_jvp_reports_invalid_inputs():
+    """Invalid inputs are reported as such, not as a crash in the tangent validator."""
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
+
+    jvp_input = {
+        "inputs": {**testinput, "testbaz": make_array((1, 2), "uint8")},
+        "jvp_inputs": ["testdiffarr"],
+        "jvp_outputs": ["testdiffarr"],
+        "tangent_vector": {"testdiffarr": testinput["testdiffarr"]},
+    }
+
+    with pytest.raises(ValidationError, match="testbaz"):
+        InputSchema.model_validate(jvp_input)
+
+
 def test_jvp_tangent_vector_dtype_casting():
     """Test that integer tangent vectors are cast to float for AD compatibility."""
     InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")

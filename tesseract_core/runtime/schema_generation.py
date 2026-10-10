@@ -748,9 +748,19 @@ def create_gradient_schema(
                         "Unable to validate tangent vector as jvp_inputs either missing or invalid"
                     ) from e
 
+                if "inputs" not in info.data:
+                    raise ValueError(
+                        "Unable to validate tangent vector as inputs either missing or invalid"
+                    )
+
                 validated = {}
                 for path, arr in tangent_vector.items():
-                    ref_arr = get_at_path(info.data["inputs"], path)
+                    try:
+                        ref_arr = get_at_path(info.data["inputs"], path)
+                    except (LookupError, AttributeError) as e:
+                        raise ValueError(
+                            f"Could not find tangent_vector path {path} in inputs."
+                        ) from e
                     if hasattr(ref_arr, "shape"):
                         ref_shape = ref_arr.shape
                     elif isinstance(ref_arr, dict):
