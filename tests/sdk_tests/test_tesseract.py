@@ -617,6 +617,32 @@ def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_modul
     assert local.server_capabilities is None
 
 
+def test_HTTPClient_only_decodes_what_the_server_marks_as_an_array(mocker):
+    """An output that has a "shape" of its own is not an encoded array."""
+    mock_response = mocker.Mock()
+    mock_response.content = orjson.dumps(
+        {
+            "grid": {"shape": [2, 3], "spacing": 0.5},
+            "values": {
+                "object_type": "array",
+                "shape": [2],
+                "dtype": "float32",
+                "data": {"buffer": [1.0, 2.0], "encoding": "json"},
+            },
+        }
+    )
+    mock_response.ok = True
+    mock_response.status_code = 200
+    mocker.patch("requests.Session.request", return_value=mock_response)
+
+    out = HTTPClient("somehost").run_tesseract("apply", {"inputs": {}})
+
+    assert out["grid"] == {"shape": [2, 3], "spacing": 0.5}
+    np.testing.assert_array_equal(
+        out["values"], np.array([1.0, 2.0], dtype="float32"), strict=True
+    )
+
+
 @pytest.mark.parametrize(
     "run_id",
     [None, "fizzbuzz"],
