@@ -188,6 +188,20 @@ jobs:
 
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
 
+      # Mirror major and minor releases (versions ending in .0) to the forum, but
+      # not patch releases. This runs before the release is created, so that a
+      # release never goes out without its forum topic.
+      - name: Mirror release notes to the forum
+        if: endsWith(steps.get_version.outputs.new_version, '.0')
+        env:
+          DISCOURSE_API_KEY: ${{ secrets.DISCOURSE_API_KEY }}
+          DISCOURSE_CATEGORY_ID: ${{ vars.DISCOURSE_RELEASE_CATEGORY_ID }}
+        run: |
+          notes_file="${{ steps.release_notes.outputs.release_note_file }}"
+          topic_url=$(python docs/forum_topics.py release \
+            "${{ steps.get_version.outputs.new_version }}" "$notes_file")
+          echo -e "\n**Discuss this release** on the [Tesseract Forum]($topic_url), including questions and help with upgrading." >> "$notes_file"
+
       - name: Create new release
         run: |
           gh release create "${{ steps.get_version.outputs.new_version }}" \

@@ -19,10 +19,6 @@ PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-
 JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51>
 ```
 
-```{tip}
-For more community-contributed examples, check out the [Tesseract Showcase](https://si-tesseract.discourse.group/c/showcase/11) on the forum.
-```
-
 ## Data assimilation demo
 
 A complete 4D-Variational data assimilation scheme for a chaotic dynamical system, built with differentiable Tesseracts.

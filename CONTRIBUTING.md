@@ -211,4 +211,4 @@ artifacts and publish them to the [GitHub Releases](https://github.com/pasteurla
 4. In the meantime, you can add more commits to `main` (and update the release branch) which will trigger re-generation of the changelog and release notes.
 5. Once the pull request is ready, merge it into `main`.
 6. GitHub Actions will then automatically release the new version. Verify that the release artifacts are correctly built and published.
-7. Make an announcement in the [Discourse Forum](https://si-tesseract.discourse.group/) and on social media, if applicable.
+7. For major and minor releases, the release notes are mirrored to the [Discourse Forum](https://si-tesseract.discourse.group/) automatically, and the release links to that topic for questions and feedback. Announce the release on social media, if applicable.
