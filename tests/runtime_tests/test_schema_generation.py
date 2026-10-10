@@ -233,6 +233,12 @@ def test_create_jacobian_schema():
             jac_testinput[var] = ["moo"]
             InputSchema.model_validate(jac_testinput)
 
+        for almost in ("testfoo.[0].bar.[0].moo", "moo testfoo.[0].bar.[0]"):
+            with pytest.raises(ValidationError):
+                # a valid path with something around it
+                jac_testinput[var] = [almost]
+                InputSchema.model_validate(jac_testinput)
+
     jac_testinput = valid_jac_input.copy()
     # Test LookupError (from IndexError) (only raised on jac_inputs)
     with pytest.raises(ValidationError):
