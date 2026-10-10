@@ -487,7 +487,8 @@ def _path_to_pattern(path: Sequence[str | object]) -> str:
 def _pattern_to_type(pattern: str) -> type:
     """Convert a string pattern (which may be a literal or regex) to a type that can be used for validation."""
     if _is_regex_pattern(pattern):
-        return Annotated[str, Field(pattern=pattern)]
+        # Anchored, since a pattern is searched for and not matched in full.
+        return Annotated[str, Field(pattern=f"^{pattern}$")]
     else:
         return Literal[pattern]
 
