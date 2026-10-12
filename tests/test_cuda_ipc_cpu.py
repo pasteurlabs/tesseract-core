@@ -1472,3 +1472,65 @@ def test_concurrent_decodes_of_one_allocation_share_its_mapping(mocked_cuda):
     with cuda_ipc._mapped(handle, 0):
         pass
     assert len(mocked_cuda.calls["open"]) == 2
+
+
+# ── A served Tesseract gets its inputs in the dtype its schema declares ──────
+
+_DTYPE_API = """
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, {declared}
+
+
+class InputSchema(BaseModel):
+    x: Array[(None,), {declared}]
+
+
+class OutputSchema(BaseModel):
+    dtype: str
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    return {{"dtype": inputs.x.dtype.name}}
+"""
+
+
+@pytest.mark.parametrize(
+    "sent, declared",
+    [("float32", "Float64"), ("float64", "Float32")],
+)
+def test_cuda_ipc_input_reaches_apply_in_the_declared_dtype(
+    mocked_cuda, tmp_path, sent, declared
+):
+    """A cuda_ipc input in another dtype is cast or rejected, never passed on.
+
+    The input schema accepts every dtype that casts to the declared one, and a
+    host encoding casts it on decode, so apply only ever sees the declared
+    dtype. A cuda_ipc input must not reach apply in the client's dtype instead.
+    """
+    from fastapi.testclient import TestClient
+    from typeguard import suppress_type_checks
+
+    from tesseract_core.runtime import serve
+    from tesseract_core.runtime.config import override_config, update_config
+    from tesseract_core.runtime.core import load_module_from_path
+
+    api_path = tmp_path / "tesseract_api.py"
+    api_path.write_text(_DTYPE_API.format(declared=declared))
+    itemsize = np.dtype(sent).itemsize
+    x = _encoded((4,), sent, device=0, offset=0, storage_size=4 * itemsize)
+
+    with override_config():
+        update_config(gpu_transport="cuda_ipc")
+        client = TestClient(serve.create_rest_api(load_module_from_path(api_path)))
+        # decode_array returns a GPU array for cuda_ipc, outside its host-array
+        # return annotation
+        with suppress_type_checks():
+            response = client.post("/apply", json={"inputs": {"x": x}})
+
+    if response.status_code == 422:
+        (error,) = response.json()["detail"]
+        assert error["loc"] == ["body", "inputs", "x"]
+        assert "dtype" in error["msg"]
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json()["dtype"] == declared.lower()
