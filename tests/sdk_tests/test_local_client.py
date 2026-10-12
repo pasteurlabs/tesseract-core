@@ -50,10 +50,7 @@ def test_serve_and_remove(dummy_api_path):
         served.remove(force=True)
 
     assert not local_client.is_running(served)
-    if os.name != "nt":
-        # Windows refuses to delete a file a just-killed child may still hold, so
-        # removal tolerates that and leaves it in the temp directory.
-        assert not served.log_path.exists()
+    assert not served.log_path.exists()
     # uvicorn announces itself on startup; if we captured nothing, log capture
     # is broken even though the health check passed.
     assert logs.strip()
@@ -143,12 +140,22 @@ def test_remove_is_idempotent(dummy_api_path):
     served.remove(force=True)
     # Must not raise, even though the process and its log file are gone
     served.remove(force=True)
-    if os.name != "nt":
-        # The logs really are gone, as they are for a removed container. Except
-        # on Windows, which refuses to delete a file a just-killed child may
-        # still hold -- removal tolerates that and leaves it behind.
-        with pytest.raises(FileNotFoundError):
-            served.logs()
+    # The logs really are gone, as they are for a removed container.
+    with pytest.raises(FileNotFoundError):
+        served.logs()
+
+
+def test_a_log_that_cannot_be_deleted_is_left_at_once(tmp_path):
+    """Only a file still held open is waited for; any other failure is final.
+
+    A directory stands in for a log that cannot be deleted, since unlinking one
+    fails on every platform.
+    """
+    started = time.monotonic()
+    local_client._unlink_once_released(tmp_path)
+
+    assert tmp_path.exists()
+    assert time.monotonic() - started < local_client._LOG_RELEASE_TIMEOUT
 
 
 # Nothing listens on port 1, so the health poll fails at once rather than
