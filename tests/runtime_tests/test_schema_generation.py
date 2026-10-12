@@ -587,6 +587,45 @@ def test_jvp_tangent_vector_shape_validation():
         InputSchema.model_validate(wrong_shape_input)
 
 
+def test_jvp_reports_invalid_inputs():
+    """Invalid inputs are reported as such, not as a crash in the tangent validator."""
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
+
+    jvp_input = {
+        "inputs": {**testinput, "testbaz": make_array((1, 2), "uint8")},
+        "jvp_inputs": ["testdiffarr"],
+        "jvp_outputs": ["testdiffarr"],
+        "tangent_vector": {"testdiffarr": testinput["testdiffarr"]},
+    }
+
+    with pytest.raises(ValidationError, match="testbaz"):
+        InputSchema.model_validate(jvp_input)
+
+
+def test_jvp_reports_a_tangent_along_an_input_that_was_not_sent():
+    """So is a tangent along an optional input that is absent."""
+
+    class Offset(BaseModel):
+        a: Differentiable[Array[(3,), Float64]]
+
+    class Inputs(BaseModel):
+        x: Differentiable[Array[(3,), Float64]]
+        offset: Offset | None = None
+
+    InputSchema, _ = create_gradient_schema(Inputs, Inputs, "jvp")
+
+    arr = make_array((3,), "float64")
+    jvp_input = {
+        "inputs": {"x": arr},
+        "jvp_inputs": ["offset.a"],
+        "jvp_outputs": ["x"],
+        "tangent_vector": {"offset.a": arr},
+    }
+
+    with pytest.raises(ValidationError, match="Could not find tangent_vector path"):
+        InputSchema.model_validate(jvp_input)
+
+
 def test_jvp_tangent_vector_dtype_casting():
     """Test that integer tangent vectors are cast to float for AD compatibility."""
     InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
