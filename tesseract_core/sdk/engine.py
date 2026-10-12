@@ -461,7 +461,7 @@ def prepare_build_context(
 
     logger.debug(f"Writing Dockerfile to {dockerfile_path}")
 
-    with open(dockerfile_path, "w") as f:
+    with open(dockerfile_path, "w", encoding="utf-8") as f:
         f.write(dockerfile_content)
 
     template_dir = get_template_dir()
