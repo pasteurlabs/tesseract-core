@@ -138,6 +138,8 @@ filterwarnings = [
     # sometimes, dependencies leak resources
     "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
     "ignore:.*sqlite3\\.Connection.*:pytest.PytestUnraisableExceptionWarning",
+    # pydantic-core declares SerSchema as a string alias that typeguard cannot resolve
+    "ignore:Skipping type check against 'SimpleSerSchema:typeguard.TypeHintWarning",
 ]
 
 [tool.coverage.run]
