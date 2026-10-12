@@ -1458,11 +1458,7 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
     mock_pool = MagicMock()
     mock_slot = MagicMock(spec=BinrefSlot)
 
-    mock_cuda_mod = MagicMock()
-    monkeypatch.setattr(
-        "tesseract_core.sdk.tesseract._import_cuda_ipc",
-        lambda: mock_cuda_mod,
-    )
+    mock_transport = MagicMock()
 
     orig_unlink = Path.unlink
 
@@ -1478,7 +1474,8 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
         binref_pool=mock_pool,
         written_files=[f1, f2],
         checked_out_slots=[mock_slot],
-        device_exports=mock_cuda_mod.ExportGroup(),
+        device_transport=mock_transport,
+        device_exports=mock_transport.new_exports(),
     )
 
     with pytest.raises(OSError, match="permission denied"):
@@ -1486,7 +1483,10 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
 
     assert not f2.exists()
     mock_pool.checkin.assert_called_once_with(mock_slot)
-    mock_cuda_mod.ExportGroup.return_value.release.assert_called_once()
+    mock_transport.release.assert_called_once_with(
+        mock_transport.new_exports.return_value
+    )
+    assert ctx.device_transport is None
     assert ctx.device_exports is None
 
 
@@ -1510,18 +1510,15 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "unlink", failing_unlink)
 
-    mock_cuda_mod = MagicMock()
-    monkeypatch.setattr(
-        "tesseract_core.sdk.tesseract._import_cuda_ipc",
-        lambda: mock_cuda_mod,
-    )
+    mock_transport = MagicMock()
 
     ctx = EncodingContext(
         input_dir=tmp_path,
         binref_pool=mock_pool,
         written_files=[f1],
         checked_out_slots=[mock_slot],
-        device_exports=mock_cuda_mod.ExportGroup(),
+        device_transport=mock_transport,
+        device_exports=mock_transport.new_exports(),
     )
 
     exception_group_cls = getattr(builtins, "ExceptionGroup", None)
@@ -1533,7 +1530,10 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match="Multiple errors occurred"):
             _close_encoding_context(ctx)
 
-    mock_cuda_mod.ExportGroup.return_value.release.assert_called_once()
+    mock_transport.release.assert_called_once_with(
+        mock_transport.new_exports.return_value
+    )
+    assert ctx.device_transport is None
     assert ctx.device_exports is None
 
 
@@ -1824,11 +1824,11 @@ def test_inconclusive_transport_check_is_run_again(monkeypatch):
 
     import tesseract_core.sdk.tesseract as sdk
 
-    fake_ipc = SimpleNamespace(
-        start_transport_check=lambda: ({}, b"", object()),
-        finish_transport_check=lambda array, expected: None,
+    fake_check = SimpleNamespace(
+        start_transport_check=lambda transport: ({}, b"", lambda: None),
+        finish_transport_check=lambda transport, array, expected: None,
     )
-    monkeypatch.setattr(sdk, "_import_cuda_ipc", lambda: fake_ipc)
+    monkeypatch.setattr(sdk, "_import_runtime", lambda module, feature: fake_check)
     answers = [
         SimpleNamespace(status_code=502, ok=False, text="Bad Gateway", content=b""),
         SimpleNamespace(status_code=200, ok=True, text="", content=b'{"ok": true}'),

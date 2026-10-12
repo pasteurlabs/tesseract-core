@@ -13,7 +13,7 @@ it, keep the object that owns the buffer alive until the framework is done.
 
 import ctypes
 import sys
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -102,7 +102,15 @@ def _dlpack_dtype(dtype: np.dtype) -> _DLDataType:
 # DLManagedTensor's address. The deleter removes the entry, which lets the
 # owner go and free the buffer once nothing else uses it either.
 
-_BUNDLES: dict[int, Any] = {}
+
+class _Bundle(NamedTuple):
+    managed: Any
+    shape_arr: Any
+    owner: Any
+    capsule: Any
+
+
+_BUNDLES: dict[int, _Bundle] = {}
 
 # Addresses of capsules no framework has consumed yet. A framework consumes a
 # capsule as soon as it gets it, so this stays small.
@@ -119,16 +127,16 @@ def _deleter(managed_ptr: int | None) -> None:
         pass
 
 
-def _capsule_refcount(bundle: tuple) -> int:
+def _capsule_refcount(bundle: _Bundle) -> int:
     """The reference count of the capsule in ``bundle``, as this helper sees it."""
-    capsule = bundle[3]
+    capsule = bundle.capsule
     return sys.getrefcount(capsule)
 
 
 # _capsule_refcount of a capsule that only its bundle references. Measured with
 # the same helper rather than hard-coded, since how many references
 # sys.getrefcount reports for a local varies across Python versions.
-_BUNDLE_ONLY_REFCOUNT = _capsule_refcount((None, None, None, object()))
+_BUNDLE_ONLY_REFCOUNT = _capsule_refcount(_Bundle(None, None, None, object()))
 
 
 def drop_abandoned_capsules() -> None:
@@ -145,7 +153,7 @@ def drop_abandoned_capsules() -> None:
         if bundle is None:
             _UNCONSUMED.discard(address)
             continue
-        if not _capsule_is_valid(bundle[3], _DLTENSOR):
+        if not _capsule_is_valid(bundle.capsule, _DLTENSOR):
             # Consumed: the consumer calls the deleter when it is done.
             _UNCONSUMED.discard(address)
         elif _capsule_refcount(bundle) <= _BUNDLE_ONLY_REFCOUNT:
@@ -182,6 +190,6 @@ def make_dlpack_capsule(
 
     address = ctypes.addressof(managed)
     capsule = _capsule_new(address, _DLTENSOR, None)
-    _BUNDLES[address] = (managed, shape_arr, owner, capsule)
+    _BUNDLES[address] = _Bundle(managed, shape_arr, owner, capsule)
     _UNCONSUMED.add(address)
     return capsule

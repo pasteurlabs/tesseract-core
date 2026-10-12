@@ -65,15 +65,16 @@ class DeviceTransport(abc.ABC):
         (``cuda_ipc``) return ``None``.
         """
 
+    @abc.abstractmethod
     def new_exports(self) -> Any:
-        """A fresh session to collect one message's exports, or ``None``.
+        """A fresh session to collect one message's exports.
 
-        A server passes it to :meth:`register` for each array of a response and
-        to :meth:`release` once the client is done with that response, so the
-        exports of concurrent requests are kept apart. ``None`` means the
-        transport keeps no per-message state.
+        The producer passes it to :meth:`register` for each array of a message,
+        and to :meth:`release` once the consumer is done with that message,
+        which keeps the exports of concurrent messages apart. A server keeps a
+        response's session only if it is truthy, so it must be falsy while it
+        holds no exports (by defining ``__len__``, for example).
         """
-        return None
 
     @abc.abstractmethod
     def register(self, arr: Any, session: Any = None) -> Any:

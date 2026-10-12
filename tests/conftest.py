@@ -766,17 +766,11 @@ def mocked_cuda(monkeypatch):
     ):
         monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
-    # Each test starts with an empty default export group and buffer pools, and
-    # must not leave fake pointers behind for the next one.
-    def _reset() -> None:
-        cuda_ipc._DEFAULT_EXPORTS.pins.clear()
-        cuda_ipc._DEFAULT_EXPORTS.staging.clear()
-
-    _reset()
+    # Each test starts with empty buffer pools, and must not leave fake pointers
+    # behind for the next one.
     monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())
     monkeypatch.setattr(cuda_ipc, "_DECODE_POOL", cuda_ipc._BufferPool())
     yield fake
-    _reset()
 
 
 @pytest.fixture(scope="module")

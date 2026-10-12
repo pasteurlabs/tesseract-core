@@ -101,24 +101,29 @@ def _unpack_cuda_ipc(data: dict) -> dict:
 def _producer_main(build_fn_name, args, to_consumer, from_consumer):
     """Build arrays in this process, send their encodings, keep them alive.
 
-    Mirrors the ring-1 server contract: the exported arrays are pinned by
-    ``dump_cuda_ipc_arraydict`` and kept alive here until the consumer signals
-    it is done (which, for the real server, is the client acknowledging the
-    response).
+    Mirrors the ring-1 server contract: the exported arrays are pinned in an
+    export group and kept alive here until the consumer signals it is done
+    (which, for the real server, is the client acknowledging the response).
     """
     try:
         import cupy  # noqa: F401
 
-        from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda.ipc import (
+            ExportGroup,
+            dump_cuda_ipc_arraydict,
+        )
 
         build_fn = _BUILDERS[build_fn_name]
         arrays = build_fn(*args)
+        exports = ExportGroup()
         payloads = [
-            (dump_cuda_ipc_arraydict(arr), expected) for arr, expected in arrays
+            (dump_cuda_ipc_arraydict(arr, exports), expected)
+            for arr, expected in arrays
         ]
 
         to_consumer.put(payloads)
         from_consumer.get(timeout=_TIMEOUT)
+        exports.release()
         del arrays
     except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
@@ -350,10 +355,10 @@ _BUILDERS = {
 @requires_cuda
 def test_encode_structure():
     """The encoded dict has the expected structure and metadata."""
-    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import ExportGroup, dump_cuda_ipc_arraydict
 
     arr = cupy.random.randn(64, 128, dtype=cupy.float32)
-    encoded = dump_cuda_ipc_arraydict(arr)
+    encoded = dump_cuda_ipc_arraydict(arr, ExportGroup())
 
     assert encoded["object_type"] == "array"
     assert encoded["shape"] == [64, 128]
@@ -377,10 +382,10 @@ def test_encode_structure():
 @requires_cuda
 def test_encode_requires_cuda_array():
     """Encoding a host array raises a clear error."""
-    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import ExportGroup, dump_cuda_ipc_arraydict
 
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
-        dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
+        dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32), ExportGroup())
 
 
 # Returns a strided view of 2*x, so the server's output is not contiguous.
@@ -437,6 +442,7 @@ def test_same_process_open_is_unsupported():
     """
     from tesseract_core.runtime.cuda.api import _get_cudart
     from tesseract_core.runtime.cuda.ipc import (
+        ExportGroup,
         dump_cuda_ipc_arraydict,
         load_cuda_ipc_arraydict,
     )
@@ -445,7 +451,7 @@ def test_same_process_open_is_unsupported():
     cudart.cudaGetLastError()  # drain any pre-existing error
 
     arr = cupy.arange(16, dtype=cupy.float32)
-    encoded = dump_cuda_ipc_arraydict(arr)
+    encoded = dump_cuda_ipc_arraydict(arr, ExportGroup())
     with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle failed"):
         load_cuda_ipc_arraydict(encoded)
 
@@ -556,21 +562,22 @@ def _ring1_server(req_q, resp_q):
         import cupy
 
         from tesseract_core.runtime.cuda.ipc import (
+            ExportGroup,
             dump_cuda_ipc_arraydict,
-            release_pinned_ipc_exports,
         )
 
+        exports = ExportGroup()
         while True:
             req = req_q.get(timeout=_TIMEOUT)
             if req is None:
                 return
             i = req
-            release_pinned_ipc_exports()  # release-at-request-start
+            exports.release()  # release-at-request-start
             for _ in range(32):
                 tmp = cupy.zeros(4096, dtype=cupy.float32)
                 del tmp
             out = cupy.arange(1024, dtype=cupy.float32) + (i + 1) * 100.0
-            resp_q.put((i, dump_cuda_ipc_arraydict(out)))
+            resp_q.put((i, dump_cuda_ipc_arraydict(out, exports)))
     except Exception:  # noqa: BLE001 -- report any worker failure to the parent
         traceback.print_exc()
         resp_q.put(("SERVER_ERROR", traceback.format_exc()))
@@ -813,10 +820,10 @@ def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
     import torch
 
     from tesseract_core.runtime.cuda.ipc import (
+        ExportGroup,
         cuda_array_to_host,
         dump_cuda_ipc_arraydict,
         has_cuda_array_interface,
-        release_pinned_ipc_exports,
     )
     from tesseract_core.sdk.tesseract import (
         EncodingContext,
@@ -831,12 +838,13 @@ def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
     assert has_cuda_array_interface(x)
     np.testing.assert_array_equal(cuda_array_to_host(x), expected)
 
+    exports = ExportGroup()
     try:
-        exported = dump_cuda_ipc_arraydict(x)
+        exported = dump_cuda_ipc_arraydict(x, exports)
         assert exported["data"]["encoding"] == "cuda_ipc"
         assert exported["shape"] == [4]
     finally:
-        release_pinned_ipc_exports()
+        exports.release()
 
     host = _encode_array(x, encoding="base64")
     np.testing.assert_array_equal(
@@ -874,17 +882,18 @@ def test_export_from_a_thread_that_made_no_cuda_call():
     import torch
 
     from tesseract_core.runtime.cuda.ipc import (
+        ExportGroup,
         dump_cuda_ipc_arraydict,
-        release_pinned_ipc_exports,
     )
 
     x = torch.ones(16, device="cuda")
+    exports = ExportGroup()
     try:
         with ThreadPoolExecutor(1) as pool:
-            exported = pool.submit(dump_cuda_ipc_arraydict, x).result()
+            exported = pool.submit(dump_cuda_ipc_arraydict, x, exports).result()
         assert exported["data"]["encoding"] == "cuda_ipc"
     finally:
-        release_pinned_ipc_exports()
+        exports.release()
 
 
 @requires_torch_cuda

@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import collections
 import inspect
 import threading
 import time
@@ -159,25 +158,38 @@ EXPORTS_DONE_HEADER = "Tesseract-Exports-Done"
 # to decode a response it has received.
 EXPORTS_TIMEOUT_S = 300.0
 
-# Kept exports by id: the transport's session holding them, when they were kept,
-# and whether the client acknowledges.
-_PENDING_EXPORTS: collections.OrderedDict[str, tuple[Any, float, bool]] = (
-    collections.OrderedDict()
-)
+
+class _PendingExports(NamedTuple):
+    """A response's exports, kept until its client is done with them."""
+
+    transport: Any
+    """The DeviceTransport that exported them."""
+
+    session: Any
+    """The transport's session holding them (see DeviceTransport.new_exports)."""
+
+    kept_at: float
+    acknowledged: bool
+    """Whether the client names the responses it is done with."""
+
+
+_PENDING_EXPORTS: dict[str, _PendingExports] = {}
 _PENDING_EXPORTS_LOCK = threading.Lock()
 
 
-def _keep_exports(exports: Any, acknowledged: bool) -> str | None:
+def _keep_exports(transport: Any, session: Any, acknowledged: bool) -> str | None:
     """Keep a response's exports and return the id to send with it, if it has any."""
-    if not exports:
+    if not session:
         return None
     export_id = uuid.uuid4().hex
     with _PENDING_EXPORTS_LOCK:
-        _PENDING_EXPORTS[export_id] = (exports, time.monotonic(), acknowledged)
+        _PENDING_EXPORTS[export_id] = _PendingExports(
+            transport, session, time.monotonic(), acknowledged
+        )
     return export_id
 
 
-def _release_exports(transport: Any, done: list[str], unacknowledged: bool) -> None:
+def _release_exports(done: list[str], unacknowledged: bool) -> None:
     """Release the exports named in ``done`` and those kept too long.
 
     With ``unacknowledged``, also release those of every client that does not
@@ -187,19 +199,17 @@ def _release_exports(transport: Any, done: list[str], unacknowledged: bool) -> N
     released = []
     with _PENDING_EXPORTS_LOCK:
         for export_id in done:
-            entry = _PENDING_EXPORTS.pop(export_id, None)
-            if entry is not None:
-                released.append(entry[0])
-        for export_id, (exports, kept_at, acknowledged) in list(
-            _PENDING_EXPORTS.items()
-        ):
-            if (unacknowledged and not acknowledged) or (
-                now - kept_at > EXPORTS_TIMEOUT_S
+            pending = _PENDING_EXPORTS.pop(export_id, None)
+            if pending is not None:
+                released.append(pending)
+        for export_id, pending in list(_PENDING_EXPORTS.items()):
+            if (unacknowledged and not pending.acknowledged) or (
+                now - pending.kept_at > EXPORTS_TIMEOUT_S
             ):
                 del _PENDING_EXPORTS[export_id]
-                released.append(exports)
-    for exports in released:
-        transport.release(exports)
+                released.append(pending)
+    for pending in released:
+        pending.transport.release(pending.session)
 
 
 class _ReleaseDoneExports:
@@ -209,9 +219,8 @@ class _ReleaseDoneExports:
     health check when it closes.
     """
 
-    def __init__(self, app: Any, transport_name: str) -> None:
+    def __init__(self, app: Any) -> None:
         self.app = app
-        self.transport_name = transport_name
         self._header = EXPORTS_DONE_HEADER.lower().encode()
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
@@ -219,12 +228,7 @@ class _ReleaseDoneExports:
             for name, value in scope["headers"]:
                 if name == self._header:
                     if value:
-                        from tesseract_core.runtime.device_transport import (
-                            get_transport,
-                        )
-
                         _release_exports(
-                            get_transport(self.transport_name),
                             value.decode("latin-1").split(","),
                             unacknowledged=False,
                         )
@@ -237,7 +241,7 @@ def check_gpu_transport(request: dict) -> dict:
 
     Returns ``{"ok": True, "array": ...}`` with the transport's reply, or
     ``{"ok": False, "reason": ...}`` if this side of the check failed. See
-    :func:`tesseract_core.runtime.cuda.ipc.answer_transport_check`.
+    :mod:`tesseract_core.runtime.cuda.check`.
     """
     gpu_transport = request.get("gpu_transport")
     if gpu_transport == "none" or gpu_transport not in available_gpu_transports():
@@ -247,13 +251,13 @@ def check_gpu_transport(request: dict) -> dict:
             f"Tesseract (available: {list(available_gpu_transports())})",
         }
     try:
-        from tesseract_core.runtime.cuda.ipc import answer_transport_check
+        from tesseract_core.runtime.cuda.check import answer_transport_check
 
         return {"ok": True, "array": answer_transport_check(request)}
     except Exception as exc:  # noqa: BLE001 - reported to the client, which decides
         return {
             "ok": False,
-            "reason": f"the Tesseract could not open GPU memory exported by the "
+            "reason": f"the Tesseract could not exchange GPU memory with the "
             f"client: {type(exc).__name__}: {exc}",
         }
 
@@ -290,17 +294,18 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             config = get_config()
             encoding = negotiate_encoding(accept)
 
-            # Collect this response's device exports so they can be kept until
-            # the client is done with them, and release earlier ones (see
-            # _release_exports). Gated on a configured GPU transport so the
-            # default path never imports the CUDA machinery.
-            exports = None
+            # Release earlier responses' device exports (see _release_exports),
+            # and collect this response's so they can be kept until the client
+            # is done with them. Gated on a GPU transport so the default path
+            # never imports the CUDA machinery.
+            transport = exports = None
             acknowledged = exports_done is not None
             if config.gpu_transport != "none":
+                _release_exports([], unacknowledged=not acknowledged)
+            if encoding.gpu_transport != "none":
                 from tesseract_core.runtime.device_transport import get_transport
 
-                transport = get_transport(config.gpu_transport)
-                _release_exports(transport, [], unacknowledged=not acknowledged)
+                transport = get_transport(encoding.gpu_transport)
                 exports = transport.new_exports()
 
             if run_id is None:
@@ -326,10 +331,10 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 )
             except BaseException:
                 # No client will read the exports of a response that failed.
-                if exports is not None:
+                if transport is not None:
                     transport.release(exports)
                 raise
-            export_id = _keep_exports(exports, acknowledged)
+            export_id = _keep_exports(transport, exports, acknowledged)
             if export_id is not None:
                 response.headers[EXPORTS_HEADER] = export_id
             return response
@@ -385,7 +390,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
 
     if config.gpu_transport != "none":
-        app.add_middleware(_ReleaseDoneExports, transport_name=config.gpu_transport)
+        app.add_middleware(_ReleaseDoneExports)
 
         # Not a Tesseract endpoint, so it stays out of the schema clients read
         # endpoints from. Async like the endpoints above, so it runs on the event

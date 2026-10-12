@@ -27,10 +27,7 @@ by :mod:`array_encoding` are:
 * :func:`dump_cuda_ipc_arraydict` / :func:`load_cuda_ipc_arraydict` -- the
   encode/decode pair,
 * :class:`ExportGroup` -- keeps one message's exports alive until its consumer
-  is done with them,
-* :func:`start_transport_check` / :func:`answer_transport_check` /
-  :func:`finish_transport_check` -- the exchange that tells a client whether
-  ``cuda_ipc`` works between it and a particular server.
+  is done with them.
 
 Out-of-process consumers that ``dlopen`` libcudart themselves (e.g. the
 ``tesseract_jax`` C++ FFI shim) can reuse the library discovery -- including the
@@ -64,14 +61,10 @@ from tesseract_core.runtime.device_transport import DeviceTransport
 __all__ = [
     "ExportGroup",
     "IpcDeviceArray",
-    "answer_transport_check",
     "cuda_array_to_host",
     "dump_cuda_ipc_arraydict",
-    "finish_transport_check",
     "has_cuda_array_interface",
     "load_cuda_ipc_arraydict",
-    "release_pinned_ipc_exports",
-    "start_transport_check",
     "validate_cuda_array",
 ]
 
@@ -185,8 +178,8 @@ class _CudaArrayInfo(NamedTuple):
         return self.strides == tuple(expected)
 
 
-def _contiguous_on_device(arr: Any) -> Any:
-    """``arr``, or a row-major copy of it on the same device if it is strided.
+def _contiguous_on_device(arr: Any) -> tuple[Any, _CudaArrayInfo]:
+    """``arr``, or a row-major copy of it on the same device if it is strided, with its info.
 
     cuda_ipc moves a flat byte range, so a strided GPU array is first copied on
     the device by the framework that made it: PyTorch's ``.contiguous()`` or
@@ -195,17 +188,16 @@ def _contiguous_on_device(arr: Any) -> Any:
     """
     info = _read_cuda_array_info(arr)
     if info.is_c_contiguous():
-        return arr
+        return arr, info
     for make_copy in (lambda: arr.contiguous(), lambda: arr.copy(order="C")):
         try:
             copy = make_copy()
         except (AttributeError, TypeError):
             continue
-        if (
-            has_cuda_array_interface(copy)
-            and _read_cuda_array_info(copy).is_c_contiguous()
-        ):
-            return copy
+        if has_cuda_array_interface(copy):
+            copy_info = _read_cuda_array_info(copy)
+            if copy_info.is_c_contiguous():
+                return copy, copy_info
     raise ValueError(
         "cuda_ipc encoding requires a C-contiguous array; got one with "
         f"strides {info.strides}, and {type(arr).__name__} offers no way to copy "
@@ -269,49 +261,30 @@ def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
 #   * Server: a response's group must outlive the response, since the client
 #     copies the outputs out only once it has received it. The server keeps the
 #     group until the client acknowledges the response (see serve.py).
-#
-# Callers that pass no group use a process-wide one, released by
-# :func:`release_pinned_ipc_exports`, which is safe only if exports never
-# overlap in time.
 
 
 class ExportGroup:
     """The arrays one message exported via CUDA IPC, kept alive until :meth:`release`.
 
     Also holds the staging buffers they were copied into (see
-    :func:`_stage_for_export`), which :meth:`release` returns to the pool.
+    :func:`_stage_for_export`), which :meth:`release` returns to the pool. Only
+    the thread encoding the message adds to a group.
     """
 
     def __init__(self) -> None:
         self.pins: list[Any] = []
         # Staging buffers as (device pointer, device, size, IPC handle).
         self.staging: list[tuple[int, int, int, bytes]] = []
-        self._lock = threading.Lock()
 
     def __len__(self) -> int:
         return len(self.pins) + len(self.staging)
 
-    def pin(self, arr: Any) -> None:
-        """Keep ``arr``, so its memory stays valid, until :meth:`release`."""
-        with self._lock:
-            self.pins.append(arr)
-
-    def add_staging(self, ptr: int, device: int, nbytes: int, handle: bytes) -> None:
-        """Keep a staging buffer until :meth:`release` returns it to the pool."""
-        with self._lock:
-            self.staging.append((ptr, device, nbytes, handle))
-
     def release(self) -> None:
         """Let go of the pinned arrays and return the staging buffers to the pool."""
-        with self._lock:
-            self.pins.clear()
-            staging, self.staging[:] = list(self.staging), []
+        self.pins.clear()
+        staging, self.staging = self.staging, []
         for ptr, device, nbytes, handle in staging:
             _STAGING_POOL.put(ptr, device, nbytes, handle)
-
-
-# The group for callers that pass none.
-_DEFAULT_EXPORTS = ExportGroup()
 
 
 class _BufferPool:
@@ -433,13 +406,8 @@ def _stage_for_export(
     except Exception:
         cuda_api.free(ptr)
         raise
-    group.add_staging(ptr, device, nbytes, handle)
+    group.staging.append((ptr, device, nbytes, handle))
     return handle
-
-
-def release_pinned_ipc_exports() -> None:
-    """Release the exports of callers that passed no :class:`ExportGroup`."""
-    _DEFAULT_EXPORTS.release()
 
 
 @contextlib.contextmanager
@@ -459,7 +427,7 @@ def _on_device(device: int) -> Iterator[None]:
         cuda_api.set_device(previous)
 
 
-def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup | None = None) -> ArrayDict:
+def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup) -> ArrayDict:
     """Dump a CUDA array to a JSON dict with a CUDA IPC handle.
 
     Works with any object that implements ``__cuda_array_interface__``, such
@@ -468,9 +436,8 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup | None = None) -> Array
     The IPC handle allows another process on the same host (with --ipc=host)
     to access the GPU memory directly without any CPU round-trip.
 
-    The source array stays pinned in ``group`` (by default the process-wide
-    one, see :func:`release_pinned_ipc_exports`) until the group is released,
-    so its GPU memory is not freed or recycled before the consumer copies it out.
+    The source array stays pinned in ``group`` until the group is released, so
+    its GPU memory is not freed or recycled before the consumer copies it out.
 
     Frameworks with VMM/pool-backed GPU allocators (e.g. JAX/XLA) hand out
     pointers that the legacy ``cudaIpcGetMemHandle`` API rejects. For those,
@@ -478,16 +445,13 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup | None = None) -> Array
     one on-GPU copy (see :func:`_stage_for_export`) and exports a handle to that
     instead, which is still far cheaper than a host round-trip.
     """
-    if group is None:
-        group = _DEFAULT_EXPORTS
     if not has_cuda_array_interface(arr):
         raise ValueError(
             "cuda_ipc encoding requires a CUDA array "
             f"(object with __cuda_array_interface__), got {type(arr).__name__}"
         )
 
-    arr = _contiguous_on_device(_without_autograd(arr))
-    info = _read_cuda_array_info(arr)
+    arr, info = _contiguous_on_device(_without_autograd(arr))
 
     if info.dtype.kind == "V":
         raise TypeError(
@@ -512,7 +476,7 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup | None = None) -> Array
     # (Not strictly needed on the VMM fallback path below, which copies out of
     # `arr` before the handle leaves the process, but keeping the pin gives both
     # paths identical cleanup.)
-    group.pin(arr)
+    group.pins.append(arr)
 
     # Synchronization and staging allocations act on the active device, which
     # need not be the array's.
@@ -758,31 +722,6 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     return IpcDeviceArray(owned_ptr, device, shape, dtype)
 
 
-# ---------------------------------------------------------------------------
-# Transport check
-# ---------------------------------------------------------------------------
-#
-# Whether cuda_ipc works between two processes depends on things neither can
-# see from the other side, such as whether they share a host and a GPU and how a
-# container runtime isolates them. A client therefore finds out by trying,
-# once per server. It exports random bytes, the server opens the handle and
-# checks them, then exports the bytes reversed for the client to open and check
-# in turn. Comparing contents also catches a handle that opens onto the wrong
-# memory.
-#
-# The check can run while other calls are in flight (Tesseract-JAX may lower
-# one function while a compiled one runs), so its arrays stay out of the export
-# groups above, and each side keeps its own check buffers alive instead.
-
-# Size of the buffer each side exports during a check.
-_CHECK_NBYTES = 256
-
-# Arrays the server exported in reply to recent checks. Kept alive until enough
-# later checks have replaced them that the client is certainly done reading,
-# even when several clients check at about the same time.
-_CHECK_REPLIES: collections.deque = collections.deque(maxlen=16)
-
-
 def _device_array_from_bytes(data: bytes, device: int) -> IpcDeviceArray:
     """Copy ``data`` into a fresh ``uint8`` device array owned by this process."""
     host = np.frombuffer(data, dtype=np.uint8)
@@ -795,70 +734,6 @@ def _device_array_from_bytes(data: bytes, device: int) -> IpcDeviceArray:
             cuda_api.free(ptr)
             raise
     return IpcDeviceArray(ptr, device, host.shape, host.dtype)
-
-
-def _export_for_check(arr: IpcDeviceArray) -> ArrayDict:
-    """Export ``arr`` by IPC handle, outside every request's export group.
-
-    The caller keeps ``arr`` alive until the other side has read it. ``arr`` is
-    a plain ``cudaMalloc`` buffer, which legacy IPC exports without staging, so
-    the throwaway group holds nothing that needs releasing.
-    """
-    return dump_cuda_ipc_arraydict(arr, ExportGroup())
-
-
-def _read_check_array(payload: Any) -> bytes:
-    """Open a check array exported by the other side and return its bytes."""
-    if not isinstance(payload, dict) or payload.get("dtype") != "uint8":
-        raise ValueError("expected a uint8 array")
-    if list(payload.get("shape", ())) != [_CHECK_NBYTES]:
-        raise ValueError(f"expected an array of {_CHECK_NBYTES} bytes")
-    if payload.get("data", {}).get("encoding") != "cuda_ipc":
-        raise ValueError("expected a cuda_ipc array")
-    return load_cuda_ipc_arraydict(payload).copy_to_host().tobytes()
-
-
-def start_transport_check() -> tuple[dict, bytes, IpcDeviceArray]:
-    """Client side: export random bytes from the active CUDA device.
-
-    Returns the request body to send to the server, the bytes its reply must
-    hold, and the exported array, which the caller keeps alive until the server
-    has answered.
-    """
-    data = os.urandom(_CHECK_NBYTES)
-    arr = _device_array_from_bytes(data, cuda_api.get_device())
-    request = {
-        "gpu_transport": "cuda_ipc",
-        "array": _export_for_check(arr),
-        "expected": pybase64.b64encode_as_string(data),
-    }
-    return request, data[::-1], arr
-
-
-def answer_transport_check(request: dict) -> ArrayDict:
-    """Server side: check the client's bytes, then export them reversed.
-
-    Raises if the client's handle cannot be opened or holds the wrong bytes.
-    """
-    data = _read_check_array(request.get("array"))
-    if data != pybase64.b64decode(request.get("expected", ""), validate=True):
-        raise ValueError(
-            "the bytes read through the client's IPC handle differ from the ones "
-            "it wrote"
-        )
-    device = int(request["array"]["data"]["buffer"].split(":", 1)[0])
-    reply = _device_array_from_bytes(data[::-1], device)
-    _CHECK_REPLIES.append(reply)
-    return _export_for_check(reply)
-
-
-def finish_transport_check(reply: Any, expected: bytes) -> None:
-    """Client side: open the server's reply and check it holds ``expected``."""
-    if _read_check_array(reply) != expected:
-        raise ValueError(
-            "the bytes read through the server's IPC handle differ from the ones "
-            "it wrote"
-        )
 
 
 def validate_cuda_array(
@@ -903,7 +778,12 @@ class CudaIpcTransport(DeviceTransport):
         per-array handle *is* the array dict and :meth:`descriptor` is a
         passthrough. Splitting them would take the IPC handle twice for nothing.
         """
-        return dump_cuda_ipc_arraydict(arr, group=session)
+        if session is None:
+            raise ValueError(
+                "cuda_ipc exports need a session from new_exports(), which keeps "
+                "them alive until it is released"
+            )
+        return dump_cuda_ipc_arraydict(arr, session)
 
     def descriptor(self, handle: ArrayDict) -> ArrayDict:
         """Return the array dict :meth:`register` already produced."""
@@ -917,8 +797,5 @@ class CudaIpcTransport(DeviceTransport):
         return load_cuda_ipc_arraydict(val)
 
     def release(self, session: Any = None) -> None:
-        """Drop the producer-side pins of ``session``, or of callers that passed none."""
-        if session is None:
-            release_pinned_ipc_exports()
-        else:
-            session.release()
+        """Drop the producer-side pins of ``session`` (an :class:`ExportGroup`)."""
+        session.release()

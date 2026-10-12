@@ -11,8 +11,11 @@ do not depend on CUDA. The cuda_ipc backend's own conformance lives in
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
+import numpy as np
+import pybase64
 import pytest
 
 from tesseract_core.runtime.array_encoding import ArrayDict
@@ -30,6 +33,9 @@ class _StubTransport(DeviceTransport):
 
     def bootstrap(self, role: Any, peer_offer: Any) -> None:
         return None
+
+    def new_exports(self) -> Any:
+        return []
 
     def register(self, arr: Any, session: Any = None) -> Any:
         return arr
@@ -109,6 +115,9 @@ def test_incomplete_transport_cannot_instantiate():
         def bootstrap(self, role, peer_offer):
             return None
 
+        def new_exports(self):
+            return []
+
         def register(self, arr, session=None):
             return arr
 
@@ -125,3 +134,83 @@ def test_incomplete_transport_cannot_instantiate():
 
     with pytest.raises(TypeError, match="abstract"):
         _MissingRelease()
+
+
+class _HostArray:
+    """A host stand-in for the device arrays a CUDA transport receives."""
+
+    def __init__(self, data: bytes, device: int) -> None:
+        self._data = np.frombuffer(data, dtype=np.uint8)
+        self.device = device
+        self.shape = self._data.shape
+        self.dtype = self._data.dtype
+
+    def copy_to_host(self) -> np.ndarray:
+        return self._data.copy()
+
+
+class _LoopbackTransport(_StubTransport):
+    """Passes arrays within this process, standing in for any transport but cuda_ipc."""
+
+    name = "loopback_test_transport"
+
+    def __init__(self) -> None:
+        self.exported: dict[str, Any] = {}
+
+    def new_exports(self) -> list[str]:
+        return []
+
+    def register(self, arr: Any, session: Any = None) -> ArrayDict:
+        key = uuid.uuid4().hex
+        self.exported[key] = arr
+        session.append(key)
+        return {
+            "object_type": "array",
+            "shape": list(arr.shape),
+            "dtype": arr.dtype.name,
+            "data": {"buffer": key, "encoding": self.name},
+        }
+
+    def receive(self, val: ArrayDict, session: Any = None) -> Any:
+        return self.exported[val["data"]["buffer"]]
+
+    def release(self, session: Any = None) -> None:
+        for key in session:
+            del self.exported[key]
+
+
+def test_transport_check_works_for_any_transport(monkeypatch):
+    """The check that a GPU transport works uses only the DeviceTransport interface.
+
+    So a transport other than cuda_ipc needs nothing more to take part in it,
+    and each export the check makes is released again.
+    """
+    import collections
+
+    from tesseract_core.runtime import device_transport
+    from tesseract_core.runtime.cuda import api as cuda_api
+    from tesseract_core.runtime.cuda import check
+
+    transport = _LoopbackTransport()
+    monkeypatch.setitem(device_transport._TRANSPORTS, transport.name, transport)
+    monkeypatch.setattr(check, "_device_array_from_bytes", _HostArray)
+    monkeypatch.setattr(cuda_api, "get_device", lambda: 0)
+    monkeypatch.setattr(check, "_CHECK_REPLIES", collections.deque())
+    monkeypatch.setattr(check, "_CHECK_REPLIES_KEPT", 1)
+
+    def run_check() -> None:
+        request, expected, release = check.start_transport_check(transport.name)
+        reply = check.answer_transport_check(request)
+        release()
+        check.finish_transport_check(transport.name, reply, expected)
+
+    run_check()
+    assert len(transport.exported) == 1, "only the server's reply is kept"
+    run_check()
+    assert len(transport.exported) == 1, "a later check releases an earlier reply"
+
+    request, _, release = check.start_transport_check(transport.name)
+    request["expected"] = pybase64.b64encode_as_string(bytes(check._CHECK_NBYTES))
+    with pytest.raises(ValueError, match="differ"):
+        check.answer_transport_check(request)
+    release()
