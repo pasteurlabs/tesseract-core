@@ -88,7 +88,7 @@ class FileBackend(BaseBackend):
         """Log a metric to CSV file."""
         # Naive local time on purpose: this string is written to the metrics CSV,
         # and adding a UTC offset would change the file format users parse.
-        timestamp = datetime.now().isoformat()  # noqa: DTZ005
+        timestamp = datetime.now().isoformat()
         step_value = (
             step
             if step is not None
