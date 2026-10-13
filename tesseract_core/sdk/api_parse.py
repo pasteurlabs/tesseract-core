@@ -464,9 +464,9 @@ def validate_tesseract_api(src_dir: Path) -> None:
             f"Invalid configuration in {config_location}: {err}"
         ) from err
 
-    # Parse Tesseract API
-    with open(tesseract_api_location) as f:
-        tesseract_api_code = f.read()
+    # Parse Tesseract API. From bytes, so the source is decoded as the
+    # interpreter would decode it, not in the platform's default encoding.
+    tesseract_api_code = tesseract_api_location.read_bytes()
 
     try:
         tesseract_api = ast.parse(tesseract_api_code)
@@ -526,7 +526,8 @@ def get_config(src_dir: Path) -> TesseractConfig:
         raise FileNotFoundError(f"No file found at {config_file}")
 
     try:
-        with open(config_file) as f:
+        # In binary, so PyYAML decodes it as YAML is defined to be encoded.
+        with open(config_file, "rb") as f:
             config = yaml.safe_load(f)
     except yaml.YAMLError as err:
         raise ValidationError(f"Invalid YAML in {config_file}: {err}") from err

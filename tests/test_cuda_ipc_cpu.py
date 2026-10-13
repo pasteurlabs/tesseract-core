@@ -602,7 +602,7 @@ def test_load_frees_owned_buffer_on_open_failure(mocked_cuda, monkeypatch):
     fails there is no mapping to close, but the owned buffer must not leak.
     """
 
-    def boom_open(handle_bytes, device):
+    def boom_open(handle_bytes):
         raise RuntimeError("cudaIpcOpenMemHandle failed: simulated")
 
     monkeypatch.setattr(cuda_api, "ipc_open_mem_handle", boom_open)

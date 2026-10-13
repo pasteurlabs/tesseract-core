@@ -168,16 +168,15 @@ def ipc_get_mem_handle(device_ptr: int) -> bytes:
     return bytes(handle.reserved)
 
 
-def ipc_open_mem_handle(handle_bytes: bytes, device: int) -> int:
-    """Open an IPC handle on ``device``; return the mapped base device pointer.
+def ipc_open_mem_handle(handle_bytes: bytes) -> int:
+    """Open an IPC handle on the active device; return the mapped base device pointer.
 
-    The returned pointer is the base of the producer's allocation as mapped
-    into this process; callers must add any per-array byte offset themselves.
+    IPC memory must be opened on the device it lives on, so callers make that
+    device active first. The returned pointer is the base of the producer's
+    allocation as mapped into this process; callers must add any per-array
+    byte offset themselves.
     """
     cudart = _get_cudart()
-    # IPC memory must be opened on the device it lives on.
-    set_device(device)
-
     handle = loader.CudaIpcMemHandle()
     ctypes.memmove(handle.reserved, handle_bytes, IPC_HANDLE_SIZE)
     dev_ptr = ctypes.c_void_p()

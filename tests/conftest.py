@@ -738,8 +738,8 @@ def mocked_cuda(monkeypatch):
             self.calls["get_handle"].append(device_ptr)
             return b"\x01" * IPC_HANDLE_SIZE
 
-        def ipc_open_mem_handle(self, handle_bytes: bytes, device: int) -> int:
-            self.calls["open"].append((handle_bytes, device))
+        def ipc_open_mem_handle(self, handle_bytes: bytes) -> int:
+            self.calls["open"].append((handle_bytes, self.current_device))
             return 0x2000  # pretend mapped base pointer
 
         def ipc_close_mem_handle(self, device_ptr: int) -> None:

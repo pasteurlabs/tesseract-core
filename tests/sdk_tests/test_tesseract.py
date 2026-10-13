@@ -87,6 +87,9 @@ def mock_serving(mocker):
 @pytest.fixture
 def mock_clients(mocker):
     mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
+    mocker.patch(
+        "tesseract_core.sdk.tesseract.HTTPClient.openapi_schema", {"paths": {}}
+    )
 
 
 def test_Tesseract_init_raises():
@@ -453,13 +456,13 @@ def test_tesseract_in_foreign_environment(dummy_api_path, tmp_path):
 
 
 def test_Tesseract_schema_method(mocker, mock_serving):
-    mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
-    mocked_run.return_value = {"#defs": {"some": "stuff"}}
+    schema = {"#defs": {"some": "stuff"}}
+    mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.openapi_schema", schema)
 
     with Tesseract.from_image("sometesseract:0.2.3") as t:
         openapi_schema = t.openapi_schema
 
-    assert openapi_schema == mocked_run.return_value
+    assert openapi_schema == schema
 
 
 def test_serve_lifecycle(mock_serving, mock_clients):
@@ -592,15 +595,17 @@ def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expecte
 
 
 def test_compression_warns_when_the_server_may_ignore_it():
-    from tesseract_core.sdk.tesseract import (
-        ServerCapabilities,
-        _fit_encoding_to_server,
-        _RequestedEncoding,
-    )
+    from tesseract_core.sdk.tesseract import ServerCapabilities
 
-    capabilities = ServerCapabilities.from_openapi_schema(_SCHEMA_1_13)
-    with pytest.warns(UserWarning, match="ignore the requested compression"):
-        _fit_encoding_to_server(_RequestedEncoding(compression="lz4"), capabilities)
+    tess = Tesseract.from_url("localhost")
+    tess._client.server_capabilities = ServerCapabilities.from_openapi_schema(
+        _SCHEMA_1_13
+    )
+    with pytest.warns(UserWarning, match="ignore the requested compression") as record:
+        tess.with_encoding(compression="lz4")
+
+    # Points at the with_encoding call, not into the SDK
+    assert [w.filename for w in record] == [__file__]
 
 
 def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_module):
@@ -610,6 +615,32 @@ def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_modul
         dummy_tesseract_module, gpu_transport="cuda_ipc"
     )
     assert local.server_capabilities is None
+
+
+def test_HTTPClient_only_decodes_what_the_server_marks_as_an_array(mocker):
+    """An output that has a "shape" of its own is not an encoded array."""
+    mock_response = mocker.Mock()
+    mock_response.content = orjson.dumps(
+        {
+            "grid": {"shape": [2, 3], "spacing": 0.5},
+            "values": {
+                "object_type": "array",
+                "shape": [2],
+                "dtype": "float32",
+                "data": {"buffer": [1.0, 2.0], "encoding": "json"},
+            },
+        }
+    )
+    mock_response.ok = True
+    mock_response.status_code = 200
+    mocker.patch("requests.Session.request", return_value=mock_response)
+
+    out = HTTPClient("somehost").run_tesseract("apply", {"inputs": {}})
+
+    assert out["grid"] == {"shape": [2, 3], "spacing": 0.5}
+    np.testing.assert_array_equal(
+        out["values"], np.array([1.0, 2.0], dtype="float32"), strict=True
+    )
 
 
 @pytest.mark.parametrize(
