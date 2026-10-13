@@ -779,6 +779,16 @@ def decode_array(
                     f"Tesseract (available: {available_gpu_transports()})"
                 )
 
+            # The schema admits any castable dtype, but a GPU array is passed on
+            # as is, so check the metadata before mapping the memory
+            check_shape_dtype_no_cast(
+                tuple(val.shape),
+                val.dtype,
+                expected_shape,
+                expected_dtype,
+                no_cast_reason=f"{val.data.encoding} does not cast on device",
+            )
+
             # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
             transport = get_transport(val.data.encoding)
             return transport.receive(val.model_dump())
