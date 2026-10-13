@@ -1644,7 +1644,8 @@ def _decode_array(
 
 
 # How a client and server agree when the server may release the device memory a
-# response exported (see tesseract_core.runtime.serve, whose names these mirror).
+# response exported (see tesseract_core.runtime.cuda.serving, whose names these
+# mirror).
 _EXPORTS_HEADER = "Tesseract-Exports"
 _EXPORTS_DONE_HEADER = "Tesseract-Exports-Done"
 

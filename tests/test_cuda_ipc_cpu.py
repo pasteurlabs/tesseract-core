@@ -1352,11 +1352,12 @@ def test_server_keeps_response_exports_until_their_client_is_done(
     from tesseract_core.runtime import serve
     from tesseract_core.runtime.config import override_config, update_config
     from tesseract_core.runtime.core import load_module_from_path
+    from tesseract_core.runtime.cuda import serving as cuda_serving
 
-    monkeypatch.setattr(serve, "_PENDING_EXPORTS", {})
+    monkeypatch.setattr(cuda_serving, "_PENDING_EXPORTS", {})
     api_path = tmp_path / "tesseract_api.py"
     api_path.write_text(_GPU_OUTPUT_API)
-    done = serve.EXPORTS_DONE_HEADER
+    done = cuda_serving.EXPORTS_DONE_HEADER
 
     with override_config():
         update_config(gpu_transport="cuda_ipc")
@@ -1373,8 +1374,8 @@ def test_server_keeps_response_exports_until_their_client_is_done(
             )
             assert response.status_code == 200, response.text
             assert response.json()["y"]["data"]["encoding"] == "cuda_ipc"
-            export_id = response.headers[serve.EXPORTS_HEADER]
-            return export_id, serve._PENDING_EXPORTS[export_id].session
+            export_id = response.headers[cuda_serving.EXPORTS_HEADER]
+            return export_id, cuda_serving._PENDING_EXPORTS[export_id].session
 
         first_id, first = apply(**{done: ""})
         assert len(first.pins) == 1
@@ -1384,7 +1385,7 @@ def test_server_keeps_response_exports_until_their_client_is_done(
         # ... and naming them, on any request, releases them.
         client.get("/health", headers={done: first_id})
         assert len(first.pins) == 0
-        assert first_id not in serve._PENDING_EXPORTS
+        assert first_id not in cuda_serving._PENDING_EXPORTS
 
         # A client that does not acknowledge has its earlier exports released
         # by its next request, but not those of clients that do.
@@ -1394,7 +1395,7 @@ def test_server_keeps_response_exports_until_their_client_is_done(
         assert len(second.pins) == 1
 
         # Exports nobody names are released once kept too long.
-        monkeypatch.setattr(serve, "EXPORTS_TIMEOUT_S", 0.0)
+        monkeypatch.setattr(cuda_serving, "EXPORTS_TIMEOUT_S", 0.0)
         apply(**{done: ""})
         assert len(second.pins) == 0
 
@@ -1412,13 +1413,14 @@ def test_server_releases_exports_of_a_response_that_fails_to_encode(
     from tesseract_core.runtime import serve
     from tesseract_core.runtime.config import override_config, update_config
     from tesseract_core.runtime.core import load_module_from_path
+    from tesseract_core.runtime.cuda import serving as cuda_serving
     from tesseract_core.runtime.device_transport import get_transport
 
     def export_then_fail(*args, device_exports=None, **kwargs):
         cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4"), device_exports)
         raise RuntimeError("encoding failed")
 
-    monkeypatch.setattr(serve, "_PENDING_EXPORTS", {})
+    monkeypatch.setattr(cuda_serving, "_PENDING_EXPORTS", {})
     monkeypatch.setattr(serve, "output_to_bytes", export_then_fail)
     api_path = tmp_path / "tesseract_api.py"
     api_path.write_text(_GPU_OUTPUT_API)
@@ -1443,13 +1445,13 @@ def test_server_releases_exports_of_a_response_that_fails_to_encode(
             json={"inputs": {"n": 4}},
             headers={
                 "Accept": "application/json; gpu_transport=cuda_ipc",
-                serve.EXPORTS_DONE_HEADER: "",
+                cuda_serving.EXPORTS_DONE_HEADER: "",
             },
         )
 
     assert response.status_code == 500
     assert released == [1], "the failed response's exports were not released"
-    assert not serve._PENDING_EXPORTS
+    assert not cuda_serving._PENDING_EXPORTS
 
 
 def test_concurrent_decodes_of_one_allocation_share_its_mapping(mocked_cuda):

@@ -260,7 +260,8 @@ def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
 #
 #   * Server: a response's group must outlive the response, since the client
 #     copies the outputs out only once it has received it. The server keeps the
-#     group until the client acknowledges the response (see serve.py).
+#     group until the client acknowledges the response (see
+#     :mod:`tesseract_core.runtime.cuda.serving`).
 
 
 class ExportGroup:
