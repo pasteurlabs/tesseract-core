@@ -85,6 +85,18 @@ def test_prepare_build_context_build_env(tmp_path_factory):
     assert "UV_INDEX_STRATEGY" not in run_stage
 
 
+def test_prepare_build_context_writes_utf8(tmp_path_factory):
+    """The Dockerfile is UTF-8 even where that is not the platform's default."""
+    src_dir = tmp_path_factory.mktemp("src")
+    build_dir = tmp_path_factory.mktemp("build")
+    description = "Density \N{GREEK SMALL LETTER RHO}"
+
+    config = TesseractConfig(name="foobar", description=description)
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    assert description in (build_dir / "Dockerfile").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("provider", ["uv-pip", "conda"])
 def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
     """host_credentials render secret mounts + a credentials file, no tokens (#675).

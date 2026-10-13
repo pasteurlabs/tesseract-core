@@ -74,7 +74,7 @@ class FileBackend(BaseBackend):
         self.metrics = []
 
         # Initialize CSV file with headers
-        with open(self.metrics_file, "w", newline="") as f:
+        with open(self.metrics_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["timestamp", "key", "value", "step"])
 
@@ -103,7 +103,7 @@ class FileBackend(BaseBackend):
         }
         self.metrics.append(metric_entry)
 
-        with open(self.metrics_file, "a", newline="") as f:
+        with open(self.metrics_file, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([timestamp, key, value, step_value])
 
