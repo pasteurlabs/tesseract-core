@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.15.0] - 2026-10-07
+## [1.15.0] - 2026-10-13
 
 ### Features
 
@@ -21,18 +21,28 @@ All notable changes to this project will be documented in this file.
 - *(runtime)* Skip absent optional leaves when expanding gradient paths (#812)
 - *(runtime)* Accept any abstract_eval as eval_fn in jacobian_from_vjp (#815)
 - *(runtime)* Correct expected Jacobian shape when input or output shape is Ellipsis (#822)
+- *(runtime)* Accept PyTorch CUDA tensors in Jacobian result validation (#825)
+- *(sdk)* Remove the serve log on Windows when a Tesseract is removed (#831)
+- *(runtime)* Report invalid inputs to a JVP request instead of crashing (#835)
+- *(runtime)* Match gradient paths in full, not anywhere in the string (#836)
+- *(sdk)* Decode only what the server marks as an array (#837)
+- *(sdk)* Read and write a Tesseract's files as UTF-8 on every platform (#832)
+- *(runtime)* Write the metrics file as UTF-8 on every platform (#834)
 
 ### Refactor
 
 - Drop DLPack detection from GPU transports, since JAX exposes CAI (#804)
+- Tidy follow-ups to per-request encoding and cuda_ipc pools (#828)
 
 ### Documentation
 
 - Hackathon winners blog announcement (#809)
+- Run tutorial snippets as end-to-end tests and fix stale examples (#820)
 
 ### Performance
 
 - *(runtime)* Cut overhead when using cuda_ipc (#806)
+- *(runtime)* Key the JAX VJP cache by an on-device fingerprint for all arrays (#830)
 
 ## [1.14.0] - 2026-09-25
 
