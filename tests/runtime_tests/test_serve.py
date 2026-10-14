@@ -554,8 +554,9 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch, accept):
 
 
 @pytest.mark.parametrize("debug", [False, True])
+@pytest.mark.parametrize("error_size", [0, 128 * 1024])
 def test_server_error_over_http(
-    tmp_path, free_port, serve_in_subprocess, capsys, debug
+    tmp_path, free_port, serve_in_subprocess, capsys, debug, error_size
 ):
     """Real HTTP errors give guidance without losing tracebacks in server logs."""
     from tesseract_core import Tesseract
@@ -563,7 +564,7 @@ def test_server_error_over_http(
     api_file = tmp_path / "tesseract_api.py"
     api_file.write_text(
         dedent(
-            """\
+            f"""\
             from pydantic import BaseModel
 
             class InputSchema(BaseModel):
@@ -573,7 +574,7 @@ def test_server_error_over_http(
                 y: float
 
             def apply(inputs: InputSchema) -> OutputSchema:
-                raise ValueError("boom")
+                raise ValueError("boom" + "x" * {error_size})
             """
         ),
         encoding="utf-8",
@@ -583,7 +584,7 @@ def test_server_error_over_http(
         free_port,
         env={"TESSERACT_DEBUG": str(int(debug))},
     ) as url:
-        response = requests.post(f"{url}/apply", json={"inputs": {"x": 1}})
+        response = requests.post(f"{url}/apply", json={"inputs": {"x": 1}}, timeout=10)
         assert response.status_code == 500
         assert response.headers["content-type"] == "text/plain; charset=utf-8"
         if debug:
@@ -595,7 +596,10 @@ def test_server_error_over_http(
             assert "Traceback" not in response.text
             assert "boom" not in response.text
 
-        with Tesseract.from_url(url) as tess, pytest.raises(RuntimeError) as exc_info:
+        with (
+            Tesseract.from_url(url, timeout=10) as tess,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
             tess.apply({"x": 1})
         message = str(exc_info.value)
         assert message.startswith(f"Error 500 from Tesseract: {response.text}")

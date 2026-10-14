@@ -281,52 +281,69 @@ def serve_in_subprocess():
     environment. The server is torn down and its output printed on exit.
     """
     from contextlib import contextmanager
+    from tempfile import TemporaryFile
 
     @contextmanager
     def serve(api_file, port, num_workers=1, timeout=30.0, env=None):
-        proc = None
-        try:
-            proc = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-c",
-                    (
-                        "from tesseract_core.runtime.serve import serve; "
-                        f"serve(host='localhost', port={port}, num_workers={num_workers})"
-                    ),
-                ],
-                env={**os.environ, "TESSERACT_API_PATH": str(api_file), **(env or {})},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
+        # Undrained pipes can fill with tracebacks and block the server, especially
+        # on Windows where the pipe buffer is small. Retain logs in a file instead.
+        with TemporaryFile() as server_log:
+            proc = None
+            try:
+                proc = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "from tesseract_core.runtime.serve import serve; "
+                            f"serve(host='localhost', port={port}, num_workers={num_workers})"
+                        ),
+                    ],
+                    env={
+                        **os.environ,
+                        "TESSERACT_API_PATH": str(api_file),
+                        **(env or {}),
+                    },
+                    stdout=server_log,
+                    stderr=subprocess.STDOUT,
+                )
 
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                if proc.poll() is not None:
-                    out, err = proc.communicate()
-                    raise RuntimeError(
-                        f"server exited early (code {proc.returncode}):\n"
-                        f"{out.decode()}{err.decode()}"
-                    )
-                try:
-                    resp = requests.get(f"http://localhost:{port}/health")
-                except requests.exceptions.ConnectionError:
-                    time.sleep(0.1)
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    if proc.poll() is not None:
+                        server_log.seek(0)
+                        raise RuntimeError(
+                            f"server exited early (code {proc.returncode}):\n"
+                            f"{server_log.read().decode()}"
+                        )
+                    try:
+                        resp = requests.get(
+                            f"http://localhost:{port}/health", timeout=1
+                        )
+                    except (
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.Timeout,
+                    ):
+                        time.sleep(0.1)
+                    else:
+                        if resp.status_code == 200:
+                            break
                 else:
-                    if resp.status_code == 200:
-                        break
-            else:
-                raise TimeoutError("Server did not start in time")
+                    raise TimeoutError("Server did not start in time")
 
-            yield f"http://localhost:{port}"
+                yield f"http://localhost:{port}"
 
-        finally:
-            if proc is not None:
-                proc.terminate()
-                stdout, stderr = proc.communicate()
-                print(stdout.decode())
-                print(stderr.decode())
-                proc.wait(timeout=5)
+            finally:
+                if proc is not None:
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                    server_log.seek(0)
+                    print(server_log.read().decode())
 
     return serve
 
