@@ -42,6 +42,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 :::{div} landing-cta
 {bdg-ref-primary-line}`Get Started <content/tutorials/get-started>`
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
+{bdg-ref-primary-line}`API Reference <content/reference/tesseract-api>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
 

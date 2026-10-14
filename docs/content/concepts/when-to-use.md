@@ -39,7 +39,7 @@ The next step is usually a persistent server with a typed interface and a binary
 
 ## Is each call coarse enough?
 
-A call to a Tesseract on the same machine costs a few milliseconds plus the time to move its arrays, and shared-memory transport keeps the second part small for large arrays. That is negligible for a solver that runs for seconds and dominant for a function that runs for microseconds. {doc}`/content/concepts/performance` has measurements, and {doc}`/content/how-to/fast-local-runs` shows how to cut array transfer costs on one machine.
+A call to a Tesseract on the same machine costs a few milliseconds plus the time to move its arrays, and shared-memory transport keeps the second part small for large arrays. That is negligible for a solver that runs for seconds and dominant for a function that runs for microseconds. The hard case is a long sequence of cheap calls that can't be batched, such as the steps of an MCMC sampler. {doc}`/content/concepts/performance` explains what to do when overhead dominates and has measurements, and {doc}`/content/how-to/fast-local-runs` shows how to cut array transfer costs on one machine.
 
 ## Smaller reasons
 

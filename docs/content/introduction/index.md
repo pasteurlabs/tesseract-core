@@ -14,6 +14,16 @@ New here? Start with the [Get Started](../tutorials/get-started.md) tutorial, or
 :alt: Tesseract interfaces
 :width: 300px
 :align: right
+:figclass: only-light
+
+<small>Internal and external interfaces of a Tesseract.</small>
+```
+
+```{figure} ../../img/tesseract-interfaces-dark.svg
+:alt: Tesseract interfaces
+:width: 300px
+:align: right
+:figclass: only-dark
 
 <small>Internal and external interfaces of a Tesseract.</small>
 ```

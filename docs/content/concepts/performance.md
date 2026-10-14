@@ -1,10 +1,20 @@
 # Performance Trade-offs & Optimization
 
+## The short version
+
+Compare the overhead of one call with the time the call itself takes. On one machine, a call to a served Tesseract costs a few milliseconds plus the time to move its arrays (see the [measurements below](#local-benchmark-scenario)). If each call computes for a second or more, that overhead is noise and you can stop reading. If it computes for about as long as the overhead, or less, then the overhead dominates, and you have three options, in order of preference:
+
+1. **Do more work per call.** Batch independent inputs into one request (see [Batch small operations](#batch-small-operations)).
+2. **Drop the process boundary.** Load the Tesseract in-process with `Tesseract.from_tesseract_api`, which costs about half a millisecond per call but needs all of its dependencies in your environment.
+3. **Make each remaining call cheap.** Keep one instance alive for all calls, keep the payload per call small, and do expensive setup once at module level (see [Keep expensive setup out of the call](#keep-expensive-setup-out-of-the-call)).
+
+The [rules of thumb](#rules-of-thumb-by-use-case) below map common workloads to these options.
+
 ## Overview
 
 Using Tesseracts adds overhead to your computations through:
 
-1. **Container startup** (~2s) — One-time cost when starting a containerized Tesseract.
+1. **Startup** — One-time cost when starting a Tesseract: ~2s for a container, or the time to start Python and import the Tesseract's dependencies for `Tesseract.from_source`.
 2. **HTTP communication** (~2.5ms locally, up to ~50-100ms+ in cloud setups) — Request/response handling per call.
 3. **Data transfer** — Moving data between client and server (depends on data size and network bandwidth).
 4. **Data serialization** — Encoding arrays for transport (depends on data size and encoding format).
@@ -15,6 +25,8 @@ For workloads where computations take seconds or longer, total overhead is typic
 ```{note}
 Tesseract is not a high-performance RPC framework. If your workload requires microsecond latency or millions of calls per second, consider a more traditional RPC framework.
 ```
+
+(local-benchmark-scenario)=
 
 ## Example scenario: Locally hosted Tesseract
 
@@ -57,6 +69,8 @@ Overhead comparison across interaction modes for different array sizes. Uses a n
 | **Containerized, json+binref via HTTP (shmem)** (green) | Same HTTP serving path, but arrays are exchanged as `json+binref` files on a shared-memory `tmpfs` (`/dev/shm`), so array data stays in memory instead of being base64-encoded into the request body. On the benchmark machine this cut overhead for a 76MB array from ~1s to ~0.2s, and to ~0.08s with the opt-in `experimental_binref_pool` fast path. See {doc}`/content/how-to/fast-local-runs`. | Same-machine (Linux) workloads on large arrays         |
 | **Containerized, json+binref via CLI** (purple)         | CLI invocation via `tesseract run`. Includes container startup and disk I/O, but avoids transferring data over the network.                                                                                                                                                                                                                                                                          | Shell scripts, one-off runs, pipelines with large data |
 
+`Tesseract.from_source` is not part of this benchmark. It serves the Tesseract over the same HTTP path as a container, but from a local subprocess, so it skips container startup and Docker's virtualization layer. Its per-call overhead should be comparable to or lower than that of containerized HTTP. In an informal check with a trivial Tesseract on an Apple Silicon laptop, calls took about 1ms, and startup took about 1s once the environment existed.
+
 The guidance chart below puts these numbers in context by showing overhead as a percentage of computation time, for three representative I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB). For small data, fixed costs (HTTP roundtrip, container startup) dominate. For large data, transfer and serialization take over.
 
 ```{figure} /img/benchmark_guidance.png
@@ -74,15 +88,16 @@ Overhead as percentage of computation time, depending on interaction mode and I/
 Advice in this section is specific to the benchmarking scenario described above. Your mileage will vary based on your setup and workload.
 ```
 
-| Scenario                                       | Recommendation                                                                                                                                                                                                                                                        |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Second-scale workloads on medium-size data** | The sweet spot for containerized HTTP execution, with low overhead benefitting from most Tesseract features.                                                                                                                                                          |
-| **Development and debugging**                  | Use {doc}`non-containerized execution </content/how-to/debugging>` or {doc}`tesseract-runtime serve </content/how-to/deploy>` for fast iteration, then switch to containerized HTTP for final testing.                                                                |
-| **Cheap operations on small data via HTTP**    | HTTP overhead (~2.5ms) can dominate when computation is fast. Batch multiple inputs into a single request.                                                                                                                                                            |
-| **Tight loops on in-memory data**              | Consider {doc}`non-containerized execution </content/how-to/debugging>` to bypass all network/container overhead. At ~0.5ms per call, you can run thousands of iterations per second. Requires all dependencies to be available in the same local Python environment. |
-| **Shell scripts and one-off runs**             | CLI is convenient but has ~2s overhead per invocation from container startup. For multiple calls, keep a container running.                                                                                                                                           |
-| **Long-running operations on large datasets**  | Use CLI with `json+binref` encoding. The ~2s container overhead is negligible for multi-minute runs, and binref allows large arrays to be passed between Tesseracts without expensive copies.                                                                         |
-| **Cheap operations on huge datasets**          | Serialization and transfer will dominate. Try partitioning your workload so each Tesseract call does more compute per byte of I/O, or use binref to avoid redundant data copies between pipeline stages.                                                              |
+| Scenario                                                       | Recommendation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Second-scale workloads on medium-size data**                 | The sweet spot for a served Tesseract (`Tesseract.from_source` or a container over HTTP). Overhead is low, and you get the process boundary and every Tesseract feature.                                                                                                                                                                                                                                                                                                                                 |
+| **A component that needs its own environment, on one machine** | Use `Tesseract.from_source`. It needs no Docker and skips container startup, and each call costs the same as other HTTP serving. The first start builds an environment in `.tesseract-venv`, which is reused while the requirements stay unchanged. Build a container when you need to share or deploy the Tesseract.                                                                                                                                                                                    |
+| **Development and debugging**                                  | Use `Tesseract.from_tesseract_api` to call the Tesseract in-process, where a debugger works, or `Tesseract.from_source` to run it in its own environment, which behaves most like a container. See {doc}`/content/how-to/debugging`.                                                                                                                                                                                                                                                                     |
+| **Cheap operations on small data via HTTP**                    | HTTP overhead (~2.5ms) can dominate when computation is fast. Batch multiple inputs into a single request.                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Many cheap calls in sequence that can't be batched**         | Examples are MCMC samplers and other iterative methods where each call depends on the previous one. If the Tesseract's dependencies fit into your environment, call it in-process with `Tesseract.from_tesseract_api` (~0.5ms per call). Otherwise, keep one instance alive across all calls, keep the payload per call small, and do expensive setup once at module level (see [Keep expensive setup out of the call](#keep-expensive-setup-out-of-the-call)). Each call still pays a few milliseconds. |
+| **Shell scripts and one-off runs**                             | CLI is convenient but has ~2s overhead per invocation from container startup. For multiple calls, keep a Tesseract running with `tesseract serve`.                                                                                                                                                                                                                                                                                                                                                       |
+| **Long-running operations on large datasets**                  | Use CLI with `json+binref` encoding. The ~2s container overhead is negligible for multi-minute runs, and binref allows large arrays to be passed between Tesseracts without expensive copies.                                                                                                                                                                                                                                                                                                            |
+| **Cheap operations on huge datasets**                          | Serialization and transfer will dominate. Try partitioning your workload so each Tesseract call does more compute per byte of I/O, or use binref to avoid redundant data copies between pipeline stages.                                                                                                                                                                                                                                                                                                 |
 
 ## Optimizing performance
 
@@ -93,6 +108,8 @@ Encoding format affects both serialization time and the volume of data transferr
 In short: use **base64** (default) for HTTP transport, **binref** for large arrays or disk-based pipelines, and **json** only when you need human-readable output. See {doc}`/content/reference/array-encodings` for format details and usage examples.
 
 When the client and a served Tesseract share a machine, you can combine HTTP serving with binref on a shared-memory `tmpfs` to pass large arrays without base64-encoding them into the request body. See {doc}`/content/how-to/fast-local-runs`.
+
+(batch-small-operations)=
 
 ### 2. Batch small operations
 
@@ -111,17 +128,17 @@ Note that your Tesseract's `apply` function must be written to accept batched in
 
 ### 3. Reuse Tesseract instances
 
-Container startup is expensive. Reuse instances across calls:
+Starting a Tesseract is expensive: ~2s for a container, and for `Tesseract.from_source` the time it takes to start Python and import the Tesseract's dependencies. Reuse instances across calls:
 
 ```python
-# Good - reuse the context
-with Tesseract.from_image("my-tesseract") as tesseract:
+# ✅ Prefer: start once, call many times
+with Tesseract.from_source("tesseract_api.py") as tesseract:
     for batch in batches:
         result = tesseract.apply(batch)
 
-# Bad - new container per call
+# ❌ Avoid: start a new Tesseract per call
 for batch in batches:
-    with Tesseract.from_image("my-tesseract") as tesseract:
+    with Tesseract.from_source("tesseract_api.py") as tesseract:
         result = tesseract.apply(batch)
 ```
 
@@ -133,7 +150,36 @@ tesseract = Tesseract.from_url("http://localhost:8100")
 result = tesseract.apply(inputs)
 ```
 
-### 4. Profile to find bottlenecks
+(keep-expensive-setup-out-of-the-call)=
+
+### 4. Keep expensive setup out of the call
+
+A served Tesseract imports its `tesseract_api.py` once at startup and handles every call in that process. Module-level state therefore persists between calls: a model loaded at import time, a cached factorization, or a lookup table stays in memory for as long as the Tesseract runs. This holds for `Tesseract.from_source`, `tesseract serve`, `Tesseract.from_image`, and in-process `Tesseract.from_tesseract_api`. It does not hold for `tesseract run`, which starts a fresh container per command.
+
+```python
+# ❌ Avoid: reload on every call
+def apply(inputs: InputSchema) -> OutputSchema:
+    model = load_model("weights.pt")
+    return OutputSchema(prediction=model(inputs.x))
+
+
+# ✅ Prefer: load once when the Tesseract starts
+model = load_model("weights.pt")
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    return OutputSchema(prediction=model(inputs.x))
+```
+
+The same applies to data that stays constant across calls. Loading it once at module level, instead of sending it with every request, keeps the payload per call small.
+
+Keep in mind:
+
+- **Each worker has its own copy.** With `--num-workers` greater than 1, the server runs several worker processes, and each one imports the module separately. Memory use grows with the number of workers, and a cache filled by one call is not visible to calls that another worker handles.
+- **Setup counts toward startup.** `Tesseract.from_source` waits 30s by default for the Tesseract to become healthy. Raise `startup_timeout` if loading takes longer.
+- **State lives only as long as the process.** It is lost when the Tesseract restarts, so don't rely on it for results you need to keep.
+
+### 5. Profile to find bottlenecks
 
 Enable profiling to see where time is spent:
 
