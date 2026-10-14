@@ -1,0 +1,71 @@
+name: Mirror blog posts to the forum
+
+# Mirrors each blog post to the forum and updates the mirror when the post
+# changes. The production docs build fails without these topics (see
+# docs/conf.py). Run it manually to backfill.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/blog/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  blog-topics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
+      - name: Install doc requirements
+        run: uv sync --extra docs --frozen
+
+      - name: Build blog posts as Markdown
+        run: uv run --no-sync sphinx-build -b markdown -q docs /tmp/markdown
+
+      - name: Mirror blog posts
+        env:
+          DISCOURSE_API_KEY: ${{ secrets.DISCOURSE_API_KEY }}
+          DISCOURSE_CATEGORY_ID: ${{ vars.DISCOURSE_BLOG_CATEGORY_ID }}
+        run: uv run --no-sync python docs/forum_topics.py blog /tmp/markdown
+
+      # Keyed on the commit, so re-runs of a failed run don't open duplicates
+      - name: Open an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Mirroring blog posts to the forum failed for ${SHA::7}"
+          if gh issue list --state all --search "in:title \"$title\"" --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "Issue already exists: $title"
+            exit 0
+          fi
+          gh issue create --title "$title" --body "$(cat <<EOF
+          The [forum mirroring workflow]($RUN_URL) failed for $SHA. Production docs builds fail until every blog post has a forum topic (see \`docs/conf.py\`).
+
+          Fix the cause, then re-run the workflow.
+          EOF
+          )"
