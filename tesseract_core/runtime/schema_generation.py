@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
 import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -48,6 +49,24 @@ T = TypeVar("T")
 # Python has funnily enough two union types now. See https://github.com/python/cpython/issues/105499
 # We check against both for compatibility with older versions of Python.
 UNION_TYPES = [Union, types.UnionType]
+
+
+# Building a TypeAdapter generates a pydantic core schema, which for an array
+# annotation means creating a new model class. That costs far more than the
+# validation itself, so gradient endpoints must not build adapters per request.
+@functools.lru_cache(maxsize=1024)
+def _type_adapter(annotation: Any) -> TypeAdapter:
+    """TypeAdapter for an annotation taken from a Tesseract's schema."""
+    return TypeAdapter(annotation)
+
+
+@functools.lru_cache(maxsize=1024)
+def _exact_array_adapter(shape: tuple, dtype: str | None) -> TypeAdapter:
+    """TypeAdapter for ``Array[shape, dtype]``, cached by ``(shape, dtype)``.
+
+    ``Array[...]`` returns a new class per call, so it cannot be the cache key.
+    """
+    return TypeAdapter(Array[shape, dtype])
 
 
 def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
@@ -468,7 +487,8 @@ def _path_to_pattern(path: Sequence[str | object]) -> str:
 def _pattern_to_type(pattern: str) -> type:
     """Convert a string pattern (which may be a literal or regex) to a type that can be used for validation."""
     if _is_regex_pattern(pattern):
-        return Annotated[str, Field(pattern=pattern)]
+        # Anchored, since a pattern is searched for and not matched in full.
+        return Annotated[str, Field(pattern=f"^{pattern}$")]
     else:
         return Literal[pattern]
 
@@ -539,7 +559,9 @@ def create_gradient_schema(
 
         raise ValueError(f"Invalid path: {concrete_path}")
 
-    def _find_shape_from_path(path_patterns: dict, concrete_path: str) -> tuple:
+    def _find_shape_from_path(
+        path_patterns: dict, concrete_path: str
+    ) -> tuple | types.EllipsisType:
         return _find_annotation_from_path(path_patterns, concrete_path).expected_shape
 
     InputSchema = apply_function_to_model_tree(
@@ -584,21 +606,22 @@ def create_gradient_schema(
                         continue
                     elif output_shape is Ellipsis:
                         expected_shape = (
+                            *arr.shape[: len(arr.shape) - len(input_shape)],
                             *input_shape,
-                            arr.shape[-len(input_shape) :],
                         )
                     elif input_shape is Ellipsis:
                         expected_shape = (
                             *output_shape,
-                            *arr.shape[: len(output_shape)],
+                            *arr.shape[len(output_shape) :],
                         )
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
-                    expected_annotation = Array[expected_shape, str(arr.dtype)]
+                    # No dtype check: GPU arrays pass through validation unconverted,
+                    # and their dtype (e.g. torch.float32) need not be a NumPy name.
                     try:
-                        result[output_path][input_path] = TypeAdapter(
-                            expected_annotation
+                        result[output_path][input_path] = _exact_array_adapter(
+                            expected_shape, None
                         ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(
@@ -615,7 +638,7 @@ def create_gradient_schema(
                     diffable_output_patterns, output_path
                 )
                 try:
-                    result[output_path] = TypeAdapter(
+                    result[output_path] = _type_adapter(
                         expected_annotation
                     ).validate_python(arr, context=info.context)
                 except ValidationError as e:
@@ -631,7 +654,7 @@ def create_gradient_schema(
                     diffable_input_patterns, input_path
                 )
                 try:
-                    result[input_path] = TypeAdapter(
+                    result[input_path] = _type_adapter(
                         expected_annotation
                     ).validate_python(arr, context=info.context)
                 except ValidationError as e:
@@ -726,9 +749,19 @@ def create_gradient_schema(
                         "Unable to validate tangent vector as jvp_inputs either missing or invalid"
                     ) from e
 
+                if "inputs" not in info.data:
+                    raise ValueError(
+                        "Unable to validate tangent vector as inputs either missing or invalid"
+                    )
+
                 validated = {}
                 for path, arr in tangent_vector.items():
-                    ref_arr = get_at_path(info.data["inputs"], path)
+                    try:
+                        ref_arr = get_at_path(info.data["inputs"], path)
+                    except (LookupError, AttributeError) as e:
+                        raise ValueError(
+                            f"Could not find tangent_vector path {path} in inputs."
+                        ) from e
                     if hasattr(ref_arr, "shape"):
                         ref_shape = ref_arr.shape
                     elif isinstance(ref_arr, dict):
@@ -739,11 +772,10 @@ def create_gradient_schema(
                     annotation = _find_annotation_from_path(
                         diffable_input_patterns, path
                     )
-                    exact_annotation = Array[ref_shape, annotation.expected_dtype]
                     try:
-                        validated[path] = TypeAdapter(exact_annotation).validate_python(
-                            arr, context=info.context
-                        )
+                        validated[path] = _exact_array_adapter(
+                            tuple(ref_shape), annotation.expected_dtype
+                        ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(f"Tangent vector '{path}': {e}") from e
                 return validated
@@ -815,7 +847,7 @@ def create_gradient_schema(
                         diffable_output_patterns, path
                     )
                     try:
-                        validated[path] = TypeAdapter(annotation).validate_python(
+                        validated[path] = _type_adapter(annotation).validate_python(
                             arr, context=info.context
                         )
                     except ValidationError as e:

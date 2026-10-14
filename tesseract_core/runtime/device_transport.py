@@ -21,7 +21,7 @@ The interface follows the lifecycle the ``cuda_ipc`` code already uses:
   receiver-driven transports like ``cuda_ipc`` (the consumer pulls); the seam
   where a push transport posts its matched sends.
 * :meth:`DeviceTransport.receive` -- decode side: materialise the array into a
-  fresh, consumer-owned buffer and return it as a framework-agnostic wrapper.
+  consumer-owned buffer and return it as a framework-agnostic wrapper.
 * :meth:`DeviceTransport.bootstrap` -- establish any shared state a handshake
   transport needs before transferring (a shared communicator, a socket for fd
   passing). A no-op for ``cuda_ipc``, whose handle needs no handshake.

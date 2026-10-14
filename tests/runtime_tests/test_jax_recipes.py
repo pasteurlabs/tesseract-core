@@ -3,6 +3,10 @@
 
 """Tests for tesseract_core.runtime.jax_recipes."""
 
+import os
+import subprocess
+import sys
+import textwrap
 from collections.abc import Hashable
 from typing import Any
 
@@ -10,6 +14,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float32, jax_recipes
@@ -352,3 +357,215 @@ class TestCacheWithNonArrayInputs:
             np.asarray(got["a.s"]), np.asarray(expected["a.s"]), rtol=1e-6
         )
         assert np.asarray(expected["a.s"]).item() != 0.0
+
+
+class TestCacheWithDeviceArrays:
+    """Array leaves are compared where they live instead of copied to the host.
+
+    Every JAX array takes the same path, so these run on CPU-only machines too.
+    """
+
+    @staticmethod
+    def _store(tree, value):
+        jax_recipes._jax_vjp_cache.put(_cache_key(tree), value)
+
+    @staticmethod
+    def _lookup(tree):
+        return jax_recipes._jax_vjp_cache.get(_cache_key(tree))
+
+    def test_key_fingerprints_arrays_without_copying_them(self):
+        a = {"x": jnp.array([1.0, 2.0])}
+        b = {"x": jnp.array([1.0, 3.0])}
+        # The fingerprint separates keys by contents before __eq__ compares them.
+        assert hash(_cache_key(a)) != hash(_cache_key(b))
+        assert _cache_key(a) != _cache_key(b)
+        assert _cache_key(a) == _cache_key({"x": jnp.array([1.0, 2.0])})
+        assert _cache_key(a) != _cache_key({"x": jnp.array([1.0, 2.0, 3.0])})
+        assert _cache_key(a)[-1].arrays[0] is a["x"]
+
+    def test_lookup_compares_contents(self):
+        jax_recipes._set_jax_vjp_cache_size(1)
+        try:
+            x = {"x": jnp.array([0.0, 1.0, jnp.nan])}
+            self._store(x, "cached")
+            assert self._lookup({"x": jnp.array([0.0, 1.0, jnp.nan])}) == "cached"
+            # Comparison is bitwise, so -0.0 is a new input.
+            assert self._lookup({"x": jnp.array([-0.0, 1.0, jnp.nan])}) is None
+            assert self._lookup({"x": jnp.array([0.0, 2.0, jnp.nan])}) is None
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+    def test_same_shape_inputs_are_cached_side_by_side(self):
+        jax_recipes._set_jax_vjp_cache_size(2)
+        try:
+            first = {"x": jnp.array([1.0, 2.0])}
+            second = {"x": jnp.array([3.0, 4.0])}
+            self._store(first, "first")
+            self._store(second, "second")
+            assert jax_recipes._jax_vjp_cache.size == 2
+            assert self._lookup(first) == "first"
+            assert self._lookup(second) == "second"
+
+            # Storing equal inputs again replaces their entry.
+            self._store({"x": jnp.array([1.0, 2.0])}, "again")
+            assert jax_recipes._jax_vjp_cache.size == 2
+            assert self._lookup(first) == "again"
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+    def test_arrays_on_different_devices_miss(self):
+        # Needs two devices, which a JAX process only gets at startup.
+        code = textwrap.dedent(
+            """
+            import jax
+            import jax.numpy as jnp
+            from tesseract_core.runtime import jax_recipes
+
+            cache = jax_recipes.LRUCache(maxsize=2)
+            key = lambda device: jax_recipes._cache_key({"x": jax.device_put(x, device)})
+            cpu0, cpu1 = jax.devices("cpu")[:2]
+            x = jnp.array([1.0, 2.0])
+            cache.put(key(cpu0), "cached")
+            assert cache.get(key(cpu1)) is None
+            assert cache.get(key(cpu0)) == "cached"
+            """
+        )
+        env = {**os.environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2"}
+        subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+    def test_key_holds_arrays_on_different_devices(self):
+        # Needs two devices, which a JAX process only gets at startup.
+        code = textwrap.dedent(
+            """
+            import jax
+            import jax.numpy as jnp
+            from tesseract_core.runtime import jax_recipes
+
+            cache = jax_recipes.LRUCache(maxsize=2)
+            cpu0, cpu1 = jax.devices("cpu")[:2]
+            x = jnp.array([1.0, 2.0])
+            key = lambda d0, d1: jax_recipes._cache_key(
+                {"a": jax.device_put(x, d0), "b": jax.device_put(x + 1, d1)}
+            )
+            cache.put(key(cpu0, cpu1), "cached")
+            assert cache.get(key(cpu0, cpu1)) == "cached"
+            assert cache.get(key(cpu1, cpu0)) is None
+            assert cache.get(key(cpu0, cpu0)) is None
+            """
+        )
+        env = {**os.environ, "XLA_FLAGS": "--xla_force_host_platform_device_count=2"}
+        subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+    def test_bitwise_equal_handles_dtypes(self):
+        for arr in (
+            jnp.array([True, False]),
+            jnp.array([1, 2], dtype=jnp.int8),
+            jnp.array([1.0, 2.0], dtype=jnp.bfloat16),
+            jnp.array([1 + 2j, 3 - 4j], dtype=jnp.complex64),
+        ):
+            assert jax_recipes._bitwise_equal((arr,), (arr + 0,))
+            assert not jax_recipes._bitwise_equal((arr,), (jnp.flip(arr),))
+
+    def test_cache_on_matches_cache_off(self):
+        InputSchema, apply_jit = _build_api()
+
+        def inputs(offset):
+            inp = _make_inputs(InputSchema, offset=offset)
+            inp.a.v = jnp.asarray(inp.a.v)
+            inp.b.v = jnp.asarray(inp.b.v)
+            return inp
+
+        ct = {"y": jnp.ones(3, dtype=jnp.float32)}
+        expected = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
+
+        jax_recipes._set_jax_vjp_cache_size(1)
+        try:
+            jax_apply(apply_jit, inputs(0.0))
+            hit = self._lookup(as_jax_arrays(inputs(0.0).model_dump()))
+            miss = self._lookup(as_jax_arrays(inputs(0.5).model_dump()))
+            got = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
+        finally:
+            jax_recipes._set_jax_vjp_cache_size(0)
+
+        assert hit is not None
+        assert miss is None
+        for k in expected:
+            np.testing.assert_allclose(np.asarray(got[k]), np.asarray(expected[k]))
+
+
+def _fmix32(h: int) -> int:
+    """Reference MurmurHash3 finalizer (fmix32 in smhasher's MurmurHash3.cpp)."""
+    h ^= h >> 16
+    h = (h * 0x85EBCA6B) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * 0xC2B2AE35) & 0xFFFFFFFF
+    return h ^ (h >> 16)
+
+
+def _fingerprint(*arrays: jax.Array) -> int:
+    return int(jax_recipes._fingerprint_jit(arrays))
+
+
+class TestFingerprint:
+    """The fingerprint that narrows cache lookups of device arrays."""
+
+    # MurmurHash3_x86_32 of empty input reduces to fmix32(seed), so its
+    # published empty-input vectors pin down the finalizer.
+    @pytest.mark.parametrize(
+        "seed,expected", [(0, 0x00000000), (1, 0x514E28B7), (0xFFFFFFFF, 0x81F16F39)]
+    )
+    def test_mix_matches_murmur3_vectors(self, seed, expected):
+        assert int(jax.jit(jax_recipes._mix)(jnp.uint32(seed))) == expected
+
+    def test_mix_matches_reference_and_wraps_in_uint32(self):
+        xs = np.random.default_rng(0).integers(0, 2**32, 10_000, dtype=np.uint64)
+        got = np.asarray(jax.jit(jax_recipes._mix)(jnp.asarray(xs.astype(np.uint32))))
+        assert got.dtype == np.uint32
+        assert [int(g) for g in got] == [_fmix32(int(x)) for x in xs]
+
+    def test_depends_only_on_contents(self):
+        a = np.arange(10, dtype=np.float32)
+        assert _fingerprint(jnp.asarray(a)) == _fingerprint(jnp.asarray(a.copy()))
+
+    @pytest.mark.parametrize(
+        "a,b",
+        [
+            # Each word is salted with its position.
+            (jnp.array([1.0, 2.0]), jnp.array([2.0, 1.0])),
+            # Bitwise, like __eq__.
+            (jnp.array([0.0]), jnp.array([-0.0])),
+            (jnp.array([1 + 2j]), jnp.array([2 + 1j])),
+            (jnp.array([True, False]), jnp.array([False, True])),
+        ],
+    )
+    def test_distinguishes(self, a, b):
+        assert _fingerprint(a) != _fingerprint(b)
+
+    def test_order_of_arrays_matters(self):
+        a, b = jnp.array([1.0]), jnp.array([2.0])
+        assert _fingerprint(a, b) != _fingerprint(b, a)
+
+    def test_sees_high_word_of_64_bit_values(self):
+        # 64-bit arrays need JAX_ENABLE_X64, which is read at startup.
+        code = textwrap.dedent(
+            """
+            import jax.numpy as jnp
+            from tesseract_core.runtime import jax_recipes
+
+            fingerprint = lambda x: int(jax_recipes._fingerprint_jit((x,)))
+            a = jnp.array([1], dtype=jnp.uint64)
+            assert a.dtype == jnp.uint64
+            assert fingerprint(a) != fingerprint(a + (1 << 40))
+            """
+        )
+        env = {**os.environ, "JAX_ENABLE_X64": "1"}
+        subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+    def test_spreads_similar_inputs(self):
+        # With a well-mixed 32-bit hash, 2000 one-hot arrays collide with
+        # probability ~5e-4, so any collision points at poor mixing.
+        fps = {
+            _fingerprint(jnp.zeros(2000, dtype=jnp.float32).at[i].set(1.0))
+            for i in range(2000)
+        }
+        assert len(fps) == 2000

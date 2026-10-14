@@ -18,7 +18,6 @@ import jax.numpy as jnp
 import numpy as np
 from pydantic import BaseModel
 
-from tesseract_core.runtime.array_encoding import _fast_tobytes
 from tesseract_core.runtime.cuda.ipc import has_cuda_array_interface
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
@@ -61,13 +60,105 @@ def _set_jax_vjp_cache_size(size: int) -> None:
     _jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
+def _as_bits(x: jax.Array) -> tuple[jax.Array, ...]:
+    """Reinterpret ``x`` as unsigned integers, so that comparing is bitwise."""
+    if jnp.issubdtype(x.dtype, jnp.complexfloating):
+        return (*_as_bits(jnp.real(x)), *_as_bits(jnp.imag(x)))
+    if x.dtype == jnp.bool_:
+        return (x.astype(jnp.uint8),)
+    return (jax.lax.bitcast_convert_type(x, jnp.dtype(f"uint{x.dtype.itemsize * 8}")),)
+
+
+@jax.jit
+def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> jax.Array:
+    """Whether two sequences of device arrays hold identical bytes.
+
+    Matches the byte comparison of host leaves, so ``-0.0`` and ``0.0`` differ
+    and a NaN equals itself.
+    """
+    result = jnp.bool_(True)
+    for x, y in zip(a, b, strict=True):
+        for xb, yb in zip(_as_bits(x), _as_bits(y), strict=True):
+            result &= jnp.all(xb == yb)
+    return result
+
+
+def _as_words(bits: jax.Array) -> tuple[jax.Array, ...]:
+    """Split the unsigned integers from :func:`_as_bits` into ``uint32`` words."""
+    if bits.dtype.itemsize == 8:
+        return ((bits >> 32).astype(jnp.uint32), bits.astype(jnp.uint32))
+    return (bits.astype(jnp.uint32),)
+
+
+def _mix(x: jax.Array) -> jax.Array:
+    """The MurmurHash3 finalizer, which spreads every input bit over the output."""
+    x ^= x >> 16
+    x *= jnp.uint32(0x85EBCA6B)
+    x ^= x >> 13
+    x *= jnp.uint32(0xC2B2AE35)
+    x ^= x >> 16
+    return x
+
+
+@jax.jit
+def _fingerprint_jit(arrays: tuple) -> jax.Array:
+    h = jnp.uint32(0)
+    for x in arrays:
+        for bits in _as_bits(x):
+            for words in _as_words(bits.ravel()):
+                # Salting each word with its position makes permutations differ.
+                salt = jax.lax.iota(jnp.uint32, words.size) * jnp.uint32(0x9E3779B9)
+                h = _mix(h + jnp.sum(_mix(words ^ salt), dtype=jnp.uint32))
+    return h
+
+
+class _ArrayLeaves:
+    """JAX arrays of a cache key that live on the same devices.
+
+    Jitted functions hash and compare their contents where they live, so that
+    neither copies them to the host. They hash by dtype, shape, devices and a
+    32-bit fingerprint of their bytes, so that keys with different contents
+    rarely share a hash. The fingerprint only narrows the search: the cache's
+    dict tells keys that share a hash apart with ``__eq__``, which compares
+    contents exactly with :func:`_bitwise_equal`.
+    """
+
+    def __init__(self, arrays: tuple[jax.Array, ...]) -> None:
+        self.arrays = arrays
+        self._meta = tuple(
+            (a.dtype.str, a.shape, frozenset(a.devices())) for a in arrays
+        )
+        self._hash: int | None = None
+
+    def __hash__(self) -> int:
+        # A dict hashes the key on every lookup, and each fingerprint waits for
+        # the device, so it is computed once per key.
+        if self._hash is None:
+            self._hash = hash((self._meta, int(_fingerprint_jit(self.arrays))))
+        return self._hash
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _ArrayLeaves)
+            and self._meta == other._meta
+            and bool(_bitwise_equal(self.arrays, other.arrays))
+        )
+
+
 def _cache_key(tree: Any) -> Hashable:
     """Build an :class:`LRUCache` key from a pytree's structure and leaves.
 
-    Array leaves contribute their dtype + shape + raw bytes so leaves with
-    identical bytes but different interpretations (e.g. ``int64[4]`` vs
-    ``int64[2,2]``) don't collide. Non-array leaves contribute their type
-    alongside their value; they must be hashable.
+    Array leaves are converted with :func:`as_jax_arrays`, as the endpoints do
+    before computing, so that the key describes the arrays the computation
+    sees. Their bytes stay where they are: the arrays on each set of devices
+    form one :class:`_ArrayLeaves` item at the end of the key, which hashes and
+    compares all of them in one call, and each array leaves the index of its
+    item at its position. The dtype and shape of every array are part of that
+    item, so that leaves with identical bytes but different interpretations
+    (e.g. ``int64[4]`` vs ``int64[2,2]``) don't collide. Arrays on different
+    devices go to different items because one jitted call cannot read them all.
+    Non-array leaves contribute their type alongside their value; they must be
+    hashable.
 
     The key is returned as a tuple rather than collapsed with :func:`hash`,
     so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
@@ -80,17 +171,23 @@ def _cache_key(tree: Any) -> Hashable:
     equal across types: ``1 == 1.0 == True``, so a bare value would still
     collide for a field typed as a union.
     """
-    leaves, treedef = jax.tree.flatten(tree)
+    leaves, treedef = jax.tree.flatten(as_jax_arrays(tree))
     # jax.PyTreeDef's __hash__ collides on dicts with different keys, so we
     # use its string form as the discriminator instead.
     items: list = [str(treedef)]
+    group_index: dict[frozenset, int] = {}
+    groups: list[list[jax.Array]] = []
     for leaf in leaves:
-        if hasattr(leaf, "tobytes"):
-            items.append(
-                (leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(np.asarray(leaf))))
-            )
+        if isinstance(leaf, jax.Array):
+            devices = frozenset(leaf.devices())
+            if devices not in group_index:
+                group_index[devices] = len(groups)
+                groups.append([])
+            groups[group_index[devices]].append(leaf)
+            items.append((_ArrayLeaves, group_index[devices]))
         else:
             items.append((type(leaf), leaf))
+    items.extend(_ArrayLeaves(tuple(group)) for group in groups)
     return tuple(items)
 
 

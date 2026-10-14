@@ -784,7 +784,7 @@ def _display_tesseract_image_meta(images: list[dict]) -> None:
         table.add_row(
             # Checksum Type + First 12 Chars of ID
             image["id"][:19],
-            str(image["tags"]),
+            str(sorted(image["tags"])),
             image["name"],
             image["version"],
             image["description"].replace("\\n", " ").replace("\n", " "),

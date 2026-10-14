@@ -266,7 +266,7 @@ def _build_torch():
 
 
 def _build_jax():
-    """JAX arrays exercise the VMM staging fallback (see cuda.api.stage_for_legacy_ipc).
+    """JAX arrays exercise the VMM staging fallback (see cuda.ipc._stage_for_export).
 
     JAX/XLA's default GPU allocator uses CUDA's Virtual Memory Management API
     (``cuMemCreate``/``cuMemAddressReserve``), which the legacy
@@ -280,8 +280,8 @@ def _build_jax():
     return [(arr, np.asarray(arr))]
 
 
-def _build_force_staging():
-    """A CuPy array plus a global patch that forces the VMM staging fallback.
+def _reject_first_ipc_handle():
+    """Patch ``ipc_get_mem_handle`` so the next export takes the staging fallback.
 
     Makes the first ``ipc_get_mem_handle`` call (on the array's base pointer)
     raise, so encode falls back to staging; the second call (on the staging
@@ -301,8 +301,35 @@ def _build_force_staging():
 
     cuda_api.ipc_get_mem_handle = flaky
 
+
+def _build_force_staging():
+    """A CuPy array exported through the staging fallback."""
+    _reject_first_ipc_handle()
     arr = cupy.arange(1024, dtype=cupy.float32) + 7.0
     return [(arr, cupy.asnumpy(arr))]
+
+
+def _build_pending_write():
+    """A tensor still being written on a non-blocking stream when it is exported.
+
+    Forces the staging fallback, whose copy runs on the legacy default stream and
+    so must wait for the write explicitly.
+    """
+    import torch
+
+    _reject_first_ipc_handle()
+    t = torch.zeros(1 << 20, device="cuda:0")
+    side = torch.cuda.Stream()
+    # The first launch on a new stream can block, so get it out of the way.
+    with torch.cuda.stream(side):
+        torch.ones(1, device="cuda:0").sum()
+    side.synchronize()
+    with torch.cuda.stream(side):
+        torch.cuda._sleep(200_000_000)
+        t.fill_(7.0)
+    if side.query():
+        raise RuntimeError("the write finished before the export")
+    return [(t, np.full(1 << 20, 7.0, dtype=np.float32))]
 
 
 _BUILDERS = {
@@ -312,6 +339,7 @@ _BUILDERS = {
     "torch": _build_torch,
     "jax": _build_jax,
     "force_staging": _build_force_staging,
+    "pending_write": _build_pending_write,
 }
 
 
@@ -467,8 +495,8 @@ def test_cross_process_jax_vmm_fallback():
     JAX/XLA's GPU allocator is VMM-backed, so the legacy ``cudaIpcGetMemHandle``
     fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
     rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
-    staging the array into a fresh ``cudaMalloc`` buffer (see
-    cuda.api.stage_for_legacy_ipc) and export a handle to that instead.
+    staging the array into a ``cudaMalloc`` buffer (see
+    cuda.ipc._stage_for_export) and export a handle to that instead.
     """
     results = run_cross_process("jax")
     assert len(results) == 1
@@ -481,12 +509,12 @@ def test_cross_process_jax_vmm_fallback():
 
 @requires_cuda
 def test_cross_process_staging_fallback_forced():
-    """Force the staging fallback (without JAX) and verify correctness + free.
+    """Force the staging fallback (without JAX) and verify correctness.
 
     Simulates a VMM-backed pointer by making the first ``cudaIpcGetMemHandle``
     call fail, so ``dump_cuda_ipc_arraydict`` stages a CuPy array into a fresh
     ``cudaMalloc`` buffer and exports a handle to that. Exercises the real
-    staging cudaMalloc/cudaMemcpy/cudaFree path on GPU.
+    staging cudaMalloc/cudaMemcpy path on GPU.
     """
     results = run_cross_process("force_staging")
     assert len(results) == 1
@@ -584,6 +612,91 @@ def test_ring1_serial_reuse():
             if proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=5)
+
+
+def _reuse_while_read_client(req_q, resp_q, result_q):
+    """Drop a decoded tensor while a queued kernel still reads it, then decode again.
+
+    The second decode reuses the dropped tensor's buffer. The kernel runs on a
+    non-blocking stream behind a sleep, so it must still see the first output.
+    """
+    try:
+        import torch
+
+        from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
+
+        def fetch(i):
+            req_q.put(i)
+            _, encoded = resp_q.get(timeout=_TIMEOUT)
+            return torch.from_dlpack(load_cuda_ipc_arraydict(encoded))
+
+        side = torch.cuda.Stream()
+        # The first launch on a new stream can block, so get it out of the way.
+        with torch.cuda.stream(side):
+            torch.ones(1, device="cuda").sum()
+        side.synchronize()
+
+        first = fetch(0)
+        first_ptr = first.data_ptr()
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(200_000_000)
+            total = first.sum()
+        del first
+        pending = not side.query()
+        second = fetch(1)
+        req_q.put(None)
+        side.synchronize()
+        result_q.put(
+            (
+                "OK",
+                {
+                    "pending": pending,
+                    "reused": second.data_ptr() == first_ptr,
+                    "total": total.item(),
+                    "second": second.cpu().numpy(),
+                },
+            )
+        )
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
+        traceback.print_exc()
+        result_q.put(("CLIENT_ERROR", traceback.format_exc()))
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_reused_owned_buffer_waits_for_pending_reads():
+    """Reusing a released decode buffer never overwrites it under a pending read."""
+    ctx = multiprocessing.get_context("spawn")
+    req_q, resp_q, result_q = (ctx.Queue() for _ in range(3))
+    server = ctx.Process(target=_ring1_server, args=(req_q, resp_q))
+    client = ctx.Process(
+        target=_reuse_while_read_client, args=(req_q, resp_q, result_q)
+    )
+    server.start()
+    client.start()
+    try:
+        status, payload = result_q.get(timeout=_TIMEOUT)
+        assert status == "OK", f"{status}:\n{payload}"
+        assert payload["pending"], "the read finished before the buffer was reused"
+        assert payload["reused"]
+        assert payload["total"] == float(np.sum(np.arange(1024) + 100.0))
+        np.testing.assert_array_equal(payload["second"], np.arange(1024) + 200.0)
+    finally:
+        client.join(timeout=_TIMEOUT)
+        server.join(timeout=_TIMEOUT)
+        for proc in (client, server):
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_staging_copy_waits_for_pending_writes():
+    """The staging copy sees the producer's writes still queued on its streams."""
+    results = run_cross_process("pending_write")
+    assert len(results) == 1
+    assert results[0]["match"], results[0]
 
 
 # ── Test 3: SDK client-side encode path ─────────────────────────────────

@@ -24,6 +24,8 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.file_interactions import (
+    available_gpu_transports,
+    compression_type,
     get_filesize,
     is_absolute_path,
     is_url,
@@ -99,7 +101,7 @@ class Base64ArrayData(BaseModel):
         ),
     ]
     encoding: Literal["base64"]
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
     model_config = ConfigDict(extra="forbid")
 
 
@@ -113,7 +115,7 @@ class BinrefArrayData(BaseModel):
 
     buffer: StrictStr = Field(pattern=r"^.+?(\:\d+(\:\d+)?)?$")
     encoding: Literal["binref"]
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -769,6 +771,12 @@ def decode_array(
 
         elif val.data.encoding == "cuda_ipc":
             from tesseract_core.runtime.device_transport import get_transport
+
+            if val.data.encoding not in available_gpu_transports():
+                raise ValueError(
+                    f"GPU transport {val.data.encoding!r} is not enabled on this "
+                    f"Tesseract (available: {available_gpu_transports()})"
+                )
 
             # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
             transport = get_transport(val.data.encoding)

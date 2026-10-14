@@ -24,6 +24,7 @@ This file contains counter-intuitive rules and aspects of the Tesseract codebase
 - **Rarely test exceptions.** Only test exception handling when control flow is complex or the error message is critical for UX. Don't write tests that just verify an exception is raised.
 - **Never skip or disable tests without asking.** If a test is failing and you want to skip it, ask the user first. Don't add `@pytest.skip`, `@pytest.mark.xfail`, or comment out tests without explicit approval.
 - **Do not add new markers or skip conditions without asking.** If you want to add a new marker or skip condition, ask the user first. Don't add `@pytest.mark.skipif` or similar without approval.
+- **Some docs pages are executed as tests.** The pages listed in `tests/endtoend_tests/test_docs.py` run top to bottom, comparing shown output against real output. Rerun that test after editing them. Its module docstring explains the hidden `% skip: next` and `% invisible-code-block` comments.
 - **Always run appropriate tests and verify code you touched works end-to-end before presenting it as complete.** Do not wait for the user to ask 'did you test this?'
 
 ## Code style
