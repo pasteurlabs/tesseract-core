@@ -10,6 +10,7 @@ Universal components for differentiable scientific computing 📦
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) |
 [Blog](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/) |
+[User forum](https://si-tesseract.discourse.group/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
@@ -37,6 +38,7 @@ Tesseract packages scientific software into **self-contained, portable component
 
 - **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems.
 - **R&D engineers** packaging research code for use by others, without spending weeks on DevOps.
+- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation.
 
 ## Example: Shape optimization across tools
 
