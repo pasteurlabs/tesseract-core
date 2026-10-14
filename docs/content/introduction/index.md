@@ -10,9 +10,9 @@ New here? Start with the [Get Started](../tutorials/get-started.md) tutorial, or
 
 ## How it works
 
-```{figure} ../../img/tesseract-interfaces.png
+```{figure} ../../img/tesseract-interfaces.svg
 :alt: Tesseract interfaces
-:width: 250px
+:width: 300px
 :align: right
 
 <small>Internal and external interfaces of a Tesseract.</small>
@@ -105,7 +105,6 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ../how-to/check-gradients.md
 ../how-to/fast-local-runs.md
 ../how-to/debugging.md
-../how-to/llm-assistance.md
 ```
 
 ```{toctree}
