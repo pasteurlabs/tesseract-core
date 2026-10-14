@@ -4,7 +4,7 @@ html_theme.sidebar_secondary.remove: true
 sd_hide_title: true
 html_class: landing-page
 og:title: "Tesseract — Universal components for differentiable scientific computing"
-og:description: "Train and optimize JAX and PyTorch programs through Fortran, Julia, C++, and commercial solvers. Each component runs in its own process behind a typed, differentiable interface. Open source."
+og:description: "Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation. Open source."
 ---
 
 # Tesseract
@@ -34,9 +34,8 @@ Universal components for differentiable scientific computing
 :::
 
 :::{div} landing-hero-subtitle
-Train and optimize through a Fortran code, a Julia package, a FEniCS model, or a commercial tool from JAX and PyTorch.
-Tesseract wraps each component behind a typed interface with derivative endpoints and runs it in its own process, no Docker required.
-Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
+Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
+No Docker required. Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 :::
 
 :::{div} landing-cta
@@ -88,6 +87,7 @@ so a wrong VJP is caught before an optimizer depends on it.
 
 Each component runs in its own process with its own dependencies,
 so conflicting stacks never have to share an interpreter.
+Shared memory and on-device GPU transfer keep the boundary {doc}`cheap <content/concepts/performance>`.
 :::
 
 :::{grid-item-card} Call it from JAX and PyTorch
@@ -249,11 +249,6 @@ and {doc}`content/concepts/when-to-use` helps you decide whether your problem ne
 
 ## Built with Tesseract
 
-:::{div} section-intro
-Each caption names the boundary the gradient crosses. Most of these projects are entries to the
-[2026 Tesseract Hackathon](blog/2026-09-30-tesseract-hackathon-winners).
-:::
-
 ::::{grid} 1 2 3 3
 :gutter: 3
 
@@ -312,6 +307,34 @@ A PyTorch network proposes EEG sources, and JAX refines them with gradients
 through OpenMEEG, a C++ boundary element solver with no autodiff of its own.
 :::
 
+:::{grid-item-card} Normax
+:link: https://github.com/arpastrana/normax
+:class-card: demo-card
+:img-top: img/gallery/normax.jpg
+
+JAX form finding, OpenSees structural analysis, and a Eurocode 3 check in one gradient,
+using 29–67% less material than resizing the tubes of a fixed shape.
+:::
+
+:::{grid-item-card} OpenSees-SHM
+:link: https://github.com/xwpken/opensees-shm-tesseract
+:class-card: demo-card
+:img-top: img/gallery/opensees-shm.jpg
+
+An OpenSees finite element model, differentiated by its own sensitivity analysis,
+infers where and how badly a steel truss has corroded, with uncertainty estimates.
+:::
+
+:::{grid-item-card} Differentiable Fortran
+:link: content/demo/enzyme-lfortran
+:link-type: doc
+:class-card: demo-card
+:img-top: img/gallery/enzyme-fortran.jpg
+
+A Fortran heat solver, differentiated by Enzyme at the LLVM level, recovers a 900-element
+initial temperature field from 100 sensors through JAX.
+:::
+
 ::::
 
 :::{div} landing-divider
@@ -321,17 +344,6 @@ through OpenMEEG, a C++ boundary element solver with no autodiff of its own.
 
 ::::{grid} 1 2 3 3
 :gutter: 3
-
-:::{grid-item-card} Differentiable Fortran (Enzyme)
-:link: content/demo/enzyme-lfortran
-:link-type: doc
-:class-card: demo-card
-:img-top: static/demo-enzyme-lfortran.svg
-:class-img-top: demo-schematic invert-on-dark
-
-Differentiate a Fortran heat-conduction solver end-to-end with Enzyme at the
-LLVM IR level, and solve an inverse problem through Tesseract-JAX.
-:::
 
 :::{grid-item-card} Multi-Physics Optimization
 :link: content/demo/multiphysics-optimization
@@ -354,28 +366,6 @@ to solve an inverse-design problem.
 
 Train a neural viscosity closure end-to-end through a Burgers' equation
 solver, with PyTorch gradients flowing through both via Tesseract-Torch.
-:::
-
-:::{grid-item-card} FEM Shape Optimization
-:link: content/demo/fem-shape-optimization
-:link-type: doc
-:class-card: demo-card
-:img-top: static/demo-fem-shapeopt.svg
-:class-img-top: demo-schematic invert-on-dark
-
-Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
-parametric structural optimization.
-:::
-
-:::{grid-item-card} 4D-Var Data Assimilation
-:link: content/demo/data-assimilation
-:link-type: doc
-:class-card: demo-card
-:img-top: static/demo-data-assimilation.svg
-:class-img-top: demo-schematic invert-on-dark
-
-A complete 4D-Variational data assimilation scheme for a chaotic dynamical
-system (Lorenz-96), built with a differentiable JAX Tesseract.
 :::
 
 :::{grid-item-card} Bayesian Inference
@@ -404,7 +394,7 @@ recover the posterior over an unknown forcing parameter with gradient-based MCMC
 Tesseract Core is the foundation. Additional packages extend its capabilities.
 :::
 
-::::{grid} 1 1 2 2
+::::{grid} 1 1 3 3
 :gutter: 3
 
 :::{grid-item-card} Tesseract Core
@@ -432,15 +422,12 @@ Embed Tesseracts as PyTorch operators. Gradients flow through with
 `torch.autograd`.
 :::
 
-:::{grid-item-card} Tesseract-Streamlit
-:link: https://github.com/pasteurlabs/tesseract-streamlit
-:class-card: ecosystem-card
-
-Auto-generate interactive web apps from running Tesseracts. No frontend
-code required.
-:::
-
 ::::
+
+:::{div} section-intro
+Also see [Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit) to generate web apps from Tesseracts,
+and [cookiecutter-tesseract](https://github.com/pasteurlabs/cookiecutter-tesseract) for a multi-Tesseract project template.
+:::
 
 :::{div} landing-divider
 :::
@@ -449,13 +436,13 @@ code required.
 
 :::{div} section-intro
 Wrap your solver or model as a Tesseract, or compose existing ones into a new pipeline.
-[Show us what you built](https://si-tesseract.discourse.group/c/showcase/11), or help improve the project.
+Show us what you built in the [community showcase](https://si-tesseract.discourse.group/c/showcase/11), or help improve the project.
 :::
 
 :::{div} landing-cta
+{bdg-link-primary-line}`Community Forum <https://si-tesseract.discourse.group/>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
-{bdg-ref-primary-line}`Blog <blog/index>`
-{bdg-ref-primary-line}`Example Gallery <content/examples/example_gallery>`
+{bdg-link-primary-line}`Contributing <https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md>`
 :::
 
 ::::{div} landing-footer

@@ -12,6 +12,7 @@ Universal components for differentiable scientific computing 📦
 [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) |
 [Blog](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
+[Community forum](https://si-tesseract.discourse.group/) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
@@ -165,8 +166,8 @@ $ tesseract run my-tesseract apply '{"inputs": {"x": [1.0, 2.0, 3.0]}}'
 - **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)**: CLI, Python SDK, and runtime (this repo).
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)**: embed Tesseracts as JAX primitives, compatible with `jit`, `grad`, and `vmap`.
 - **[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)**: embed Tesseracts as PyTorch operators with `torch.autograd` support.
-- **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)**: generate interactive web apps from Tesseracts.
-- **[cookiecutter-tesseract](https://github.com/pasteurlabs/cookiecutter-tesseract)**: project template with build scripts, tests, CI, and shared code for multi-Tesseract projects.
+
+Also see [Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit) to generate web apps from Tesseracts, and [cookiecutter-tesseract](https://github.com/pasteurlabs/cookiecutter-tesseract) for a multi-Tesseract project template.
 
 ## Learn more
 

@@ -41,6 +41,14 @@ The next step is usually a persistent server with a typed interface and a binary
 
 A call to a Tesseract on the same machine costs a few milliseconds plus the time to move its arrays, and shared-memory transport keeps the second part small for large arrays. That is negligible for a solver that runs for seconds and dominant for a function that runs for microseconds. The hard case is a long sequence of cheap calls that can't be batched, such as the steps of an MCMC sampler. {doc}`/content/concepts/performance` explains what to do when overhead dominates and has measurements, and {doc}`/content/how-to/fast-local-runs` shows how to cut array transfer costs on one machine.
 
+## What Tesseract doesn't do
+
+A few design choices are worth knowing before you commit to one:
+
+- **One entrypoint per Tesseract.** Each Tesseract has a single `apply`. To expose several functions, build several Tesseracts and compose them (see {doc}`/content/concepts/design-patterns`).
+- **Python is always the glue.** A Tesseract can wrap any software, but the code between the runtime and the wrapped software is Python. Support for Python projects is more mature than for other languages.
+- **No knowledge of its context.** A Tesseract doesn't know which loop calls it or where it runs. Orchestration and the outer optimization or training loop stay in the calling code.
+
 ## Smaller reasons
 
 Some benefits don't depend on all four conditions:
