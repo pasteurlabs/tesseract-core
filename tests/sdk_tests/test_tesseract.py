@@ -1648,6 +1648,38 @@ def _make_tesseract_with_mock_response(response):
     return tess
 
 
+@pytest.mark.parametrize(
+    ("status_code", "body"),
+    [
+        (500, "Internal Server Error"),
+        (500, "A custom server error"),
+        (500, "Traceback (most recent call last):\nValueError: boom"),
+        (400, "Bad Request"),
+        (503, "Service Unavailable"),
+    ],
+)
+def test_http_error_debug_hint(status_code, body):
+    """HTTP 500s from older/custom servers retain their body and gain guidance."""
+    response = requests.Response()
+    response.status_code = status_code
+    response._content = body.encode("utf-8")
+    with (
+        Tesseract.from_url("http://localhost") as tess,
+        pytest.raises(RuntimeError) as exc_info,
+    ):
+        tess._client._decode_response(response, "apply")
+
+    message = str(exc_info.value)
+    original_message = f"Error {status_code} from Tesseract: {body}"
+    if status_code == 500:
+        assert message.startswith(original_message + "\n\n")
+        assert "server log" in message
+        assert message.count("TESSERACT_DEBUG=1") == 1
+        assert "content/how-to/debugging.html#debug-mode" in message
+    else:
+        assert message == original_message
+
+
 class TestHTTPClientValidationErrors:
     """Test that Tesseract raises proper ValidationErrors for 422 responses over HTTP."""
 
