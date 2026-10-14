@@ -68,7 +68,7 @@ Each component uses a different differentiation strategy (analytic adjoints, fin
 </p>
 
 > [!NOTE]
-> Requires Python 3.10+. Building container images, as in this example, also requires [Docker](https://docs.docker.com/engine/install/). To use Tesseracts without Docker, see [running without containers](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/how-to/advanced-usage/#running-without-containers).
+> Requires [Docker](https://docs.docker.com/engine/install/) and Python 3.10+.
 
 **CLI:**
 
