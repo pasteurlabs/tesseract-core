@@ -2,6 +2,10 @@
 
 Tesseracts built via `tesseract build` are standard Docker images, so they can be shared, pushed, pulled, and deployed like any other container.
 
+Containerized Tesseracts do not inherit environment variables from the host;
+pass required values with `tesseract serve --env` or `tesseract run --env`, or
+set non-secret defaults in `tesseract_config.yaml` before building the image.
+
 ## Using Docker tools
 
 Built Tesseracts are Docker images named after the Tesseract. Standard Docker commands work directly:

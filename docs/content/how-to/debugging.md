@@ -56,6 +56,41 @@ This approach is particularly useful for:
 - Running unit tests against your Tesseract
 - Debugging with Python debuggers like `pdb` or IDE debuggers
 
+## When an environment variable is not visible
+
+The environment available to a Tesseract depends on how it is launched. A
+containerized Tesseract does not inherit the host shell's environment unless a
+variable is passed explicitly:
+
+| Launch path | Where the Tesseract runs | Environment visible to the Tesseract |
+| --- | --- | --- |
+| `tesseract serve` / `tesseract run` | Docker container | Values baked into the image through `env` in `tesseract_config.yaml`, plus values passed with `--env`. Host variables are not copied automatically. |
+| `Tesseract.from_image(...)` | Docker container | Values baked into the image, plus values passed with the `environment=` argument. Host variables are not copied automatically. |
+| `tesseract-runtime` | Current host process | The environment of the process that invoked `tesseract-runtime`. |
+| `Tesseract.from_tesseract_api(...)` | Current Python process | The environment of the Python process. |
+| `Tesseract.from_source(...)` | A subprocess on the host | The caller's environment is inherited by the subprocess. |
+
+For example, pass a host variable explicitly when using a containerized
+Tesseract:
+
+```bash
+$ tesseract run --env=MY_ENV_VARIABLE="$MY_ENV_VARIABLE" helloworld apply '{"inputs": {"name": "Tessie"}}'
+$ tesseract serve --env=MY_ENV_VARIABLE="$MY_ENV_VARIABLE" helloworld
+```
+
+For a Python SDK launch, pass it through the container environment explicitly:
+
+```python
+import os
+
+from tesseract_core import Tesseract
+
+tess = Tesseract.from_image(
+    "helloworld",
+    environment={"MY_ENV_VARIABLE": os.environ["MY_ENV_VARIABLE"]},
+)
+```
+
 ## Debug mode
 
 `tesseract serve` supports a `--debug` flag; this has two effects:
