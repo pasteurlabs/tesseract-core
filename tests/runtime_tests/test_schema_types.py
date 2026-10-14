@@ -154,6 +154,21 @@ def test_empty_array_roundtrip(encoding):
     assert roundtrip.data.shape == (0,)
 
 
+@pytest.mark.parametrize("encoding", ["base64", "binref"])
+def test_non_native_byte_order_roundtrip(encoding, tmp_path):
+    class AnyDtypeModel(BaseModel):
+        data: Array[(None,), None]
+
+    arr = np.array([1, 2, 3], dtype=">i4")
+    serialized = AnyDtypeModel(data=arr).model_dump_json(
+        context={"array_encoding": encoding, "base_dir": tmp_path}
+    )
+    roundtrip = AnyDtypeModel.model_validate_json(
+        serialized, context={"base_dir": tmp_path}
+    )
+    np.testing.assert_array_equal(roundtrip.data, arr)
+
+
 def test_json_binref_roundtrip(tmpdir):
     dumpdir = Path(tmpdir) / "dumpdir"
     model = MyModel(

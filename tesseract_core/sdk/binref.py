@@ -36,7 +36,7 @@ import numpy as np
 
 def _fast_tobytes(arr: np.ndarray) -> memoryview:
     """Convert a numpy array to bytes without copying if possible."""
-    return np.ascontiguousarray(arr).data
+    return np.ascontiguousarray(arr, dtype=arr.dtype.newbyteorder("=")).data
 
 
 def encode_array_binref(arr: Any, input_dir: Path, written_files: list[Path]) -> dict:
@@ -241,7 +241,12 @@ def read_binref_array(
     with open(full_path, "rb") as f:
         if offset:
             f.seek(offset)
-        f.readinto(memoryview(out).cast("B"))
+        num_read = f.readinto(memoryview(out).cast("B"))
+    if num_read < num_bytes:
+        raise ValueError(
+            f"Binref buffer {full_path} is too small: expected {num_bytes} bytes "
+            f"at offset {offset}, but only {num_read} could be read."
+        )
     return out
 
 

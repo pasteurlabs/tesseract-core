@@ -50,10 +50,7 @@ def test_serve_and_remove(dummy_api_path):
         served.remove(force=True)
 
     assert not local_client.is_running(served)
-    if os.name != "nt":
-        # Windows refuses to delete a file a just-killed child may still hold, so
-        # removal tolerates that and leaves it in the temp directory.
-        assert not served.log_path.exists()
+    assert not served.log_path.exists()
     # uvicorn announces itself on startup; if we captured nothing, log capture
     # is broken even though the health check passed.
     assert logs.strip()
@@ -143,12 +140,22 @@ def test_remove_is_idempotent(dummy_api_path):
     served.remove(force=True)
     # Must not raise, even though the process and its log file are gone
     served.remove(force=True)
-    if os.name != "nt":
-        # The logs really are gone, as they are for a removed container. Except
-        # on Windows, which refuses to delete a file a just-killed child may
-        # still hold -- removal tolerates that and leaves it behind.
-        with pytest.raises(FileNotFoundError):
-            served.logs()
+    # The logs really are gone, as they are for a removed container.
+    with pytest.raises(FileNotFoundError):
+        served.logs()
+
+
+def test_a_log_that_cannot_be_deleted_is_left_at_once(tmp_path):
+    """Only a file still held open is waited for; any other failure is final.
+
+    A directory stands in for a log that cannot be deleted, since unlinking one
+    fails on every platform.
+    """
+    started = time.monotonic()
+    local_client._unlink_once_released(tmp_path)
+
+    assert tmp_path.exists()
+    assert time.monotonic() - started < local_client._LOG_RELEASE_TIMEOUT
 
 
 # Nothing listens on port 1, so the health poll fails at once rather than
@@ -239,17 +246,64 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
     thing under each way of setting it. Does not exercise the transport itself,
     which needs a GPU.
     """
-    tess = Tesseract.from_source(
+    with Tesseract.from_source(
         dummy_api_path, python_executable=sys.executable, **kwargs
-    )
-    runtime_config = tess._spawn_config["runtime_config"]
+    ) as tess:
+        runtime_config = tess._spawn_config["runtime_config"]
+        child = serving.runtime_config_to_env(runtime_config).get(
+            "TESSERACT_GPU_TRANSPORT"
+        )
+        client = tess._client.default_encoding.gpu_transport
 
-    child = serving.runtime_config_to_env(runtime_config).get("TESSERACT_GPU_TRANSPORT")
-    client = tess._spawn_config.get("gpu_transport") or runtime_config.get(
-        "gpu_transport", "none"
-    )
     assert child == expected
-    assert client == expected
+    # A client that does not ask gets the server's default of "none"
+    assert (client or "none") == expected
+
+
+@pytest.mark.parametrize(
+    ("gpu_transport", "expected"),
+    [("none", ("none",)), ("cuda_ipc", ("none", "cuda_ipc"))],
+)
+def test_server_capabilities_reflect_the_server(
+    dummy_api_path, gpu_transport, expected
+):
+    """A client that did not configure the server still sees what it accepts.
+
+    Only reads what the server advertises, since exercising the transport needs a GPU.
+    """
+    with Tesseract.from_source(dummy_api_path, gpu_transport=gpu_transport) as tess:
+        remote = Tesseract.from_url(tess._client.url)
+        for client in (tess, remote):
+            capabilities = client.server_capabilities
+            assert capabilities.gpu_transports == expected
+            assert capabilities.output_formats == ("json", "json+base64", "json+binref")
+            assert capabilities.compressions == ("none", "lz4")
+
+
+def test_with_encoding_applies_to_the_view_only(
+    dummy_api_path, sample_inputs, tmp_path
+):
+    """The response format is observable through the files json+binref leaves behind."""
+    with Tesseract.from_source(dummy_api_path, output_path=tmp_path) as tess:
+        tess.apply(sample_inputs)
+        assert list(tmp_path.rglob("*.bin")) == []
+
+        binref = tess.with_encoding(output_format="json+binref")
+        result = binref.apply(sample_inputs)
+        np.testing.assert_allclose(result["result"], [5.0, 8.0])
+        num_files = len(list(tmp_path.rglob("*.bin")))
+        assert num_files > 0
+
+        tess.apply(sample_inputs)
+        assert len(list(tmp_path.rglob("*.bin"))) == num_files
+
+        # Every parameter the server advertises can be requested explicitly
+        explicit = tess.with_encoding(gpu_transport="none", compression="lz4")
+        result = explicit.apply(sample_inputs)
+        np.testing.assert_allclose(result["result"], [5.0, 8.0])
+
+        with pytest.raises(ValueError, match="does not accept gpu_transport"):
+            tess.with_encoding(gpu_transport="cuda_ipc")
 
 
 def test_gpu_transport_rejects_an_unknown_value(dummy_api_path):

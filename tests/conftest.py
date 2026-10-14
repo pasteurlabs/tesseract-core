@@ -121,6 +121,22 @@ def tesseract_output_dir(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def forbid_device_host_copy(monkeypatch):
+    """Make implicit device-to-host copies raise in every test.
+
+    Containers don't inherit the variable and need it passed explicitly. Tests
+    that exercise a host copy on purpose opt out via ``allow_device_host_copy``.
+    """
+    monkeypatch.setenv("TESSERACT_FORBID_DEVICE_HOST_COPY", "1")
+
+
+@pytest.fixture
+def allow_device_host_copy(monkeypatch):
+    """Opt a test out of ``forbid_device_host_copy``."""
+    monkeypatch.delenv("TESSERACT_FORBID_DEVICE_HOST_COPY")
+
+
+@pytest.fixture(autouse=True)
 def reset_config():
     """Reset the runtime configuration before each test."""
     import tesseract_core.runtime.config
@@ -662,22 +678,27 @@ def mocked_cuda(monkeypatch):
                 "get_handle": [],
                 "open": [],
                 "close": [],
-                "stage": [],
             }
             # Simulated device memory, keyed by device pointer.
             self._buffers: dict[int, bytearray] = {}
             self._next_ptr = 0xD000
             # Bytes returned by the next device->host copy, if a test seeds them.
             self.device_bytes: bytes | None = None
-            # Force ipc_get_mem_handle to reject a pointer (simulating a
-            # VMM/pool-backed allocation) unless it is a staging buffer.
-            self.reject_non_staging_ipc = False
-            self._staging_ptrs: set[int] = set()
+            # Make legacy IPC reject pointers this fake did not allocate,
+            # simulating VMM-backed memory. Its own cudaMalloc buffers, such as
+            # staging buffers, stay exportable.
+            self.reject_foreign_ipc = False
+            # Active device, as cudaSetDevice / cudaGetDevice see it.
+            self.current_device = 0
 
         # -- device / memory management ---------------------------------
 
         def set_device(self, device: int) -> None:
             self.calls["set_device"].append(device)
+            self.current_device = device
+
+        def get_device(self) -> int:
+            return self.current_device
 
         def malloc(self, nbytes: int) -> int:
             ptr = self._next_ptr
@@ -691,7 +712,6 @@ def mocked_cuda(monkeypatch):
                 return
             self.calls["free"].append(device_ptr)
             self._buffers.pop(device_ptr, None)
-            self._staging_ptrs.discard(device_ptr)
 
         def memcpy_device_to_device(self, dst: int, src: int, nbytes: int) -> None:
             self.calls["memcpy_d2d"].append((dst, src, nbytes))
@@ -713,29 +733,26 @@ def mocked_cuda(monkeypatch):
             return device_ptr - 256, 4096
 
         def ipc_get_mem_handle(self, device_ptr: int) -> bytes:
-            if self.reject_non_staging_ipc and device_ptr not in self._staging_ptrs:
+            if self.reject_foreign_ipc and device_ptr not in self._buffers:
                 raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
             self.calls["get_handle"].append(device_ptr)
             return b"\x01" * IPC_HANDLE_SIZE
 
-        def ipc_open_mem_handle(self, handle_bytes: bytes, device: int) -> int:
-            self.calls["open"].append((handle_bytes, device))
+        def ipc_open_mem_handle(self, handle_bytes: bytes) -> int:
+            self.calls["open"].append((handle_bytes, self.current_device))
             return 0x2000  # pretend mapped base pointer
 
         def ipc_close_mem_handle(self, device_ptr: int) -> None:
             self.calls["close"].append(device_ptr)
 
-        def stage_for_legacy_ipc(self, src_ptr: int, nbytes: int) -> int:
-            self.calls["stage"].append((src_ptr, nbytes))
-            ptr = 0x9000
-            self._staging_ptrs.add(ptr)
-            self._buffers[ptr] = bytearray(nbytes)
-            return ptr
+        def device_total_memory(self, device: int) -> int:
+            return 8 << 30
 
     fake = FakeCuda()
 
     for name in (
         "set_device",
+        "get_device",
         "malloc",
         "free",
         "memcpy_device_to_device",
@@ -745,16 +762,21 @@ def mocked_cuda(monkeypatch):
         "ipc_get_mem_handle",
         "ipc_open_mem_handle",
         "ipc_close_mem_handle",
-        "stage_for_legacy_ipc",
+        "device_total_memory",
     ):
         monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
-    # Each test starts with empty export registries.
-    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+    # Each test starts with empty export registries and buffer pools, and must
+    # not leave fake pointers behind for the next one.
+    def _reset() -> None:
+        cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
+        cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+
+    _reset()
+    monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())
+    monkeypatch.setattr(cuda_ipc, "_DECODE_POOL", cuda_ipc._BufferPool())
     yield fake
-    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+    _reset()
 
 
 @pytest.fixture(scope="module")

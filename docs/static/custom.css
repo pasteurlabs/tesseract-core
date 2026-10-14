@@ -725,6 +725,28 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     }
 }
 
+/* Thumbnails — opt-in small image floated beside the text that follows it
+   (in a paragraph or list item); the parent clears the float */
+.blog-page .content img.blog-img-thumb {
+    float: right;
+    max-width: 180px;
+    max-height: 140px;
+    margin: 0.25rem 0 0.5rem 1rem;
+}
+
+.blog-page .content :has(> img.blog-img-thumb)::after {
+    content: "";
+    display: block;
+    clear: both;
+}
+
+@media (max-width: 480px) {
+    .blog-page .content img.blog-img-thumb {
+        float: none;
+        margin: 0.5rem 0;
+    }
+}
+
 /* Image captions — italic paragraph immediately after an image */
 .blog-page .content p:has(> img) + p > em:only-child {
     display: block;

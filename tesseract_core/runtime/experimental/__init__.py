@@ -1,6 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from .binref_passthrough import (
+    BinrefArray,
+    BinrefWriter,
+)
 from .finite_differences import (
     finite_difference_jacobian,
     finite_difference_jvp,
@@ -40,6 +44,8 @@ SKIP_REQUIRED_FILE_CHECK = False
 # from a single module into submodules.
 for _obj in (
     LazySequence,
+    BinrefArray,
+    BinrefWriter,
     InputPath,
     OutputPath,
     TesseractReference,
@@ -60,6 +66,8 @@ for _obj in (
 del _obj
 
 __all__ = [
+    "BinrefArray",
+    "BinrefWriter",
     "InputPath",
     "LazySequence",
     "OutputPath",

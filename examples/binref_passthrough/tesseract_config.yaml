@@ -1,0 +1,5 @@
+name: "binref_passthrough"
+version: "1.0.0"
+description: "Returns a simulation trajectory written to disk without loading it back into memory."
+
+build_config: {}

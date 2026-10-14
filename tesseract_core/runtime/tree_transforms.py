@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import collections
 import re
 import threading
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -110,12 +109,11 @@ def get_at_path(tree: Any, path: str) -> Any:
         if method in ("seq", "dict"):
             return _get_recursive(tree[idx], path)
         elif method == "getattr":
-            if hasattr(tree, key):
-                return _get_recursive(getattr(tree, key), path)
-            elif isinstance(tree, Mapping):
-                # If the key is not an attribute, try to access it as a key in a dictionary
-                # This is useful for accessing keys of models that have been dumped to dictionaries
+            if isinstance(tree, Mapping):
+                # Dumped models are dicts, so look up keys before attributes like dict.values
                 return _get_recursive(tree[key], path)
+            elif hasattr(tree, key):
+                return _get_recursive(getattr(tree, key), path)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -145,18 +143,17 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 return
             return _set_recursive(tree[idx], path, value)
         elif method == "getattr":
-            if hasattr(tree, key):
-                if not path:
-                    setattr(tree, key, value)
-                    return
-                return _set_recursive(getattr(tree, key), path, value)
-            elif isinstance(tree, dict):
-                # If the key is not an attribute, try to access it as a key in a dictionary
-                # This is useful for accessing keys of models that have been dumped to dictionaries
+            if isinstance(tree, dict):
+                # Dumped models are dicts, so look up keys before attributes like dict.values
                 if not path:
                     tree[key] = value
                     return
                 return _set_recursive(tree[key], path, value)
+            elif hasattr(tree, key):
+                if not path:
+                    setattr(tree, key, value)
+                    return
+                return _set_recursive(getattr(tree, key), path, value)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -229,6 +226,19 @@ def filter_func(
     return filtered_func
 
 
+def is_arraylike(value: Any) -> bool:
+    """Whether ``value`` is an array or converts to one.
+
+    Duck-typed on ``__array__`` and ``shape``, so NumPy arrays and scalars,
+    on-disk binrefs and device arrays all qualify, while a model that happens
+    to carry a ``shape`` field does not.
+    """
+    return hasattr(value, "__array__") and hasattr(value, "shape")
+
+
+_MISSING = object()
+
+
 class LRUCache:
     """Thread-safe LRU cache with a configurable maximum size.
 
@@ -238,31 +248,45 @@ class LRUCache:
 
     All public methods are protected by a lock, so the cache is safe to use
     from multiple threads.
+
+    Unlike :func:`functools.lru_cache`, which memoizes the calls to a single
+    function, the cache stores and returns values explicitly: the JAX recipe
+    stores the VJP of a function while computing ``apply`` and returns it to a
+    later ``vjp`` call.
     """
 
     def __init__(self, maxsize: int = 1) -> None:
         self._maxsize = maxsize
         self._lock = threading.Lock()
-        self._cache: collections.OrderedDict[Hashable, Any] = collections.OrderedDict()
+        # Dicts keep insertion order, so the first entry is the least recently used.
+        self._cache: dict[Hashable, Any] = {}
+
+    # Every dict operation may call __eq__ on the keys that share the hash of the
+    # key it looks up, and that can be costly: the JAX recipe's keys compare
+    # device arrays. So each method below looks the key up once, with pop, and
+    # marks an entry MRU by re-inserting it rather than with
+    # OrderedDict.move_to_end, which would look the key up again.
 
     def put(self, key: Hashable, value: Any) -> None:
         """Insert or update *value* under *key*, evicting LRU entries if needed."""
         if self._maxsize <= 0:
             return
         with self._lock:
-            if key in self._cache:
-                self._cache.move_to_end(key)
+            self._cache.pop(key, _MISSING)
+            # Evicting first spares the insertion from comparing the key with
+            # an entry that is about to go.
+            while len(self._cache) >= self._maxsize:
+                del self._cache[next(iter(self._cache))]
             self._cache[key] = value
-            while len(self._cache) > self._maxsize:
-                self._cache.popitem(last=False)
 
     def get(self, key: Hashable) -> Any | None:
         """Return the value for *key* (marking it MRU), or ``None`` on a miss."""
         with self._lock:
-            if key not in self._cache:
+            value = self._cache.pop(key, _MISSING)
+            if value is _MISSING:
                 return None
-            self._cache.move_to_end(key)
-            return self._cache[key]
+            self._cache[key] = value
+            return value
 
     @property
     def size(self) -> int:

@@ -158,6 +158,29 @@ def test_create_abstract_eval_schema():
     AbstractOutputSchema.model_validate(testinput_abstract)
 
 
+def test_abstract_eval_schema_array_defaults():
+    class Sub(BaseModel):
+        s: Differentiable[Float32] = 1.0
+
+    class Model(BaseModel):
+        x: Differentiable[Array[(None,), Float32]]
+        y: Array[(2,), Float64] = [1, 2]
+        z: Array[(2,), Float64] = None
+        sub: Sub
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate(
+        {"inputs": {"x": {"shape": [3], "dtype": "float32"}, "sub": {}}}
+    ).inputs
+
+    assert inputs.model_dump() == {
+        "x": {"shape": (3,), "dtype": "float32"},
+        "y": {"shape": (2,), "dtype": "float64"},
+        "z": None,
+        "sub": {"s": {"shape": (), "dtype": "float32"}},
+    }
+
+
 def test_create_jacobian_schema():
     arr = testinput["testdiffarr"]
     testoutput = {
@@ -210,6 +233,12 @@ def test_create_jacobian_schema():
             jac_testinput[var] = ["moo"]
             InputSchema.model_validate(jac_testinput)
 
+        for almost in ("testfoo.[0].bar.[0].moo", "moo testfoo.[0].bar.[0]"):
+            with pytest.raises(ValidationError):
+                # a valid path with something around it
+                jac_testinput[var] = [almost]
+                InputSchema.model_validate(jac_testinput)
+
     jac_testinput = valid_jac_input.copy()
     # Test LookupError (from IndexError) (only raised on jac_inputs)
     with pytest.raises(ValidationError):
@@ -253,6 +282,84 @@ def test_create_jacobian_schema():
     # Flat dict
     with pytest.raises(ValidationError):
         OutputSchema.model_validate(testoutput["testdiffarr"], context=ctx)
+
+
+@pytest.mark.parametrize(
+    "input_shape,output_shape,jac_shape,valid",
+    [
+        # Both shapes concrete
+        ((3,), (5,), (5, 3), True),
+        ((3,), (5,), (3, 5), False),
+        # Output shape is Ellipsis
+        ((3,), ..., (5, 3), True),
+        ((3,), ..., (3, 3), True),
+        ((3,), ..., (5, 2, 3), True),
+        ((3,), ..., (3,), True),
+        ((), ..., (5,), True),
+        ((3,), ..., (3, 5), False),
+        # Input shape is Ellipsis
+        (..., (5,), (5, 3), True),
+        (..., (5,), (5, 3, 2), True),
+        (..., (5,), (5,), True),
+        (..., (), (3,), True),
+        (..., (5,), (3, 5), False),
+    ],
+)
+def test_jacobian_output_shape_validation(input_shape, output_shape, jac_shape, valid):
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[input_shape, Float64]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[output_shape, Float64]]
+
+    _, JacobianOutputSchema = create_gradient_schema(
+        InputSchema, OutputSchema, "jacobian"
+    )
+    jac = {"y": {"x": np.zeros(jac_shape)}}
+    ctx = {"input_keys": {"x"}, "output_keys": {"y"}}
+
+    if valid:
+        JacobianOutputSchema.model_validate(jac, context=ctx)
+    else:
+        with pytest.raises(ValidationError, match="Jacobian result"):
+            JacobianOutputSchema.model_validate(jac, context=ctx)
+
+
+def test_jacobian_output_validation_accepts_torch_gpu_tensor():
+    """GPU tensors are validated unconverted, and torch dtypes are not NumPy dtype names."""
+
+    class TorchDtype:
+        def __str__(self):
+            return "torch.float32"
+
+    class TorchCudaTensor:
+        shape = (5, 3)
+        dtype = TorchDtype()
+
+        @property
+        def __cuda_array_interface__(self):
+            return {
+                "shape": (5, 3),
+                "typestr": "<f4",
+                "data": (0, False),
+                "strides": None,
+                "version": 3,
+            }
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(3,), Float32]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(5,), Float32]]
+
+    _, JacobianOutputSchema = create_gradient_schema(
+        InputSchema, OutputSchema, "jacobian"
+    )
+    tensor = TorchCudaTensor()
+    result = JacobianOutputSchema.model_validate(
+        {"y": {"x": tensor}}, context={"input_keys": {"x"}, "output_keys": {"y"}}
+    )
+    assert result.root["y"]["x"] is tensor
 
 
 def test_create_jvp_schema():
@@ -486,6 +593,45 @@ def test_jvp_tangent_vector_shape_validation():
         InputSchema.model_validate(wrong_shape_input)
 
 
+def test_jvp_reports_invalid_inputs():
+    """Invalid inputs are reported as such, not as a crash in the tangent validator."""
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
+
+    jvp_input = {
+        "inputs": {**testinput, "testbaz": make_array((1, 2), "uint8")},
+        "jvp_inputs": ["testdiffarr"],
+        "jvp_outputs": ["testdiffarr"],
+        "tangent_vector": {"testdiffarr": testinput["testdiffarr"]},
+    }
+
+    with pytest.raises(ValidationError, match="testbaz"):
+        InputSchema.model_validate(jvp_input)
+
+
+def test_jvp_reports_a_tangent_along_an_input_that_was_not_sent():
+    """So is a tangent along an optional input that is absent."""
+
+    class Offset(BaseModel):
+        a: Differentiable[Array[(3,), Float64]]
+
+    class Inputs(BaseModel):
+        x: Differentiable[Array[(3,), Float64]]
+        offset: Offset | None = None
+
+    InputSchema, _ = create_gradient_schema(Inputs, Inputs, "jvp")
+
+    arr = make_array((3,), "float64")
+    jvp_input = {
+        "inputs": {"x": arr},
+        "jvp_inputs": ["offset.a"],
+        "jvp_outputs": ["x"],
+        "tangent_vector": {"offset.a": arr},
+    }
+
+    with pytest.raises(ValidationError, match="Could not find tangent_vector path"):
+        InputSchema.model_validate(jvp_input)
+
+
 def test_jvp_tangent_vector_dtype_casting():
     """Test that integer tangent vectors are cast to float for AD compatibility."""
     InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
@@ -550,6 +696,44 @@ def test_vjp_cotangent_vector_dtype_casting():
     # The cotangent vector should now have float dtype
     cotangent = result.cotangent_vector["testdiffarr"]
     assert np.issubdtype(cotangent.dtype, np.floating)
+
+
+def test_gradient_paths_match_whole_field_name():
+    """A field whose name starts with a sibling's must get its own annotation.
+
+    Path patterns for fields inside a list or dict are regexes, and an
+    unanchored match let the pattern for `a` claim `layers.[0].alpha`. The
+    first declared field won, so `alpha` was validated against `a`'s shape and
+    dtype: a correct cotangent was rejected, or silently downcast.
+    """
+
+    class Layer(BaseModel):
+        a: Differentiable[Array[(3,), Float32]]
+        alpha: Differentiable[Array[(4,), Float64]]
+
+    class Layers(BaseModel):
+        layers: list[Layer]
+
+    InputSchema, _ = create_gradient_schema(Layers, Layers, "vjp")
+    inputs = {
+        "layers": [
+            {"a": make_array((3,), "float32"), "alpha": make_array((4,), "float64")}
+        ]
+    }
+    cotangent = np.array([1.0, 1 / 3, np.pi, 2 / 3], dtype="float64")
+
+    validated = InputSchema.model_validate(
+        {
+            "inputs": inputs,
+            "vjp_inputs": ["layers.[0].alpha"],
+            "vjp_outputs": ["layers.[0].alpha"],
+            "cotangent_vector": {"layers.[0].alpha": cotangent},
+        }
+    )
+
+    got = validated.cotangent_vector["layers.[0].alpha"]
+    assert got.dtype == np.dtype("float64")
+    np.testing.assert_array_equal(got, cotangent)
 
 
 def test_untyped_container_schema_generation():

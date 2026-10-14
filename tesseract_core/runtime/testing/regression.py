@@ -22,6 +22,7 @@ from pydantic import (
 from ..config import get_config
 from ..core import get_input_schema, get_output_schema
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
+from ..tree_transforms import is_arraylike
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
 
@@ -205,6 +206,18 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     return exc_class
 
 
+def _coerce_arraylike(value: Any) -> Any:
+    """Convert lazy array-likes (e.g. a ``BinrefArray``) to NumPy arrays.
+
+    Other values, including scalars and containers, are returned unchanged.
+    """
+    if isinstance(value, np.ndarray):
+        return value
+    if is_arraylike(value):
+        return np.asarray(value)
+    return value
+
+
 def _validate_tree_structure(
     tree: Any,
     template: Any,
@@ -230,6 +243,9 @@ def _validate_tree_structure(
         mismatch messages. Both may be non-empty when some subtrees match and
         others don't.
     """
+    tree = _coerce_arraylike(tree)
+    template = _coerce_arraylike(template)
+
     if type(tree) is not type(template):
         return (
             {},

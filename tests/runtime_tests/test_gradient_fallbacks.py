@@ -268,6 +268,26 @@ def test_jacobian_from_vjp(
             np.testing.assert_allclose(jac[dy][dx], expected[dy][dx], rtol=1e-10)
 
 
+def test_jacobian_from_vjp_accepts_a_template_abstract_eval():
+    """eval_fn must work with abstract_eval as real Tesseracts declare it.
+
+    Templates name its argument ``abstract_inputs``, so eval_fn cannot be
+    called with ``inputs=``, and the JAX recipe returns plain
+    ``{"shape": ..., "dtype": ...}`` dicts instead of ShapeDType objects.
+    """
+    inputs = {"x": np.array([1.0, 2.0, 3.0])}
+    jacobian = np.diag([3.0, 3.0, 3.0])
+
+    def abstract_eval(abstract_inputs):
+        return {"y": {"shape": (3,), "dtype": "float64"}}
+
+    def vjp_fn(inputs, vjp_inputs, vjp_outputs, cotangent_vector):
+        return {"x": jacobian.T @ cotangent_vector["y"]}
+
+    jac = jacobian_from_vjp(vjp_fn, abstract_eval, inputs, {"x"}, {"y"})
+    np.testing.assert_allclose(jac["y"]["x"], jacobian, rtol=1e-10)
+
+
 @pytest.mark.parametrize(
     "inputs,tangent,cotangent,apply_fn,abstract_eval_fn,jacobian_fn,vjp_fn,jvp_fn",
     _CASES,

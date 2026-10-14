@@ -8,6 +8,7 @@ from tesseract_core.runtime.tree_transforms import (
     filter_func,
     flatten_with_paths,
     get_at_path,
+    is_arraylike,
     path_to_index_op,
     set_at_path,
     split_path,
@@ -202,9 +203,17 @@ class TestGetAtPath:
         with pytest.raises(expected_error):
             get_at_path(sample_tree, invalid_path)
 
+    @pytest.mark.parametrize("key", ["values", "items", "keys", "get", "copy"])
+    def test_dict_method_names_are_keys(self, key):
+        assert get_at_path({key: {"a": 1}}, f"{key}.a") == 1
+
 
 class TestSetAtPath:
     """Test cases for set_at_path function."""
+
+    @pytest.mark.parametrize("key", ["values", "items", "keys", "get", "copy"])
+    def test_dict_method_names_are_keys(self, key):
+        assert set_at_path({key: 1}, {key: 2}) == {key: 2}
 
     def test_set_at_path_creates_deep_copy(self, sample_tree):
         """Test that set_at_path creates a deep copy and doesn't modify original."""
@@ -736,6 +745,38 @@ class TestLRUCache:
         cache.put(b"k", "v")
         assert cache.get(b"k") is None
 
+    def test_compares_keys_at_most_once_per_call(self):
+        """Comparing keys can be costly (the JAX recipe compares device arrays)."""
+
+        class Key:
+            eq_calls = 0
+
+            def __init__(self, value):
+                self.value = value
+
+            def __hash__(self):
+                return hash(self.value)
+
+            def __eq__(self, other):
+                Key.eq_calls += 1
+                return self.value == other.value
+
+        def eq_calls(call):
+            Key.eq_calls = 0
+            call()
+            return Key.eq_calls
+
+        cache = LRUCache(maxsize=2)
+        assert eq_calls(lambda: cache.put(Key(1), "a")) == 0
+        assert eq_calls(lambda: cache.put(Key(2), "b")) == 0
+        assert eq_calls(lambda: cache.get(Key(1))) == 1
+        # Evicts Key(2), the least recently used.
+        assert eq_calls(lambda: cache.put(Key(3), "c")) == 0
+        assert eq_calls(lambda: cache.get(Key(2))) == 0
+        assert eq_calls(lambda: cache.put(Key(3), "d")) == 1
+        assert cache.get(Key(3)) == "d"
+        assert cache.get(Key(1)) == "a"
+
 
 class TestSplitPath:
     """Dots separate segments except where they belong to a dict key."""
@@ -768,3 +809,37 @@ class TestSplitPath:
         """The case this was for: a state-dict key reaches its value."""
         tree = {"params": {"layer.0.weight": 7}}
         assert get_at_path(tree, "params.{layer.0.weight}") == 7
+
+
+class TestIsArraylike:
+    """Tests for is_arraylike."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [np.zeros((2, 3)), np.float64(1.0), np.array(1.0)],
+    )
+    def test_arrays(self, value):
+        assert is_arraylike(value)
+
+    @pytest.mark.parametrize("value", [1, 1.0, "abc", b"abc", None, [1, 2], {"a": 1}])
+    def test_non_arrays(self, value):
+        assert not is_arraylike(value)
+
+    def test_converts_to_array(self):
+        """A lazy array-like, as a binref or a device buffer appears to a leaf."""
+
+        class Lazy:
+            shape = (2,)
+
+            def __array__(self, dtype=None, copy=None):
+                return np.zeros(2)
+
+        assert is_arraylike(Lazy())
+
+    def test_shape_alone_is_not_enough(self):
+        """A model carrying a shape field is not an array."""
+
+        class Params(BaseModel):
+            shape: tuple[int, int]
+
+        assert not is_arraylike(Params(shape=(2, 3)))
