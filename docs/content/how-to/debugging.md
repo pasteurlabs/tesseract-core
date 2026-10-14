@@ -74,8 +74,9 @@ calling older runtimes that return a bare `Internal Server Error`.
 
 When serving directly with `tesseract-runtime serve`, set `TESSERACT_DEBUG=1` in the
 server's environment before starting it. For a container, use `tesseract serve --debug`.
-`Tesseract.from_source()` and `Tesseract.from_image()` enable debug mode by default;
-if you explicitly disabled it, pass `runtime_config={"debug": True}` to enable it again.
+`Tesseract.from_image()` enables debug mode by default.
+`Tesseract.from_source()` also enables it by default; if you explicitly disabled it,
+pass `runtime_config={"debug": True}` to enable it again.
 When connecting with `Tesseract.from_url()`, debug mode must be enabled by whoever
 runs the remote server; setting the environment variable on the client does not
 change the server's configuration.
