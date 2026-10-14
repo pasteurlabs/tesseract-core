@@ -3,7 +3,8 @@
 """Build a Tesseract's Python environment on the host, for ``from_source``.
 
 The host-side counterpart of the ``build_*_venv.sh`` templates run by
-``tesseract build``. Only :func:`resolve_python_executable` and :func:`declared_env` are public.
+``tesseract build``. Only :func:`resolve_python_executable` and
+:func:`declared_env_and_metadata` are public.
 """
 
 from __future__ import annotations
@@ -402,16 +403,24 @@ def _build_conda_env(
     return python_executable
 
 
-def declared_env(api_path: Path) -> dict[str, str]:
-    """The config's top-level ``env``, which a container sets in its image.
+def declared_env_and_metadata(
+    api_path: Path,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The config's ``env`` and ``name``/``version``/``description``, as an image has them.
 
-    Empty if there is no readable config, since an explicit ``python_executable``
-    does not require one.
+    Both are empty without a readable config, since an explicit
+    ``python_executable`` does not require one.
     """
     try:
-        return dict(get_config(api_path.parent).env)
+        config = get_config(api_path.parent)
     except (OSError, ValidationError):
-        return {}
+        return {}, {}
+    metadata = {
+        "name": config.name,
+        "version": config.version,
+        "description": config.description,
+    }
+    return dict(config.env), metadata
 
 
 @contextlib.contextmanager
