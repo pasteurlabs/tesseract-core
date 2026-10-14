@@ -43,7 +43,7 @@ Tesseract packages scientific software into **self-contained, portable component
 ## Example: Shape optimization across tools
 
 <a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/grid_fin_stl.png" width="200" align="right" alt="Rocket grid fin geometry optimized by a differentiable Tesseract pipeline" title="Rocket grid fin optimized end-to-end across SpaceClaim, a mesher, and PyMAPDL.">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="200" align="right" alt="Rocket grid fin geometry optimized by a differentiable Tesseract pipeline" title="Rocket grid fin optimized end-to-end across SpaceClaim, a mesher, and PyMAPDL.">
 </a>
 
 The [rocket fin optimization case study](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/) combines three Tesseracts:
