@@ -325,14 +325,13 @@ An OpenSees finite element model, differentiated by its own sensitivity analysis
 infers where and how badly a steel truss has corroded, with uncertainty estimates.
 :::
 
-:::{grid-item-card} Differentiable Fortran
-:link: content/demo/enzyme-lfortran
-:link-type: doc
+:::{grid-item-card} Mosaic
+:link: https://github.com/pasteurlabs/mosaic
 :class-card: demo-card
-:img-top: img/gallery/enzyme-fortran.jpg
+:img-top: img/gallery/mosaic.jpg
 
-A Fortran heat solver, differentiated by Enzyme at the LLVM level, recovers a 900-element
-initial temperature field from 100 sensors through JAX.
+Solvers in C++, Julia, JAX, and PyTorch, from deal.II and OpenFOAM to JAX-FEM and XLB,
+behind one Tesseract interface, so a single harness can compare their gradients and cost on shared tasks.
 :::
 
 ::::

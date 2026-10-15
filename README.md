@@ -73,9 +73,9 @@ An OpenSees finite element model, differentiated by its own sensitivity analysis
 A PyTorch network proposes EEG sources, and JAX refines them with gradients through OpenMEEG, a C++ boundary element solver with no autodiff of its own.
 </td>
 <td width="33%" valign="top">
-<a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/enzyme-lfortran/"><img src="https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/docs/img/gallery/enzyme-fortran.jpg" alt="Recovered and true initial temperature fields"></a>
-<b><a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/enzyme-lfortran/">Differentiable Fortran</a></b><br>
-A Fortran heat solver, differentiated by Enzyme at the LLVM level, recovers a 900-element initial temperature field from 100 sensors through JAX.
+<a href="https://github.com/pasteurlabs/mosaic"><img src="https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/docs/img/gallery/mosaic.jpg" alt="Channel flow around a cylinder before and after gradient-based inflow optimization"></a>
+<b><a href="https://github.com/pasteurlabs/mosaic">Mosaic</a></b><br>
+Solvers in C++, Julia, JAX, and PyTorch, from deal.II and OpenFOAM to JAX-FEM and XLB, behind one Tesseract interface, so a single harness can compare their gradients and cost on shared tasks.
 </td>
 </tr>
 </table>

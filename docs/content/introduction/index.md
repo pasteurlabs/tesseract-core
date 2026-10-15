@@ -28,9 +28,13 @@ New here? Start with the [Get Started](../tutorials/get-started.md) tutorial, or
 <small>Internal and external interfaces of a Tesseract.</small>
 ```
 
-A Tesseract is a component defined in one file, `tesseract_api.py`. It declares its inputs and outputs as Pydantic schemas and marks which fields are differentiable. Its primary entrypoint, `apply`, wraps whatever software you choose. All other [endpoints](../reference/endpoints.md) relate to `apply`: `abstract_eval` returns the output structure, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` return derivatives, and so on. Derivative endpoints are optional.
+A Tesseract is a component defined in one file, `tesseract_api.py`:
 
-Callers don't import this file. They reach the Tesseract across a process boundary, over HTTP or through the Python SDK, so the component keeps its own interpreter and dependencies.
+- **Schemas** declare its inputs and outputs as Pydantic models and mark which fields are differentiable.
+- **`apply`** is the primary entrypoint and wraps whatever software you choose.
+- **Derivative endpoints** (`jacobian`, `jacobian_vector_product`, `vector_jacobian_product`) are optional and differentiate `apply`.
+- **`abstract_eval`** returns the output structure without running `apply`. See [endpoints](../reference/endpoints.md) for the full list.
+- **A process boundary** separates it from its callers, who reach it over HTTP or through the Python SDK instead of importing it, so it keeps its own interpreter and dependencies.
 
 ## The workflow
 
@@ -45,6 +49,7 @@ For tests and debugging, `Tesseract.from_tesseract_api` imports a Tesseract dire
 ## Where to go next
 
 - **Using a Tesseract someone else built:** [](../tutorials/interact.md)
+- **Finding ready-made differentiable solvers:** [Mosaic](https://github.com/pasteurlabs/mosaic), a benchmark suite of physics solvers packaged as Tesseracts
 - **Making calls faster:** [](../concepts/performance.md)
 - **Seeing complete examples:** [](../demo/demo.md)
 
