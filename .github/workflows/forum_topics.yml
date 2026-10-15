@@ -1,7 +1,7 @@
 name: Mirror blog posts to the forum
 
-# Mirrors each blog post to the forum and updates the mirror when the post
-# changes. The production docs build fails without these topics (see
+# Mirrors each blog post to the forum and updates the mirror when the post or
+# the script that renders it changes. The production docs build fails without these topics (see
 # docs/conf.py). Run it manually to backfill.
 
 on:
@@ -10,11 +10,11 @@ on:
       - main
     paths:
       - "docs/blog/*.md"
+      - "docs/forum_topics.py"
   workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   blog-topics:
@@ -54,7 +54,7 @@ jobs:
       - name: Open an issue on failure
         if: failure()
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
