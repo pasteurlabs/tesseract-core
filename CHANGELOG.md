@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Read and write a Tesseract's files as UTF-8 on every platform (#832)
 - *(runtime)* Write the metrics file as UTF-8 on every platform (#834)
 - *(sdk)* Pass the config's name, version and description to `from_source` Tesseracts (#841)
+- Show videos in forum mirrors of blog posts and stay within the forum's topic rate limit (#848)
 
 ### Refactor
 
