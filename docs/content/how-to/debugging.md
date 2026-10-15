@@ -67,19 +67,18 @@ This approach is particularly useful for:
   is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
   remote debugging sessions.
 
-When an endpoint raises unexpectedly outside debug mode, its HTTP 500 response points
-you to the server log and this guide; the traceback remains in the server log.
-The Python SDK also adds this guidance when
-calling older runtimes that return a bare `Internal Server Error`.
+Without debug mode, a failing request returns a generic HTTP 500 error, so that tracebacks
+and other server internals stay hidden from clients. The traceback still goes to the server log.
+Read it with `docker logs <container ID>` for containers, or with `Tesseract.server_logs()`
+for Tesseracts started through the Python SDK. `tesseract-runtime serve` prints it to the terminal.
 
-When serving directly with `tesseract-runtime serve`, set `TESSERACT_DEBUG=1` in the
-server's environment before starting it. For a container, use `tesseract serve --debug`.
-`Tesseract.from_image()` enables debug mode by default.
-`Tesseract.from_source()` also enables it by default; if you explicitly disabled it,
-pass `runtime_config={"debug": True}` to enable it again.
-When connecting with `Tesseract.from_url()`, debug mode must be enabled by whoever
-runs the remote server; setting the environment variable on the client does not
-change the server's configuration.
+To get tracebacks in the response instead, enable debug mode. How depends on how the
+Tesseract is served:
+
+- **Containers**: `tesseract serve --debug`.
+- **Without containers**: `TESSERACT_DEBUG=1 tesseract-runtime serve`.
+- **Python SDK**: `Tesseract.from_image()` and `Tesseract.from_source()` serve in debug mode by default.
+- **Remote servers** (`Tesseract.from_url()`): whoever runs the server has to enable debug mode there.
 
 In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
 debug mode:
