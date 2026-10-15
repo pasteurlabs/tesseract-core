@@ -257,7 +257,7 @@ def _fit_encoding_to_server(
 
 # GPU transports a client picks by itself when a server offers them, in order of
 # preference.
-_AUTO_GPU_TRANSPORTS = ("cuda_ipc",)
+_AUTO_GPU_TRANSPORTS = ("cuda_ipc", "nixl")
 
 
 class Tesseract:
@@ -907,7 +907,7 @@ class Tesseract:
         or the ``gpu_transport`` it was created with, is returned once it is
         known to work. Otherwise this returns the first transport the server
         offers that works from this process, in the SDK's order of preference
-        (which currently holds only ``cuda_ipc``), and ``none`` otherwise, with
+        (``cuda_ipc``, then ``nixl``), and ``none`` otherwise, with
         a warning for each offered transport that does not work.
 
         Whether a transport works depends on how both processes are set up
@@ -1211,10 +1211,10 @@ def _subprocess_spawn_config(
     else:
         config_kwargs.setdefault("gpu_transport", "none")
 
-    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc"):
+    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc", "nixl"):
         raise ValueError(
             f"Unknown gpu_transport {config_kwargs['gpu_transport']!r}. "
-            "Supported values: 'none', 'cuda_ipc'."
+            "Supported values: 'none', 'cuda_ipc', 'nixl'."
         )
 
     return auto_dirs, dict(

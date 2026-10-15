@@ -1444,6 +1444,37 @@ def test_container_diagnoses_its_own_exit(state, expected):
     assert expected in docker_client.diagnose_exit(container, logs="")
 
 
+def test_container_url_on_the_host_network():
+    """A host-network container publishes no ports; it serves on its API port."""
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={
+            "Config": {"Cmd": ["serve", "--port", "41234", "--host", "0.0.0.0"]},
+            "HostConfig": {"NetworkMode": "host"},
+            "NetworkSettings": {"Ports": {}},
+        },
+    )
+    assert container.url == "http://127.0.0.1:41234"
+
+
+def test_container_url_from_its_published_port():
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={
+            "Config": {"Cmd": ["serve", "--port", "8000", "--host", "0.0.0.0"]},
+            "HostConfig": {"NetworkMode": "bridge"},
+            "NetworkSettings": {
+                "Ports": {"8000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "50001"}]}
+            },
+        },
+    )
+    assert container.url == "http://127.0.0.1:50001"
+
+
 def _stopped_container(logs=b"", state=None, **overrides):
     """A Container wired up to answer without a daemon behind it.
 

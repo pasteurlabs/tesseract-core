@@ -161,6 +161,29 @@ class CudaIpcArrayData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class NixlArrayData(BaseModel):
+    """Data structure for a NIXL GPU transfer descriptor.
+
+    The buffer field packs ``<agent_metadata>:<address>:<device>``, which are the
+    producer's base64-encoded NIXL agent metadata, the device address of the
+    array's registered bytes, and the producer's ordinal for the device holding
+    them. All three are empty for an empty array. The base64 alphabet never
+    contains ``:``, so it is safe as a delimiter.
+
+    This is only the JSON *schema* for the encoding. The machinery that produces
+    and consumes it lives in :mod:`tesseract_core.runtime.nixl_transport`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^([A-Za-z0-9+/=]+:\d+:\d+|::)$",
+        description="Packed NIXL descriptor: <agent_metadata>:<address>:<device>",
+    )
+    encoding: Literal["nixl"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class EncodedArrayModel(BaseModel):
     """Base class for general encoded arrays.
 
@@ -170,7 +193,13 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[NonNegativeInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
+    data: (
+        BinrefArrayData
+        | Base64ArrayData
+        | JsonArrayData
+        | CudaIpcArrayData
+        | NixlArrayData
+    )
     model_config = ConfigDict(extra="forbid")
 
 
@@ -263,7 +292,11 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
+            BinrefArrayData
+            | Base64ArrayData
+            | JsonArrayData
+            | CudaIpcArrayData
+            | NixlArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -773,7 +806,7 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = load_binref_arraydict(val.model_dump(), base_dir)
 
-        elif val.data.encoding == "cuda_ipc":
+        elif val.data.encoding in {"cuda_ipc", "nixl"}:
             from tesseract_core.runtime.device_transport import get_transport
 
             if val.data.encoding not in available_gpu_transports():

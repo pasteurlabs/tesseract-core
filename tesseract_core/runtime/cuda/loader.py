@@ -271,6 +271,9 @@ def load_cudart() -> Any:
     # process, and by decode to block until its device-to-device copy completes.
     cudart.cudaDeviceSynchronize.argtypes = []
     cudart.cudaDeviceSynchronize.restype = ctypes.c_int
+    # Used to pick the NIXL build that matches this runtime.
+    cudart.cudaRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    cudart.cudaRuntimeGetVersion.restype = ctypes.c_int
     return cudart
 
 

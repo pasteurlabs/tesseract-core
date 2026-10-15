@@ -39,6 +39,7 @@ except ModuleNotFoundError as e:
 # Public API and built-in device-transport registration
 from .cuda.ipc import CudaIpcTransport
 from .device_transport import register_transport
+from .nixl_transport import NixlTransport
 from .schema_types import (
     Array,
     Differentiable,
@@ -59,6 +60,7 @@ from .schema_types import (
 # Register built-in device transports here rather than as an import-time side
 # effect in the backend modules, so get_transport stays a plain registry lookup.
 register_transport(CudaIpcTransport())
+register_transport(NixlTransport())
 
 __all__ = [
     "Array",
