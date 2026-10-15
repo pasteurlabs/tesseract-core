@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.15.0] - 2026-10-13
+## [1.15.0] - 2026-10-15
 
 ### Features
 
@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Unify input array encoding and decouple binref from output format (#795)
 - *(runtime)* Forward on-disk binrefs through Array fields via BinrefArray (#743)
 - [**breaking**] Negotiate compression and GPU transport per request via the Accept header (#805)
+- [**breaking**] Auto-resolve a GPU transport that works between client and server, and make cuda_ipc safe for concurrent calls (#829)
 
 ### Bug Fixes
 
@@ -28,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Decode only what the server marks as an array (#837)
 - *(sdk)* Read and write a Tesseract's files as UTF-8 on every platform (#832)
 - *(runtime)* Write the metrics file as UTF-8 on every platform (#834)
+- *(sdk)* Pass the config's name, version and description to `from_source` Tesseracts (#841)
 
 ### Refactor
 
@@ -38,6 +40,7 @@ All notable changes to this project will be documented in this file.
 
 - Hackathon winners blog announcement (#809)
 - Run tutorial snippets as end-to-end tests and fix stale examples (#820)
+- Mirror blog posts and release notes to the forum as comment threads, fine-tune forum positioning (#792)
 
 ### Performance
 
