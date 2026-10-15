@@ -78,6 +78,7 @@ def output_to_bytes(
     binref_dir: str | Path | None = None,
     compression: compression_type | None = None,
     gpu_transport: gpu_transport_type = "none",
+    device_exports: Any = None,
 ) -> bytes:
     """Encode endpoint output to bytes.
 
@@ -125,6 +126,9 @@ def output_to_bytes(
         raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
 
     context["device_transport"] = None if gpu_transport == "none" else gpu_transport
+    # Collects this output's device exports, so the caller can keep them until
+    # the consumer is done (see DeviceTransport.new_exports).
+    context["device_exports"] = device_exports
 
     # Two-phase serialization to bypass serde_json's slow UTF-8 scanning
     # on large base64 strings (https://github.com/pydantic/pydantic/issues/12911).

@@ -1896,6 +1896,20 @@ def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
         )
 
 
+def test_serve_gpu_transport_errors_with_several_workers(monkeypatch):
+    """A GPU transport needs a single worker, which keeps every response's exports."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="more than one worker"):
+        engine.serve(
+            "my-image",
+            gpus=["all"],
+            gpu_transport="cuda_ipc",
+            num_workers=2,
+            skip_health_check=True,
+        )
+
+
 def test_serve_unknown_gpu_transport_errors(monkeypatch):
     """An unknown gpu_transport value is a startup error."""
     _stub_serve_docker(monkeypatch)
