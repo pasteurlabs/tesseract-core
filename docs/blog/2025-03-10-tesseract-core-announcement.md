@@ -6,6 +6,7 @@ blog_date: "2025-03-10"
 blog_author: Pasteur Labs
 blog_title: "Tesseract Core is now live... and open source!"
 blog_description: "We're announcing the public release of Tesseract Core, a free and open source application enabling scientists and engineers to build end-to-end differentiable pipelines with minimal code."
+forum_topic: 65
 ---
 
 # Tesseract Core is now live... and open source!

@@ -8,9 +8,10 @@
 Universal components for differentiable scientific computing 📦
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
-[Showcases & tutorials](https://si-tesseract.discourse.group/c/showcase/11) |
+[Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) |
+[Blog](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/) |
+[User forum](https://si-tesseract.discourse.group/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
-[Community forum](https://si-tesseract.discourse.group/) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
@@ -41,11 +42,11 @@ Tesseract packages scientific software into **self-contained, portable component
 
 ## Example: Shape optimization across tools
 
-<a href="https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="200" align="right" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline" title="Topology-optimized bracket produced by a multi-tool differentiable Tesseract pipeline.">
+<a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="200" align="right" alt="Rocket grid fin geometry optimized by a differentiable Tesseract pipeline" title="Rocket grid fin optimized end-to-end across SpaceClaim, a mesher, and PyMAPDL.">
 </a>
 
-The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) combines three Tesseracts:
+The [rocket fin optimization case study](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/) combines three Tesseracts:
 
 ```
 [SpaceClaim geometry] → [Mesh + SDF] → [PyMAPDL FEA solver]
@@ -56,7 +57,7 @@ The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/
 Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline that [is one `jax.grad` call away](https://github.com/pasteurlabs/tesseract-jax) from end-to-end gradients.
 
 > [!TIP]
-> More examples in the [example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html) and [community showcases](https://si-tesseract.discourse.group/c/showcase/11).
+> More examples in the [demos](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) and the [example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html).
 
 ## Quick start
 

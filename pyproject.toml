@@ -68,6 +68,7 @@ docs = [
     "sphinxext_opengraph[social_cards]",
     "sphinx-sitemap",
     "sphinx-reredirects",
+    "sphinx-markdown-builder",
     "tesseract-core[runtime]",
 ]
 dev = [
