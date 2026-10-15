@@ -27,10 +27,12 @@ import os
 import posixpath
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urljoin
 
 from blog_posts import collect_blog_posts
 
@@ -54,6 +56,12 @@ SYNC_MARKER_REGEX = re.compile(r"<!-- mirrored from source with digest (\w+) -->
 
 # Fenced code blocks and inline code, which rewrites must leave alone
 CODE_REGEX = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
+
+# The forum lets each user create one topic every 15 seconds. Wait a second longer
+# to stay clear of the limit.
+TOPIC_CREATION_INTERVAL_SECONDS = 16
+
+_last_topic_created: float | None = None
 
 
 def _request(method: str, path: str, payload: dict | None = None) -> dict:
@@ -99,6 +107,8 @@ def find_topic(external_id: str) -> str | None:
 
 def sync_topic(external_id: str, title: str, body: str) -> str:
     """Create or update the topic with this external ID, and return its URL."""
+    global _last_topic_created
+
     # Discourse only routes lookups for external IDs of this form
     if not re.fullmatch(r"[\w-]+", external_id):
         raise ValueError(f"Invalid Discourse external ID: {external_id!r}")
@@ -108,6 +118,9 @@ def sync_topic(external_id: str, title: str, body: str) -> str:
 
     topic = _get_topic(external_id)
     if topic is None:
+        if _last_topic_created is not None:
+            wait = _last_topic_created + TOPIC_CREATION_INTERVAL_SECONDS
+            time.sleep(max(0, wait - time.monotonic()))
         post = _request(
             "POST",
             "/posts.json",
@@ -118,6 +131,7 @@ def sync_topic(external_id: str, title: str, body: str) -> str:
                 "external_id": external_id,
             },
         )
+        _last_topic_created = time.monotonic()
         url = f"{FORUM_URL}/t/{post['topic_slug']}/{post['topic_id']}"
         print(f"created:   {external_id} -> {url}", file=sys.stderr)
         return url
@@ -174,6 +188,16 @@ def render_blog_post(markdown: str, post_file: str) -> str:
             text,
         )
 
+        # The Markdown build copies raw HTML as is, so its paths are relative to the
+        # post's URL. Videos thus link to the docs site instead of GitHub, since
+        # Discourse only copies images and GitHub serves videos with a content type
+        # that browsers may not play.
+        text = re.sub(
+            r'(<\w+\b[^>]*\bsrc=")(?!https?://)([^"]+)"',
+            lambda m: f'{m[1]}{urljoin(post_url, m[2])}"',
+            text,
+        )
+
         # Links to other pages are relative to the post and point at Markdown sources
         def page_url(m: re.Match) -> str:
             page = posixpath.normpath(posixpath.join("blog", m[2]))
@@ -188,11 +212,21 @@ def render_blog_post(markdown: str, post_file: str) -> str:
             text,
         )
 
+    def unwrap_figures(text: str) -> str:
+        # Discourse strips <figure> and <figcaption>, so set the caption below the
+        # media in italics, like the Markdown build does for image captions
+        return re.sub(
+            r"<figure>((?:(?!</figure>).)*?)<figcaption>(.*?)</figcaption>\s*</figure>",
+            lambda m: f"{m[1].strip()}\n\n*{m[2].strip()}*",
+            text,
+            flags=re.DOTALL,
+        )
+
     # The topic title replaces the post's heading
     markdown = re.sub(r"\A# .*\n+", "", markdown)
     body = (
         f"*Originally published on the [Tesseract Blog]({post_url}).*\n\n"
-        + _outside_code(markdown, absolutize).strip()
+        + _outside_code(markdown, lambda t: unwrap_figures(absolutize(t))).strip()
         + "\n"
     )
     return _truncate(body, post_url, "the Tesseract Blog")
