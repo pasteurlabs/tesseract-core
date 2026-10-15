@@ -18,6 +18,8 @@ Layers:
 
 The main consumer is :mod:`tesseract_core.runtime.cuda.ipc`, which layers the
 ``cuda_ipc`` GPU transport on top of this API.
+:mod:`~tesseract_core.runtime.cuda.serving` holds what the REST API needs to
+serve GPU transports.
 """
 
 from tesseract_core.runtime.cuda import api, dlpack, loader

@@ -25,6 +25,7 @@ from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.file_interactions import (
     available_gpu_transports,
+    compression_type,
     get_filesize,
     is_absolute_path,
     is_url,
@@ -100,7 +101,7 @@ class Base64ArrayData(BaseModel):
         ),
     ]
     encoding: Literal["base64"]
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
     model_config = ConfigDict(extra="forbid")
 
 
@@ -114,7 +115,7 @@ class BinrefArrayData(BaseModel):
 
     buffer: StrictStr = Field(pattern=r"^.+?(\:\d+(\:\d+)?)?$")
     encoding: Literal["binref"]
-    compression: Literal["lz4"] | None = None
+    compression: compression_type | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -135,9 +136,10 @@ class CudaIpcArrayData(BaseModel):
     The buffer field packs all four components as
     ``<device>:<handle>:<storage_offset>:<storage_size>``, where:
 
-    - ``device`` is the CUDA device ordinal the memory lives on,
+    - ``device`` is the UUID of the CUDA device the memory lives on,
     - ``handle`` is the base64-encoded 64-byte cudaIpcMemHandle_t (its base64
-      alphabet never contains ``:``, so it is safe as a field delimiter),
+      alphabet never contains ``:``, so it is safe as a field delimiter), or
+      empty for an empty array, which has no memory to share,
     - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
     - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
 
@@ -147,7 +149,10 @@ class CudaIpcArrayData(BaseModel):
     """
 
     buffer: StrictStr = Field(
-        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+            r":[A-Za-z0-9+/=]*:\d+:\d+$"
+        ),
         description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
     )
     encoding: Literal["cuda_ipc"]
@@ -777,6 +782,16 @@ def decode_array(
                     f"Tesseract (available: {available_gpu_transports()})"
                 )
 
+            # The schema admits any castable dtype, but a GPU array is passed on
+            # as is, so check the metadata before mapping the memory
+            check_shape_dtype_no_cast(
+                tuple(val.shape),
+                val.dtype,
+                expected_shape,
+                expected_dtype,
+                no_cast_reason=f"{val.data.encoding} does not cast on device",
+            )
+
             # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
             transport = get_transport(val.data.encoding)
             return transport.receive(val.model_dump())
@@ -867,7 +882,9 @@ def encode_array(
         from tesseract_core.runtime.device_transport import get_transport
 
         transport = get_transport(device_transport)
-        return transport.descriptor(transport.register(arr))
+        return transport.descriptor(
+            transport.register(arr, context.get("device_exports"))
+        )
 
     # Host encoding: the data must reach the host. A GPU array survived
     # validation untouched (see validate_python_or_gpu_array), so materialise it

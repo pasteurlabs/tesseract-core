@@ -25,8 +25,9 @@ The interface follows the lifecycle the ``cuda_ipc`` code already uses:
 * :meth:`DeviceTransport.bootstrap` -- establish any shared state a handshake
   transport needs before transferring (a shared communicator, a socket for fd
   passing). A no-op for ``cuda_ipc``, whose handle needs no handshake.
-* :meth:`DeviceTransport.release` -- drop the producer-side pins once the borrow
-  is done.
+* :meth:`DeviceTransport.release` -- drop the producer-side pins of one
+  message's exports (collected in a :meth:`DeviceTransport.new_exports`
+  session) once the borrow is done.
 """
 
 from __future__ import annotations
@@ -61,15 +62,26 @@ class DeviceTransport(abc.ABC):
 
         Returns a session object cached by the caller and passed back to the
         other methods. Receiver-driven transports whose handle is self-contained
-        (``cuda_ipc``) return ``None`` and ignore the session everywhere.
+        (``cuda_ipc``) return ``None``.
+        """
+
+    @abc.abstractmethod
+    def new_exports(self) -> Any:
+        """A fresh session to collect one message's exports.
+
+        The producer passes it to :meth:`register` for each array of a message,
+        and to :meth:`release` once the consumer is done with that message,
+        which keeps the exports of concurrent messages apart. A server keeps a
+        response's session only if it is truthy, so it must be falsy while it
+        holds no exports (by defining ``__len__``, for example).
         """
 
     @abc.abstractmethod
     def register(self, arr: Any, session: Any = None) -> Any:
         """Encode side: pin ``arr`` and return an opaque per-array handle.
 
-        Keeps the source allocation alive until :meth:`release`, exactly as the
-        cuda_ipc export registry does.
+        Keeps the source allocation alive until :meth:`release` is called with
+        the same ``session`` (see :meth:`new_exports`).
         """
 
     @abc.abstractmethod

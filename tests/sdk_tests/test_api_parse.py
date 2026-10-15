@@ -406,6 +406,20 @@ def test_schemastore_fixtures_match_generated_schema(tmp_path):
         jsonschema.validate(yaml.safe_load(negative), schema)
 
 
+def test_files_are_read_as_utf8(tmp_path, valid_tesseract_api, valid_tesseract_config):
+    """Not in the platform's default encoding, which on Windows cannot decode this."""
+    rho = "\N{GREEK SMALL LETTER RHO}"
+    (tmp_path / "tesseract_api.py").write_text(
+        f"{valid_tesseract_api}\n# density {rho}\n", encoding="utf-8"
+    )
+    (tmp_path / "tesseract_config.yaml").write_text(
+        f'{valid_tesseract_config}\ndescription: "Density {rho}"\n', encoding="utf-8"
+    )
+
+    validate_tesseract_api(tmp_path)
+    assert get_config(tmp_path).description == f"Density {rho}"
+
+
 @pytest.mark.parametrize("content", ["name: [unclosed\n", "", "- a list\n"])
 def test_get_config_reports_bad_files_as_validation_errors(tmp_path, content):
     (tmp_path / "tesseract_config.yaml").write_text(content)

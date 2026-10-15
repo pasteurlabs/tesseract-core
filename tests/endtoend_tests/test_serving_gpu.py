@@ -126,6 +126,9 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     device array. The decode is framework-agnostic -- the result is a device
     wrapper exposing ``__cuda_array_interface__`` and ``__dlpack__``, read back
     here via its host-copy helper (no CuPy needed to inspect it).
+
+    Both this client and a plain ``from_url`` one, which requests no transport,
+    resolve to cuda_ipc once it checked out across the container boundary.
     """
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)
@@ -133,6 +136,8 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
 
     with _serve_cuda_ipc(gpu_image_name) as t:
         result = t.apply({"a": a, "b": b, "s": s})
+        assert t.resolve_gpu_transport() == "cuda_ipc"
+        assert Tesseract.from_url(t._client.url).resolve_gpu_transport() == "cuda_ipc"
 
     got = result["result"]
     assert hasattr(got, "__cuda_array_interface__")
@@ -220,3 +225,25 @@ def test_serve_cuda_ipc_vector_jacobian_product(gpu_image_name):
 
     _assert_device_result(vjp["a"], 3.0 * cotangent)
     _assert_device_result(vjp["b"], cotangent)
+
+
+@requires_cuda
+def test_serve_cuda_ipc_without_a_shared_gpu(gpu_image_name):
+    """A container offering cuda_ipc it cannot use leads clients to host copies.
+
+    Hiding the GPU from the container stands in for a server that shares no GPU
+    with the client, such as one on another host. A plain ``from_url`` client
+    falls back to host copies with a warning, and the client that requested
+    cuda_ipc gets an error before any call is made.
+    """
+    with Tesseract.from_image(
+        gpu_image_name,
+        gpus=["all"],
+        gpu_transport="cuda_ipc",
+        environment={"CUDA_VISIBLE_DEVICES": ""},
+    ) as t:
+        remote = Tesseract.from_url(t._client.url)
+        with pytest.warns(UserWarning, match="copied to the host instead"):
+            assert remote.resolve_gpu_transport() == "none"
+        with pytest.raises(RuntimeError, match="does not work between"):
+            t.resolve_gpu_transport()

@@ -74,7 +74,7 @@ class FileBackend(BaseBackend):
         self.metrics = []
 
         # Initialize CSV file with headers
-        with open(self.metrics_file, "w", newline="") as f:
+        with open(self.metrics_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["timestamp", "key", "value", "step"])
 
@@ -88,7 +88,7 @@ class FileBackend(BaseBackend):
         """Log a metric to CSV file."""
         # Naive local time on purpose: this string is written to the metrics CSV,
         # and adding a UTC offset would change the file format users parse.
-        timestamp = datetime.now().isoformat()  # noqa: DTZ005
+        timestamp = datetime.now().isoformat()
         step_value = (
             step
             if step is not None
@@ -103,7 +103,7 @@ class FileBackend(BaseBackend):
         }
         self.metrics.append(metric_entry)
 
-        with open(self.metrics_file, "a", newline="") as f:
+        with open(self.metrics_file, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([timestamp, key, value, step_value])
 
