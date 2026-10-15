@@ -592,6 +592,32 @@ def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expecte
         assert fitted.accept_header() == expected
 
 
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [
+        (_SCHEMA_BEFORE_1_13, None),
+        (_SCHEMA_1_13, "application/*; gpu_transport=none"),
+        (_SCHEMA_CURRENT, "application/*; gpu_transport=none"),
+    ],
+)
+def test_calls_request_no_gpu_transport_unless_asked(mocker, schema, expected):
+    # Runtimes 1.13 and 1.14 use the GPU transport they serve unless a request
+    # names one, so calls that do not ask for a transport request "none"
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    tess = Tesseract.from_url("localhost")
+    tess._client.server_capabilities = ServerCapabilities.from_openapi_schema(schema)
+    response = mocker.Mock(ok=True, status_code=200, content=b"{}", headers={})
+    request = mocker.patch.object(
+        tess._client._session, "request", return_value=response
+    )
+
+    tess.apply({})
+
+    headers = request.call_args.kwargs.get("headers") or {}
+    assert headers.get("Accept") == expected
+
+
 def test_compression_warns_when_the_server_may_ignore_it():
     from tesseract_core.sdk.tesseract import ServerCapabilities
 

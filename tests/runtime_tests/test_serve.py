@@ -594,6 +594,8 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
     tess = Tesseract.from_url("http://testserver")
     test_client.headers["Content-Type"] = "application/json"
     tess._client._session = test_client
+    # httpx responses lack the .ok the SDK checks when fetching the schema
+    tess._client.openapi_schema = rest_api.openapi()
 
     # Send a properly structured encoded array with non-numeric data in the buffer
     # to trigger a custom PydanticCustomError (array_decode_error) on the server

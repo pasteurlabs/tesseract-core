@@ -164,7 +164,8 @@ class RequestedEncoding:
     """The encoding calls through a Tesseract request (see :attr:`Tesseract.current_encoding`).
 
     Each field is the value calls request, or None if they leave it to the
-    server's default.
+    server's default. GPU transports are opt-in, so calls that leave
+    ``gpu_transport`` as None request ``none``.
     """
 
     output_format: str | None = None
@@ -748,8 +749,7 @@ class Tesseract:
         # The output format and GPU transport configure the server and are also
         # what calls through this Tesseract request. The transport follows the
         # precedence serve() applies to the container, so the explicit kwarg wins
-        # over runtime_config. If neither sets it, calls do not ask and get the
-        # server's default of "none".
+        # over runtime_config. If neither sets it, calls request "none".
         runtime_config = self._spawn_config.get("runtime_config") or {}
         gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
             "gpu_transport"
@@ -886,9 +886,8 @@ class Tesseract:
         """The encoding calls through this Tesseract request.
 
         The options this Tesseract was created with, overridden by those of
-        :meth:`with_encoding` for a view. A field is None if calls leave it to the
-        server's default, which for ``gpu_transport`` means copying GPU arrays to
-        the host. To find out which GPU transport to use for GPU arrays, see
+        :meth:`with_encoding` for a view (see :class:`RequestedEncoding` for what
+        None means). To find out which GPU transport to use for GPU arrays, see
         :meth:`resolve_gpu_transport`.
         """
         return self._encoding
@@ -1901,6 +1900,11 @@ class HTTPClient:
         params = {"run_id": run_id} if run_id is not None else {}
         if encoding is None:
             encoding = RequestedEncoding()
+        # GPU transports are opt-in. Name "none" explicitly, since runtimes 1.13
+        # and 1.14 otherwise use the transport they serve. GET requests (health)
+        # return no arrays, so they skip this and the schema fetch it costs.
+        if encoding.gpu_transport is None and method != "GET":
+            encoding = replace(encoding, gpu_transport="none")
         # Only parameters can trip up a server, and checking them costs a fetch
         # of the OpenAPI schema on first use
         if encoding.params:
@@ -2043,7 +2047,8 @@ class HTTPClient:
             stream_logs: If True, stream logs to stdout. If a callable, stream
                     logs to that callable.
             encoding: The encoding to request. None, or a field left as None,
-                defers to the server's default.
+                defers to the server's default, except that ``gpu_transport``
+                defaults to ``none``.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
