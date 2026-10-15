@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.15.0] - 2026-10-15
+
+### Features
+
+- *(sdk)* Drop conda base image requirement and shrink built images (#803)
+- *(sdk)* Unify input array encoding and decouple binref from output format (#795)
+- *(runtime)* Forward on-disk binrefs through Array fields via BinrefArray (#743)
+- [**breaking**] Negotiate compression and GPU transport per request via the Accept header (#805)
+- [**breaking**] Auto-resolve a GPU transport that works between client and server, and make cuda_ipc safe for concurrent calls (#829)
+
+### Bug Fixes
+
+- *(runtime)* Convert array defaults to ShapeDType in abstract_eval schema (#796)
+- *(runtime)* Look up dict keys before attributes in gradient paths (#810)
+- Convert non-native byte order arrays before base64 and binref encoding (#811)
+- *(runtime)* Match whole field name when resolving gradient paths (#814)
+- *(runtime)* Convert recipe inputs to framework arrays (#802)
+- *(runtime)* Skip absent optional leaves when expanding gradient paths (#812)
+- *(runtime)* Accept any abstract_eval as eval_fn in jacobian_from_vjp (#815)
+- *(runtime)* Correct expected Jacobian shape when input or output shape is Ellipsis (#822)
+- *(runtime)* Accept PyTorch CUDA tensors in Jacobian result validation (#825)
+- *(sdk)* Remove the serve log on Windows when a Tesseract is removed (#831)
+- *(runtime)* Report invalid inputs to a JVP request instead of crashing (#835)
+- *(runtime)* Match gradient paths in full, not anywhere in the string (#836)
+- *(sdk)* Decode only what the server marks as an array (#837)
+- *(sdk)* Read and write a Tesseract's files as UTF-8 on every platform (#832)
+- *(runtime)* Write the metrics file as UTF-8 on every platform (#834)
+- *(sdk)* Pass the config's name, version and description to `from_source` Tesseracts (#841)
+- Show videos in forum mirrors of blog posts and stay within the forum's topic rate limit (#848)
+
+### Refactor
+
+- Drop DLPack detection from GPU transports, since JAX exposes CAI (#804)
+- Tidy follow-ups to per-request encoding and cuda_ipc pools (#828)
+
+### Documentation
+
+- Hackathon winners blog announcement (#809)
+- Run tutorial snippets as end-to-end tests and fix stale examples (#820)
+- Mirror blog posts and release notes to the forum as comment threads, fine-tune forum positioning (#792)
+
+### Performance
+
+- *(runtime)* Cut overhead when using cuda_ipc (#806)
+- *(runtime)* Key the JAX VJP cache by an on-device fingerprint for all arrays (#830)
+
 ## [1.14.0] - 2026-09-25
 
 ### Features
