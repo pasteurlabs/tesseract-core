@@ -1300,7 +1300,7 @@ def test_strided_arrays_are_copied_on_the_device_by_their_framework():
     # cuda_ipc moves a flat byte range, so a strided array is first made
     # contiguous by the framework that made it, never through the host.
     contiguous = FakeCudaArray((3, 2), "<f4")
-    assert cuda_ipc._contiguous_on_device(contiguous)[0] is contiguous
+    assert cuda_ipc.contiguous_on_device(contiguous)[0] is contiguous
 
     class TorchLike(FakeCudaArray):
         def contiguous(self):
@@ -1313,7 +1313,7 @@ def test_strided_arrays_are_copied_on_the_device_by_their_framework():
 
     for cls in (TorchLike, CuPyLike):
         strided = cls((3, 2), "<f4", strides=(4, 12))
-        copy, info = cuda_ipc._contiguous_on_device(strided)
+        copy, info = cuda_ipc.contiguous_on_device(strided)
         assert copy is contiguous
         assert info.is_c_contiguous()
 

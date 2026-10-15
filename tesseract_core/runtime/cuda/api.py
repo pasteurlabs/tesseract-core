@@ -168,6 +168,21 @@ def device_synchronize() -> None:
     _check(_get_cudart().cudaDeviceSynchronize(), "cudaDeviceSynchronize")
 
 
+def runtime_library_path() -> str:
+    """Path or soname of the libcudart this module loaded."""
+    return _get_cudart()._name
+
+
+def runtime_version() -> int:
+    """Version of the loaded CUDA runtime, as ``1000 * major + 10 * minor``."""
+    version = ctypes.c_int()
+    _check(
+        _get_cudart().cudaRuntimeGetVersion(ctypes.byref(version)),
+        "cudaRuntimeGetVersion",
+    )
+    return version.value
+
+
 # -- IPC -------------------------------------------------------------------
 
 

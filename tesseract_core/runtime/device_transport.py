@@ -5,11 +5,11 @@
 
 A *device transport* moves a GPU array's bytes from a producer process to a
 consumer process without a host round-trip. It is selected via the runtime's
-``gpu_transport`` config, independently of the host-array output format;
-``cuda_ipc`` is the first such transport. This module defines the common
-interface they share so further transports (VMM-fd map-and-read, and later
-cross-host NCCL/NIXL) slot in behind one dispatch path instead of each bolting a
-new encoder, wire format, and release hook onto the runtime.
+``gpu_transport`` config, independently of the host-array output format.
+``cuda_ipc`` and ``nixl`` are such transports. This module defines the common
+interface they share, so further transports (such as VMM-fd map-and-read or
+NCCL) slot in behind one dispatch path instead of each bolting a new encoder,
+wire format, and release hook onto the runtime.
 
 The interface follows the lifecycle the ``cuda_ipc`` code already uses:
 

@@ -59,13 +59,17 @@ from tesseract_core.runtime.cuda import dlpack
 from tesseract_core.runtime.device_transport import DeviceTransport
 
 __all__ = [
+    "CudaArrayInfo",
     "ExportGroup",
     "IpcDeviceArray",
+    "contiguous_on_device",
     "cuda_array_to_host",
     "dump_cuda_ipc_arraydict",
     "has_cuda_array_interface",
     "load_cuda_ipc_arraydict",
+    "on_device",
     "validate_cuda_array",
+    "without_autograd",
 ]
 
 
@@ -80,11 +84,11 @@ def has_cuda_array_interface(obj: Any) -> bool:
         return hasattr(obj, "__cuda_array_interface__")
     except RuntimeError:
         # PyTorch raises this rather than AttributeError for a CUDA tensor that
-        # requires grad, which is still a GPU array (see _without_autograd).
+        # requires grad, which is still a GPU array (see without_autograd).
         return True
 
 
-def _without_autograd(arr: Any) -> Any:
+def without_autograd(arr: Any) -> Any:
     """``arr``, detached if it is a PyTorch tensor that requires grad.
 
     Such a tensor refuses ``__cuda_array_interface__`` and ``.numpy()``.
@@ -126,7 +130,7 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     fetches to host on conversion).
     """
     check_device_host_copy(f"a {type(arr).__name__} GPU array")
-    arr = _without_autograd(arr)
+    arr = without_autograd(arr)
     get = getattr(arr, "get", None)
     if callable(get):  # CuPy
         return np.asarray(get())
@@ -147,7 +151,7 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     )
 
 
-class _CudaArrayInfo(NamedTuple):
+class CudaArrayInfo(NamedTuple):
     """Device-array metadata read from ``__cuda_array_interface__``.
 
     ``strides`` is in bytes; ``None`` means row-major contiguous.
@@ -178,7 +182,7 @@ class _CudaArrayInfo(NamedTuple):
         return self.strides == tuple(expected)
 
 
-def _contiguous_on_device(arr: Any) -> tuple[Any, _CudaArrayInfo]:
+def contiguous_on_device(arr: Any) -> tuple[Any, CudaArrayInfo]:
     """``arr``, or a row-major copy of it on the same device if it is strided, with its info.
 
     cuda_ipc moves a flat byte range, so a strided GPU array is first copied on
@@ -206,13 +210,13 @@ def _contiguous_on_device(arr: Any) -> tuple[Any, _CudaArrayInfo]:
     )
 
 
-def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
+def _read_cuda_array_info(arr: Any) -> CudaArrayInfo:
     """Read a CUDA array's metadata from ``__cuda_array_interface__``.
 
     The protocol carries no device ordinal, so it is read from the framework's
     ``.device`` attribute and defaults to 0.
     """
-    arr = _without_autograd(arr)
+    arr = without_autograd(arr)
     iface = arr.__cuda_array_interface__
     shape = tuple(iface["shape"])
     dtype = np.dtype(iface["typestr"])  # e.g. "<f4", "|b1"
@@ -227,7 +231,7 @@ def _read_cuda_array_info(arr: Any) -> _CudaArrayInfo:
     elif getattr(dev, "index", None) is not None:
         device = dev.index  # PyTorch
 
-    return _CudaArrayInfo(
+    return CudaArrayInfo(
         data_ptr=iface["data"][0],
         nbytes=math.prod(shape) * dtype.itemsize,
         shape=shape,
@@ -412,7 +416,7 @@ def _stage_for_export(
 
 
 @contextlib.contextmanager
-def _on_device(device: int) -> Iterator[None]:
+def on_device(device: int) -> Iterator[None]:
     """Make ``device`` the active CUDA device for the block, then restore the caller's."""
     previous = cuda_api.get_device()
     # Set it even when it is already active, because cudaSetDevice also makes
@@ -452,7 +456,7 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup) -> ArrayDict:
             f"(object with __cuda_array_interface__), got {type(arr).__name__}"
         )
 
-    arr, info = _contiguous_on_device(_without_autograd(arr))
+    arr, info = contiguous_on_device(without_autograd(arr))
 
     if info.dtype.kind == "V":
         raise TypeError(
@@ -483,7 +487,7 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup) -> ArrayDict:
 
     # Synchronization and staging allocations act on the active device, which
     # need not be the array's.
-    with _on_device(info.device):
+    with on_device(info.device):
         # IPC handles reference the *whole* backing allocation, not the array's
         # (possibly offset) data pointer. Pooled allocators (CuPy, PyTorch) hand
         # out many arrays from a single cudaMalloc block, so we must resolve the
@@ -702,7 +706,7 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
 
     # Allocation and synchronization act on the active device, which need not
     # be the array's.
-    with _on_device(device):
+    with on_device(device):
         # Free the buffers of decoded arrays whose only remaining reference was
         # a DLPack capsule nobody consumed, so the pool can offer them below.
         dlpack.drop_abandoned_capsules()
@@ -741,7 +745,7 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
 def _device_array_from_bytes(data: bytes, device: int) -> IpcDeviceArray:
     """Copy ``data`` into a fresh ``uint8`` device array owned by this process."""
     host = np.frombuffer(data, dtype=np.uint8)
-    with _on_device(device):
+    with on_device(device):
         ptr = cuda_api.malloc(host.nbytes)
         try:
             cuda_api.memcpy_host_to_device(ptr, host.ctypes.data, host.nbytes)

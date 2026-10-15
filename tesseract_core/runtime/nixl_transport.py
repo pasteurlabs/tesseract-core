@@ -1,0 +1,356 @@
+# Copyright 2025 Pasteur Labs. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""NIXL device transport: point-to-point GPU array exchange via NIXL.
+
+Like ``cuda_ipc`` (:mod:`tesseract_core.runtime.cuda.ipc`), this transport passes
+a GPU array between two processes without a host round-trip. NIXL picks its
+backend by itself: CUDA IPC or shared memory on one host, and UCX across hosts
+(RDMA where the hardware supports it, TCP otherwise). NIXL is only loaded once a
+Tesseract encodes or decodes a NIXL array.
+
+The consumer initiates the transfer, a READ. The producer registers the array's
+device memory with its NIXL agent and sends its agent metadata, the array's
+address and its device in the JSON message. The consumer adds the producer as a
+remote agent and reads the bytes into a buffer of its own, which it returns as
+the same :class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray` that
+``cuda_ipc`` returns. The producer's registration does nothing until then, so
+this fits the request lifecycle of ``cuda_ipc``.
+
+The message holds plain numbers instead of NIXL's descriptor serialization,
+which is a pickle, so neither process unpickles what the other sends.
+"""
+
+from __future__ import annotations
+
+import collections
+import contextlib
+import ctypes
+import importlib
+import os
+import sys
+import threading
+import time
+import uuid
+from collections.abc import Iterator
+from typing import Any
+
+import numpy as np
+import pybase64
+
+from tesseract_core.runtime.array_encoding import ArrayDict
+from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda.ipc import (
+    IpcDeviceArray,
+    contiguous_on_device,
+    has_cuda_array_interface,
+    on_device,
+    without_autograd,
+)
+from tesseract_core.runtime.device_transport import DeviceTransport
+
+# ---------------------------------------------------------------------------
+# Lazy NIXL agent (one per process)
+# ---------------------------------------------------------------------------
+#
+# Each process has one NIXL agent, which owns the UCX backend and the memory
+# registrations. Concurrent requests share it, so it is created with strict
+# thread synchronization (by default, NIXL synchronizes nothing).
+
+_NIXL_AGENT: Any = None
+_NIXL_AGENT_LOCK = threading.Lock()
+
+# Reads in flight from each remote agent, by name (see _remote_agent).
+_REMOTE_READS: collections.Counter[str] = collections.Counter()
+_REMOTE_READS_LOCK = threading.Lock()
+
+# How long a consumer waits for a posted READ to complete. It only runs out when
+# a transfer stalls, e.g. because the producer died, not on a slow large one.
+_XFER_TIMEOUT = 120.0
+
+
+def _nixl_agent_name() -> str:
+    """A NIXL agent name unique to this process, even across hosts.
+
+    NIXL refuses a remote agent with the local agent's name, and pids repeat
+    across hosts, so the name adds a random part.
+    """
+    return f"tesseract-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _import_nixl_api() -> Any:
+    """Import the NIXL build that matches the CUDA runtime this process uses.
+
+    NIXL ships one build per CUDA major, and two builds cannot share a process.
+    Its ``nixl`` package picks one from the CUDA framework it finds (torch, if
+    installed), which can differ from the runtime that
+    :mod:`tesseract_core.runtime.cuda.api` loads. Each build's UCX also loads
+    libcudart of its major by bare soname, which fails where the runtime comes
+    from a pip wheel, and UCX then treats GPU memory as host memory.
+
+    So this makes the runtime's libcudart global, where UCX finds it, and
+    imports the build already imported, else the matching one, else NIXL's own
+    choice.
+    """
+    ctypes.CDLL(cuda_api.runtime_library_path(), mode=ctypes.RTLD_GLOBAL)
+
+    loaded = sys.modules.get("nixl._api")
+    if loaded is not None:
+        return loaded
+
+    build = f"nixl_cu{cuda_api.runtime_version() // 1000}"
+    try:
+        return importlib.import_module(f"{build}._api")
+    except ModuleNotFoundError as exc:
+        if exc.name != build:
+            raise
+    return importlib.import_module("nixl._api")
+
+
+def _get_nixl_agent() -> Any:
+    """Lazily create this process's NIXL agent, or explain the missing extra."""
+    global _NIXL_AGENT
+    with _NIXL_AGENT_LOCK:
+        if _NIXL_AGENT is not None:
+            return _NIXL_AGENT
+        try:
+            nixl_api = _import_nixl_api()
+        except ImportError as exc:  # pragma: no cover - env-dependent
+            raise RuntimeError(
+                "The 'nixl' GPU transport requires NIXL. Install it with the "
+                "optional extra: pip install tesseract-core[nixl]."
+            ) from exc
+
+        _NIXL_AGENT = nixl_api.nixl_agent(
+            _nixl_agent_name(),
+            nixl_api.nixl_agent_config(
+                backends=["UCX"],
+                sync_mode=nixl_api.nixl_thread_sync_t.NIXL_THREAD_SYNC_STRICT,
+            ),
+        )
+        return _NIXL_AGENT
+
+
+# ---------------------------------------------------------------------------
+# Encode side: register the array and describe the transfer
+# ---------------------------------------------------------------------------
+
+
+class NixlExportGroup:
+    """The arrays one message exported via NIXL, kept registered until :meth:`release`.
+
+    Only the thread encoding the message adds to a group.
+    """
+
+    def __init__(self) -> None:
+        # (registration, source array) pairs.
+        self.exports: list[tuple[Any, Any]] = []
+
+    def __len__(self) -> int:
+        return len(self.exports)
+
+    def release(self) -> None:
+        """Deregister the exported arrays and let go of them."""
+        exports, self.exports = self.exports, []
+        if not exports:
+            return
+        agent = _get_nixl_agent()
+        for registration, _arr in exports:
+            # A server releases exports while answering later, unrelated
+            # requests, which must not fail over this. A failed deregistration
+            # only leaks the registration.
+            try:
+                agent.deregister_memory(registration)
+            except Exception:  # noqa: BLE001, S110
+                pass
+
+
+def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
+    """Register a CUDA array in ``group`` and describe it as a JSON array dict.
+
+    A strided array is first copied on the device, as for cuda_ipc.
+    """
+    if not has_cuda_array_interface(arr):
+        raise ValueError(
+            "nixl encoding requires a CUDA array "
+            f"(object with __cuda_array_interface__), got {type(arr).__name__}"
+        )
+
+    arr, info = contiguous_on_device(without_autograd(arr))
+
+    if info.dtype.kind == "V":
+        raise TypeError(
+            f"nixl cannot encode arrays of dtype {info.dtype}, which have no "
+            "NumPy equivalent (e.g. bfloat16)."
+        )
+
+    if info.nbytes == 0:
+        # An empty array has no memory to register, so its descriptor is empty
+        # and the consumer recreates it without a transfer.
+        buffer = "::"
+    else:
+        agent = _get_nixl_agent()
+        registration = agent.register_memory(
+            [(info.data_ptr, info.nbytes, info.device, "")], "VRAM"
+        )
+        group.exports.append((registration, arr))
+
+        # The consumer reads the memory from another process, outside any stream
+        # ordering on this side, so wait for the producer's kernels to finish
+        # before the descriptor leaves the process.
+        with on_device(info.device):
+            cuda_api.device_synchronize()
+
+        meta_b64 = pybase64.b64encode_as_string(agent.get_agent_metadata())
+        buffer = f"{meta_b64}:{info.data_ptr}:{info.device}"
+
+    return {
+        "object_type": "array",
+        "shape": list(info.shape),
+        "dtype": info.dtype.name,
+        "data": {"buffer": buffer, "encoding": "nixl"},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Decode side: add the remote agent and READ into an owned buffer
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _remote_agent(agent: Any, metadata: bytes) -> Iterator[str]:
+    """Load a producer's agent metadata for the block, yielding the producer's name.
+
+    NIXL refuses metadata that describes a memory region it already knows under
+    another registration, which a producer sends whenever its pooled allocator
+    hands out the same buffer again. So the producer is forgotten once no read
+    from it is in flight, and each message's metadata loads afresh.
+    """
+    with _REMOTE_READS_LOCK:
+        name = agent.add_remote_agent(metadata)
+        _REMOTE_READS[name] += 1
+    try:
+        yield name
+    finally:
+        with _REMOTE_READS_LOCK:
+            _REMOTE_READS[name] -= 1
+            if not _REMOTE_READS[name]:
+                del _REMOTE_READS[name]
+                agent.remove_remote_agent(name)
+
+
+def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
+    """Read the array a NIXL descriptor describes into a new buffer on the active device."""
+    meta_b64, address, remote_device = val["data"]["buffer"].split(":")
+    dtype = np.dtype(val["dtype"])
+    shape = tuple(val["shape"])
+    nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
+    device = cuda_api.get_device()
+
+    if not meta_b64:
+        # An empty array's descriptor carries no transfer (see the encoder).
+        if nbytes:
+            raise ValueError(
+                f"nixl descriptor is empty, but the array of shape {shape} and "
+                f"dtype {dtype} is not"
+            )
+        return IpcDeviceArray(0, device, shape, dtype)
+
+    remote_meta = pybase64.b64decode(meta_b64, validate=True)
+
+    agent = _get_nixl_agent()
+    # The producer registered exactly these bytes. Its address and device ordinal
+    # identify them to its own agent and need not mean anything in this process.
+    remote_descs = agent.get_xfer_descs(
+        [(int(address), nbytes, int(remote_device))], "VRAM"
+    )
+
+    # Entering the device also makes its primary context current on this
+    # thread, which the allocation and UCX's CUDA transport need.
+    with _remote_agent(agent, remote_meta) as peer_name, on_device(device):
+        owned_ptr = cuda_api.malloc(nbytes)
+        try:
+            local_reg = agent.register_memory([(owned_ptr, nbytes, device, "")], "VRAM")
+            try:
+                handle = agent.initialize_xfer(
+                    "READ", local_reg.trim(), remote_descs, peer_name, b"tesseract"
+                )
+                try:
+                    agent.transfer(handle)
+                    _wait_for_xfer(agent, handle)
+                finally:
+                    agent.release_xfer_handle(handle)
+            finally:
+                agent.deregister_memory(local_reg)
+        except Exception:
+            cuda_api.free(owned_ptr)
+            raise
+
+    return IpcDeviceArray(owned_ptr, device, shape, dtype)
+
+
+def _wait_for_xfer(agent: Any, handle: Any) -> None:
+    """Block until a NIXL transfer completes, raising on error or timeout.
+
+    A posted READ can stall indefinitely if the producer dies mid-transfer, so
+    give up after ``_XFER_TIMEOUT`` seconds rather than hang the consumer forever.
+    """
+    deadline = time.monotonic() + _XFER_TIMEOUT
+    while True:
+        state = agent.check_xfer_state(handle)
+        if state == "DONE":
+            return
+        if state == "ERR":
+            raise RuntimeError("nixl transfer failed")
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"nixl transfer did not complete within {_XFER_TIMEOUT}s"
+            )
+        time.sleep(0.0005)
+
+
+# ---------------------------------------------------------------------------
+# DeviceTransport backend
+# ---------------------------------------------------------------------------
+
+
+class NixlTransport(DeviceTransport):
+    """DeviceTransport backend for the ``nixl`` transport."""
+
+    name = "nixl"
+    reach = "both"
+
+    def bootstrap(self, role: Any, peer_offer: Any) -> None:
+        """No-op, since each message carries the producer's agent metadata."""
+
+    def new_exports(self) -> NixlExportGroup:
+        """A fresh :class:`NixlExportGroup` for one message's exports."""
+        return NixlExportGroup()
+
+    def register(self, arr: Any, session: Any = None) -> ArrayDict:
+        """Register ``arr`` in ``session`` (a :class:`NixlExportGroup`) and describe it.
+
+        The per-array handle *is* the array dict, so :meth:`descriptor` is a
+        passthrough.
+        """
+        if session is None:
+            raise ValueError(
+                "nixl exports need a session from new_exports(), which keeps them "
+                "registered until it is released"
+            )
+        return dump_nixl_arraydict(arr, session)
+
+    def descriptor(self, handle: ArrayDict) -> ArrayDict:
+        """Return the array dict :meth:`register` already produced."""
+        return handle
+
+    def flush(self, session: Any = None) -> None:
+        """No-op, since the consumer initiates the READ."""
+
+    def receive(self, val: ArrayDict, session: Any = None) -> IpcDeviceArray:
+        """READ the exported bytes into a fresh consumer-owned ``IpcDeviceArray``."""
+        return load_nixl_arraydict(val)
+
+    def release(self, session: Any = None) -> None:
+        """Deregister the exports of ``session`` (a :class:`NixlExportGroup`)."""
+        session.release()
