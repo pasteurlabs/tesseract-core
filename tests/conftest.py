@@ -61,7 +61,7 @@ def pytest_collection_modifyitems(config, items):
 
         try:
             docker = docker_client_module.CLIDockerClient()
-            docker.info()
+            docker.version()
             return True
         except (docker_client_module.APIError, OSError):
             return False
@@ -414,8 +414,13 @@ def _docker_cleanup(docker_client, request):
                     f"Failed to remove container {container}: {pprint_exc(e)}"
                 )
 
-        # Remove images
+        # Remove images -- skipped under CI: the runner is ephemeral so the image
+        # store is wiped with the VM anyway, and each `rmi` adds seconds of CLI
+        # startup + layer unlink work (especially slow on rootless podman).
+        skip_image_cleanup = os.environ.get("CI") == "true"
         for image in context["images"]:
+            if skip_image_cleanup:
+                continue
             try:
                 if isinstance(image, str):
                     image_obj = docker_client.images.get(image)
@@ -544,7 +549,7 @@ def mocked_docker(monkeypatch):
         """Mock CLIDockerClient class."""
 
         @staticmethod
-        def info() -> tuple:
+        def version() -> tuple:
             """Mock info method for DockerClient."""
             return "", ""
 
