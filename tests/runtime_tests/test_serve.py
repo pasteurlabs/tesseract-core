@@ -12,11 +12,12 @@ from textwrap import dedent
 import numpy as np
 import pytest
 import requests
+import uvicorn
 from fastapi.testclient import TestClient
 from typeguard import suppress_type_checks
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.serve import create_rest_api
+from tesseract_core.runtime.serve import create_rest_api, serve
 
 test_input = {
     "a": [1.0, 2.0, 3.0],
@@ -341,6 +342,19 @@ def test_check_gpu_transport_route(dummy_tesseract_module):
     reply = client.post("/check_gpu_transport", json=malformed)
     assert reply.json()["ok"] is False
     assert "expected a uint8 array" in reply.json()["reason"]
+
+
+def test_serve_gpu_transport_refuses_several_workers(monkeypatch):
+    """A GPU transport needs a single worker, which keeps every response's exports."""
+    from tesseract_core.runtime.config import update_config
+
+    def fail_run(*args, **kwargs):
+        pytest.fail("the server was started")
+
+    monkeypatch.setattr(uvicorn, "run", fail_run)
+    update_config(gpu_transport="cuda_ipc")
+    with pytest.raises(ValueError, match="more than one worker"):
+        serve("localhost", 8000, num_workers=2)
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
