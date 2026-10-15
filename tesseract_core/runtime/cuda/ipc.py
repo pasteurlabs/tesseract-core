@@ -462,6 +462,8 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup) -> ArrayDict:
 
     data_ptr, nbytes = info.data_ptr, info.nbytes
 
+    device_uuid = cuda_api.device_uuid(info.device)
+
     if nbytes == 0:
         # An empty array has no memory to share (frameworks give it a null
         # pointer, which the CUDA calls below reject), so its descriptor
@@ -470,7 +472,7 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup) -> ArrayDict:
             "object_type": "array",
             "shape": list(info.shape),
             "dtype": info.dtype.name,
-            "data": {"buffer": f"{info.device}::0:0", "encoding": "cuda_ipc"},
+            "data": {"buffer": f"{device_uuid}::0:0", "encoding": "cuda_ipc"},
         }
 
     # Keep the source allocation alive until exports are explicitly released.
@@ -511,7 +513,7 @@ def dump_cuda_ipc_arraydict(arr: Any, group: ExportGroup) -> ArrayDict:
         "shape": list(info.shape),
         "dtype": info.dtype.name,
         "data": {
-            "buffer": f"{info.device}:{handle_b64}:{storage_offset}:{storage_size}",
+            "buffer": f"{device_uuid}:{handle_b64}:{storage_offset}:{storage_size}",
             "encoding": "cuda_ipc",
         },
     }
@@ -647,11 +649,24 @@ def _mapped(handle_bytes: bytes, device: int) -> Iterator[int]:
                 cuda_api.ipc_close_mem_handle(entry[0])
 
 
+def _device_with_uuid(device_uuid: str) -> int:
+    """This process's ordinal for the CUDA device with UUID ``device_uuid``."""
+    for device in range(cuda_api.device_count()):
+        if cuda_api.device_uuid(device) == device_uuid:
+            return device
+    raise ValueError(
+        f"The array lives on the GPU with UUID {device_uuid}, which this process "
+        "cannot see. Give both processes access to that GPU (e.g. via --gpus or "
+        "CUDA_VISIBLE_DEVICES)."
+    )
+
+
 def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     """Load a CUDA array from a JSON dict with a CUDA IPC handle.
 
     The calling process must share the IPC namespace with the producer
-    (e.g. both run with --ipc=host on Docker) and see the same GPU.
+    (e.g. both run with --ipc=host on Docker) and see the same GPU, though they
+    may number it differently.
 
     Returns a caller-owned :class:`IpcDeviceArray`. Decoding maps the IPC handle
     (see :func:`_mapped`), copies the array's own bytes device-to-device into a
@@ -665,11 +680,11 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     ``__cuda_array_interface__`` and ``__dlpack__`` so Torch/JAX/CuPy can adopt
     it zero-copy, plus ``.copy_to_host()`` / ``np.asarray(...)`` for inspection.
     """
-    device_str, handle_b64, storage_offset_str, _storage_size_str = val["data"][
+    device_uuid, handle_b64, storage_offset_str, _storage_size_str = val["data"][
         "buffer"
     ].split(":")
     handle_bytes = pybase64.b64decode(handle_b64, validate=True)
-    device = int(device_str)
+    device = _device_with_uuid(device_uuid)
     storage_offset = int(storage_offset_str)
 
     dtype = np.dtype(val["dtype"])

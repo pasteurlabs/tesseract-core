@@ -658,7 +658,9 @@ def mocked_cuda(monkeypatch):
 
     Yields a ``FakeCuda`` whose ``.calls`` dict holds the recorded call log and
     whose ``.device_bytes`` / ``.reject_ipc_below`` attributes let a test seed
-    device-to-host reads or force the VMM staging fallback.
+    device-to-host reads or force the VMM staging fallback. Setting
+    ``.device_uuids`` simulates a process that sees or numbers devices
+    differently.
     """
     from tesseract_core.runtime.cuda import api as cuda_api
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
@@ -673,6 +675,7 @@ def mocked_cuda(monkeypatch):
                 "free": [],
                 "memcpy_d2d": [],
                 "memcpy_d2h": [],
+                "memcpy_h2d": [],
                 "sync": [],
                 "alloc_base": [],
                 "get_handle": [],
@@ -690,6 +693,10 @@ def mocked_cuda(monkeypatch):
             self.reject_foreign_ipc = False
             # Active device, as cudaSetDevice / cudaGetDevice see it.
             self.current_device = 0
+            # UUIDs of the devices this process sees, by ordinal.
+            self.device_uuids = [
+                f"00000000-0000-0000-0000-{device:012x}" for device in range(8)
+            ]
 
         # -- device / memory management ---------------------------------
 
@@ -699,6 +706,12 @@ def mocked_cuda(monkeypatch):
 
         def get_device(self) -> int:
             return self.current_device
+
+        def device_count(self) -> int:
+            return len(self.device_uuids)
+
+        def device_uuid(self, device: int) -> str:
+            return self.device_uuids[device]
 
         def malloc(self, nbytes: int) -> int:
             ptr = self._next_ptr
@@ -715,6 +728,9 @@ def mocked_cuda(monkeypatch):
 
         def memcpy_device_to_device(self, dst: int, src: int, nbytes: int) -> None:
             self.calls["memcpy_d2d"].append((dst, src, nbytes))
+
+        def memcpy_host_to_device(self, dst: int, host_ptr: int, nbytes: int) -> None:
+            self.calls["memcpy_h2d"].append((dst, host_ptr, nbytes))
 
         def memcpy_device_to_host(self, host_ptr: int, src: int, nbytes: int) -> None:
             self.calls["memcpy_d2h"].append((host_ptr, src, nbytes))
@@ -753,9 +769,12 @@ def mocked_cuda(monkeypatch):
     for name in (
         "set_device",
         "get_device",
+        "device_count",
+        "device_uuid",
         "malloc",
         "free",
         "memcpy_device_to_device",
+        "memcpy_host_to_device",
         "memcpy_device_to_host",
         "device_synchronize",
         "get_allocation_base",

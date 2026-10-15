@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Annotated, Any, NamedTuple
 
 from fastapi import Body, FastAPI, Response
+from fastapi.responses import JSONResponse
 
 from tesseract_core.runtime.device_transport import get_transport
 from tesseract_core.runtime.file_interactions import available_gpu_transports
@@ -144,30 +145,37 @@ class _ReleaseDoneExports:
         await self.app(scope, receive, send)
 
 
-def check_gpu_transport(request: dict) -> dict:
+def check_gpu_transport(request: dict) -> Response:
     """Answer a client checking whether a GPU transport works between it and this server.
 
-    Returns ``{"ok": True, "array": ...}`` with the transport's reply, or
-    ``{"ok": False, "reason": ...}`` if this side of the check failed. See
+    Responds with ``{"ok": True, "array": ...}`` holding the transport's reply,
+    or ``{"ok": False, "reason": ...}`` if this side of the check failed. See
     :mod:`tesseract_core.runtime.cuda.check`.
     """
     gpu_transport = request.get("gpu_transport")
     if gpu_transport == "none" or gpu_transport not in available_gpu_transports():
-        return {
-            "ok": False,
-            "reason": f"gpu_transport={gpu_transport!r} is not enabled on this "
-            f"Tesseract (available: {list(available_gpu_transports())})",
-        }
-    try:
-        from tesseract_core.runtime.cuda.check import answer_transport_check
+        return JSONResponse(
+            {
+                "ok": False,
+                "reason": f"gpu_transport={gpu_transport!r} is not enabled on this "
+                f"Tesseract (available: {list(available_gpu_transports())})",
+            }
+        )
 
-        return {"ok": True, "array": answer_transport_check(request)}
-    except Exception as exc:  # noqa: BLE001 - reported to the client, which decides
-        return {
-            "ok": False,
-            "reason": f"the Tesseract could not exchange GPU memory with the "
-            f"client: {type(exc).__name__}: {exc}",
-        }
+    from tesseract_core.runtime.cuda.check import answer_transport_check
+
+    def answer(session: Any) -> Response:
+        try:
+            reply = {"ok": True, "array": answer_transport_check(request, session)}
+        except Exception as exc:  # noqa: BLE001 - reported to the client, which decides
+            reply = {
+                "ok": False,
+                "reason": f"the Tesseract could not exchange GPU memory with the "
+                f"client: {type(exc).__name__}: {exc}",
+            }
+        return JSONResponse(reply)
+
+    return ResponseExports(gpu_transport, acknowledged=True).respond(answer)
 
 
 def add_gpu_transport_handling(app: FastAPI) -> None:
@@ -179,7 +187,7 @@ def add_gpu_transport_handling(app: FastAPI) -> None:
     # loop between requests rather than alongside one.
     async def check_gpu_transport_route(
         request: Annotated[dict[str, Any], Body()],
-    ) -> dict:
+    ) -> Response:
         return check_gpu_transport(request)
 
     app.add_api_route(

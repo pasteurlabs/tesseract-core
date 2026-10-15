@@ -308,7 +308,10 @@ def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):
         "shape": [3],
         "dtype": "float64",
         # Well-formed descriptor for a handle that does not exist
-        "data": {"buffer": f"0:{'A' * 88}:0:24", "encoding": "cuda_ipc"},
+        "data": {
+            "buffer": f"00000000-0000-0000-0000-000000000000:{'A' * 88}:0:24",
+            "encoding": "cuda_ipc",
+        },
     }
     response = client.post("/apply", json={"inputs": inputs})
     assert response.status_code == 422, response.text

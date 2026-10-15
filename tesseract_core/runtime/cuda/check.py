@@ -19,13 +19,13 @@ transports do.
 
 The check can run while other calls are in flight (Tesseract-JAX may lower one
 function while a compiled one runs), so each side keeps its check exports in
-sessions of their own.
+sessions of their own. The server keeps the exports of its reply until the
+client names them as done, as it does for any response (see
+:mod:`tesseract_core.runtime.cuda.serving`).
 """
 
-import collections
 import functools
 import os
-import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -45,25 +45,13 @@ __all__ = [
 # Size of the array each side exports during a check.
 _CHECK_NBYTES = 256
 
-# The server's replies to recent checks, as (transport, session). Each is kept
-# until _CHECK_REPLIES_KEPT later checks have replaced it, which leaves its
-# client ample time to read it even when several clients check at once.
-_CHECK_REPLIES: collections.deque[tuple[DeviceTransport, Any]] = collections.deque()
-_CHECK_REPLIES_KEPT = 16
-_CHECK_REPLIES_LOCK = threading.Lock()
-
 
 def _export(
-    transport: DeviceTransport, data: bytes, device: int
-) -> tuple[ArrayDict, Any]:
-    """Export ``data`` from ``device``, returning its descriptor and the session keeping it."""
+    transport: DeviceTransport, data: bytes, device: int, session: Any
+) -> ArrayDict:
+    """Export ``data`` from ``device`` into ``session``, returning its descriptor."""
     arr = _device_array_from_bytes(data, device)
-    session = transport.new_exports()
-    try:
-        return transport.descriptor(transport.register(arr, session)), session
-    except BaseException:
-        transport.release(session)
-        raise
+    return transport.descriptor(transport.register(arr, session))
 
 
 def _read(transport: DeviceTransport, payload: Any) -> tuple[bytes, int]:
@@ -91,7 +79,12 @@ def start_transport_check(
     """
     transport = get_transport(gpu_transport)
     data = os.urandom(_CHECK_NBYTES)
-    array, session = _export(transport, data, cuda_api.get_device())
+    session = transport.new_exports()
+    try:
+        array = _export(transport, data, cuda_api.get_device(), session)
+    except BaseException:
+        transport.release(session)
+        raise
     request = {
         "gpu_transport": gpu_transport,
         "array": array,
@@ -100,8 +93,8 @@ def start_transport_check(
     return request, data[::-1], functools.partial(transport.release, session)
 
 
-def answer_transport_check(request: dict) -> ArrayDict:
-    """Server side: check the client's bytes, then export them reversed.
+def answer_transport_check(request: dict, session: Any) -> ArrayDict:
+    """Server side: check the client's bytes, then export them reversed into ``session``.
 
     Raises if the client's array cannot be read or holds the wrong bytes.
     """
@@ -111,16 +104,7 @@ def answer_transport_check(request: dict) -> ArrayDict:
         raise ValueError(
             "the bytes read from the client's array differ from the ones it wrote"
         )
-    reply, session = _export(transport, data[::-1], device)
-    with _CHECK_REPLIES_LOCK:
-        _CHECK_REPLIES.append((transport, session))
-        expired = [
-            _CHECK_REPLIES.popleft()
-            for _ in range(len(_CHECK_REPLIES) - _CHECK_REPLIES_KEPT)
-        ]
-    for old_transport, old_session in expired:
-        old_transport.release(old_session)
-    return reply
+    return _export(transport, data[::-1], device, session)
 
 
 def finish_transport_check(gpu_transport: str, reply: Any, expected: bytes) -> None:

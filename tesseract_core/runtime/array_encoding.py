@@ -136,7 +136,7 @@ class CudaIpcArrayData(BaseModel):
     The buffer field packs all four components as
     ``<device>:<handle>:<storage_offset>:<storage_size>``, where:
 
-    - ``device`` is the CUDA device ordinal the memory lives on,
+    - ``device`` is the UUID of the CUDA device the memory lives on,
     - ``handle`` is the base64-encoded 64-byte cudaIpcMemHandle_t (its base64
       alphabet never contains ``:``, so it is safe as a field delimiter), or
       empty for an empty array, which has no memory to share,
@@ -149,7 +149,10 @@ class CudaIpcArrayData(BaseModel):
     """
 
     buffer: StrictStr = Field(
-        pattern=r"^\d+:[A-Za-z0-9+/=]*:\d+:\d+$",
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+            r":[A-Za-z0-9+/=]*:\d+:\d+$"
+        ),
         description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
     )
     encoding: Literal["cuda_ipc"]

@@ -278,6 +278,15 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
 def serve(host: str, port: int, num_workers: int) -> None:
     """Start the REST API."""
+    gpu_transport = get_config().gpu_transport
+    if gpu_transport != "none" and num_workers > 1:
+        # A client names the responses it is done with on a later request,
+        # which may reach a different worker than the one keeping their GPU
+        # memory, so that memory would only be freed when it times out.
+        raise ValueError(
+            f"gpu_transport={gpu_transport!r} cannot be served by more than one "
+            f"worker (got num_workers={num_workers})."
+        )
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",
         host=host,

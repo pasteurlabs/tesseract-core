@@ -254,7 +254,7 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
         child = serving.runtime_config_to_env(runtime_config).get(
             "TESSERACT_GPU_TRANSPORT"
         )
-        client = tess._client.default_encoding.gpu_transport
+        client = tess.current_encoding.gpu_transport
 
     assert child == expected
     # A client that does not ask gets the server's default of "none"

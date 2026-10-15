@@ -41,11 +41,16 @@ from tesseract_core.runtime.cuda import ipc as cuda_ipc
 from tesseract_core.runtime.cuda import loader
 
 
+def _uuid(device: int) -> str:
+    """The UUID the ``mocked_cuda`` fixture gives device ``device`` by default."""
+    return f"00000000-0000-0000-0000-{device:012x}"
+
+
 def _unpack_cuda_ipc(data: dict) -> dict:
     """Split a packed cuda_ipc ``buffer`` back into its named components."""
     device, handle, storage_offset, storage_size = data["buffer"].split(":")
     return {
-        "device": int(device),
+        "device": device,
         "handle": handle,
         "storage_offset": int(storage_offset),
         "storage_size": int(storage_size),
@@ -118,32 +123,26 @@ def test_dump_assembles_payload_and_offset(mocked_cuda):
 def test_dump_device_detection_cupy(mocked_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_CuPyDevice(id=2))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr, cuda_ipc.ExportGroup())
-    assert _unpack_cuda_ipc(out["data"])["device"] == 2
+    assert _unpack_cuda_ipc(out["data"])["device"] == _uuid(2)
 
 
 def test_dump_device_detection_torch(mocked_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=3))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr, cuda_ipc.ExportGroup())
-    assert _unpack_cuda_ipc(out["data"])["device"] == 3
+    assert _unpack_cuda_ipc(out["data"])["device"] == _uuid(3)
 
 
 def test_dump_device_defaults_to_zero(mocked_cuda):
     # No .device attribute, and torch tensors with device.index == None.
-    assert (
-        _unpack_cuda_ipc(
-            cuda_ipc.dump_cuda_ipc_arraydict(
-                FakeCudaArray((3,), "<f4"), cuda_ipc.ExportGroup()
-            )["data"]
-        )["device"]
-        == 0
-    )
+    assert _unpack_cuda_ipc(
+        cuda_ipc.dump_cuda_ipc_arraydict(
+            FakeCudaArray((3,), "<f4"), cuda_ipc.ExportGroup()
+        )["data"]
+    )["device"] == _uuid(0)
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=None))
-    assert (
-        _unpack_cuda_ipc(
-            cuda_ipc.dump_cuda_ipc_arraydict(arr, cuda_ipc.ExportGroup())["data"]
-        )["device"]
-        == 0
-    )
+    assert _unpack_cuda_ipc(
+        cuda_ipc.dump_cuda_ipc_arraydict(arr, cuda_ipc.ExportGroup())["data"]
+    )["device"] == _uuid(0)
 
 
 def test_dump_rejects_non_cuda_array(mocked_cuda):
@@ -239,7 +238,7 @@ def test_dump_works_on_the_arrays_device(mocked_cuda, monkeypatch):
         0xD000,
         b"\x01" * cuda_api.IPC_HANDLE_SIZE,
     )
-    assert _unpack_cuda_ipc(out["data"])["device"] == 1
+    assert _unpack_cuda_ipc(out["data"])["device"] == _uuid(1)
 
 
 def test_dump_on_the_active_device_does_not_switch(mocked_cuda):
@@ -358,8 +357,13 @@ def test_client_request_releases_input_exports(mocked_cuda, monkeypatch):
     buffered, so we assert it is still present when the (fake) request is
     dispatched, and gone once _request returns.
     """
-    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
+    from tesseract_core.sdk.tesseract import (
+        HTTPClient,
+        RequestedEncoding,
+        ServerCapabilities,
+    )
 
+    encoding = RequestedEncoding("json+base64", "cuda_ipc")
     seen_during_request = {}
 
     def request(**kwargs):
@@ -368,9 +372,7 @@ def test_client_request_releases_input_exports(mocked_cuda, monkeypatch):
         seen_during_request["pinned"] = list(groups[0].pins)
         return Mock(status_code=200, ok=True, content=b"{}", headers={})
 
-    client = HTTPClient(
-        "http://localhost:8000", output_format="json+base64", gpu_transport="cuda_ipc"
-    )
+    client = HTTPClient("http://localhost:8000")
     client._session.request = request
     client.server_capabilities = ServerCapabilities(
         ("json+base64",), ("none", "cuda_ipc"), ("none",)
@@ -378,7 +380,7 @@ def test_client_request_releases_input_exports(mocked_cuda, monkeypatch):
 
     groups = _record_export_groups(monkeypatch)
     arr = FakeCudaArray((3,), "<f4")
-    client._request("apply", method="POST", payload={"a": arr})
+    client._request("apply", method="POST", payload={"a": arr}, encoding=encoding)
 
     # Pinned during the request (so the server can copy it out) ...
     assert arr in seen_during_request["pinned"]
@@ -395,7 +397,13 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     fail on an all-CPU payload. Guard by making the runtime import explode.
     """
     from tesseract_core.sdk import tesseract as sdk
-    from tesseract_core.sdk.tesseract import HTTPClient, ServerCapabilities
+    from tesseract_core.sdk.tesseract import (
+        HTTPClient,
+        RequestedEncoding,
+        ServerCapabilities,
+    )
+
+    encoding = RequestedEncoding("json+base64", "cuda_ipc")
 
     def _boom():
         raise AssertionError(
@@ -404,9 +412,7 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
 
     monkeypatch.setattr(sdk, "_import_cuda_ipc", _boom)
 
-    client = HTTPClient(
-        "http://localhost:8000", output_format="json+base64", gpu_transport="cuda_ipc"
-    )
+    client = HTTPClient("http://localhost:8000")
     client._session.request = lambda **kwargs: Mock(
         status_code=200, ok=True, content=b"{}", headers={}
     )
@@ -415,7 +421,9 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     )
 
     # Plain host array -> encodes as base64, pins nothing, releases nothing.
-    client._request("apply", method="POST", payload={"a": np.zeros(3)})
+    client._request(
+        "apply", method="POST", payload={"a": np.zeros(3)}, encoding=encoding
+    )
 
 
 def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
@@ -482,7 +490,7 @@ def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
         "shape": list(shape),
         "dtype": dtype,
         "data": {
-            "buffer": f"{device}:{handle}:{offset}:{storage_size}",
+            "buffer": f"{_uuid(device)}:{handle}:{offset}:{storage_size}",
             "encoding": "cuda_ipc",
         },
     }
@@ -523,6 +531,27 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     assert iface["data"] == (0xD000, False)
     assert iface["strides"] is None
     assert iface["typestr"] == np.dtype("float32").str
+
+
+def test_devices_are_named_by_uuid_whatever_each_process_numbers_them(mocked_cuda):
+    """The consumer opens the handle on the producer's GPU, as the consumer numbers it."""
+    out = cuda_ipc.dump_cuda_ipc_arraydict(
+        FakeCudaArray((4,), "<f4", device=_TorchDevice(index=2)),
+        cuda_ipc.ExportGroup(),
+    )
+
+    # A consumer that sees only that GPU.
+    mocked_cuda.device_uuids = [_uuid(2)]
+    assert cuda_ipc.load_cuda_ipc_arraydict(out).device == 0
+    # One that sees all of them, in another order.
+    mocked_cuda.device_uuids = [_uuid(5), _uuid(2), _uuid(0)]
+    assert cuda_ipc.load_cuda_ipc_arraydict(out).device == 1
+    assert [device for _, device in mocked_cuda.calls["open"]] == [0, 1]
+
+    # One that does not see it at all.
+    mocked_cuda.device_uuids = [_uuid(0)]
+    with pytest.raises(ValueError, match="cannot see"):
+        cuda_ipc.load_cuda_ipc_arraydict(out)
 
 
 def test_load_reuses_owned_buffer_released_on_del(mocked_cuda):
@@ -1240,7 +1269,7 @@ def test_empty_array_crosses_without_a_handle(mocked_cuda):
     out = cuda_ipc.dump_cuda_ipc_arraydict(
         FakeCudaArray((0, 3), "<f4", data_ptr=0), cuda_ipc.ExportGroup()
     )
-    assert out["data"]["buffer"] == "0::0:0"
+    assert out["data"]["buffer"] == f"{_uuid(0)}::0:0"
     assert mocked_cuda.calls["get_handle"] == []
     CudaIpcArrayData(**out["data"])  # the wire schema accepts it
 
@@ -1254,7 +1283,7 @@ def test_empty_array_crosses_without_a_handle(mocked_cuda):
 
 def test_descriptor_without_a_handle_must_be_for_an_empty_array(mocked_cuda):
     encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=0)
-    encoded["data"]["buffer"] = "0::0:0"
+    encoded["data"]["buffer"] = f"{_uuid(0)}::0:0"
     with pytest.raises(ValueError, match="no handle"):
         cuda_ipc.load_cuda_ipc_arraydict(encoded)
 
@@ -1398,6 +1427,57 @@ def test_server_keeps_response_exports_until_their_client_is_done(
         monkeypatch.setattr(cuda_serving, "EXPORTS_TIMEOUT_S", 0.0)
         apply(**{done: ""})
         assert len(second.pins) == 0
+
+
+def test_server_keeps_its_check_reply_until_the_client_is_done(
+    mocked_cuda, monkeypatch, dummy_tesseract_module
+):
+    """The array a check replies with stays exported, however many checks follow."""
+    import os
+
+    import pybase64
+    from fastapi.testclient import TestClient
+
+    from tesseract_core.runtime import serve
+    from tesseract_core.runtime.config import override_config, update_config
+    from tesseract_core.runtime.cuda import check
+    from tesseract_core.runtime.cuda import serving as cuda_serving
+
+    monkeypatch.setattr(cuda_serving, "_PENDING_EXPORTS", {})
+    data = os.urandom(check._CHECK_NBYTES)
+    # What the server reads back from the client's array.
+    mocked_cuda.device_bytes = data
+    handle = pybase64.b64encode_as_string(b"\x02" * cuda_api.IPC_HANDLE_SIZE)
+    request = {
+        "gpu_transport": "cuda_ipc",
+        "array": {
+            "object_type": "array",
+            "shape": [check._CHECK_NBYTES],
+            "dtype": "uint8",
+            "data": {
+                "buffer": f"{_uuid(0)}:{handle}:0:{check._CHECK_NBYTES}",
+                "encoding": "cuda_ipc",
+            },
+        },
+        "expected": pybase64.b64encode_as_string(data),
+    }
+
+    with override_config():
+        update_config(gpu_transport="cuda_ipc")
+        client = TestClient(serve.create_rest_api(dummy_tesseract_module))
+
+        def run_check():
+            response = client.post("/check_gpu_transport", json=request)
+            assert response.json()["ok"], response.json()
+            export_id = response.headers[cuda_serving.EXPORTS_HEADER]
+            return export_id, cuda_serving._PENDING_EXPORTS[export_id].session
+
+        first_id, first = run_check()
+        for _ in range(20):
+            run_check()
+        assert len(first) == 1
+        client.get("/health", headers={cuda_serving.EXPORTS_DONE_HEADER: first_id})
+        assert len(first) == 0
 
 
 def test_server_releases_exports_of_a_response_that_fails_to_encode(

@@ -185,8 +185,6 @@ def test_transport_check_works_for_any_transport(monkeypatch):
     So a transport other than cuda_ipc needs nothing more to take part in it,
     and each export the check makes is released again.
     """
-    import collections
-
     from tesseract_core.runtime import device_transport
     from tesseract_core.runtime.cuda import api as cuda_api
     from tesseract_core.runtime.cuda import check
@@ -195,22 +193,18 @@ def test_transport_check_works_for_any_transport(monkeypatch):
     monkeypatch.setitem(device_transport._TRANSPORTS, transport.name, transport)
     monkeypatch.setattr(check, "_device_array_from_bytes", _HostArray)
     monkeypatch.setattr(cuda_api, "get_device", lambda: 0)
-    monkeypatch.setattr(check, "_CHECK_REPLIES", collections.deque())
-    monkeypatch.setattr(check, "_CHECK_REPLIES_KEPT", 1)
 
-    def run_check() -> None:
-        request, expected, release = check.start_transport_check(transport.name)
-        reply = check.answer_transport_check(request)
-        release()
-        check.finish_transport_check(transport.name, reply, expected)
-
-    run_check()
+    request, expected, release = check.start_transport_check(transport.name)
+    reply_session = transport.new_exports()
+    reply = check.answer_transport_check(request, reply_session)
+    release()
     assert len(transport.exported) == 1, "only the server's reply is kept"
-    run_check()
-    assert len(transport.exported) == 1, "a later check releases an earlier reply"
+    check.finish_transport_check(transport.name, reply, expected)
+    transport.release(reply_session)
+    assert not transport.exported
 
     request, _, release = check.start_transport_check(transport.name)
     request["expected"] = pybase64.b64encode_as_string(bytes(check._CHECK_NBYTES))
     with pytest.raises(ValueError, match="differ"):
-        check.answer_transport_check(request)
+        check.answer_transport_check(request, transport.new_exports())
     release()

@@ -82,7 +82,7 @@ def _unpack_cuda_ipc(data: dict) -> dict:
     """
     device, handle, storage_offset, storage_size = data["buffer"].split(":")
     return {
-        "device": int(device),
+        "device": device,
         "handle": handle,
         "storage_offset": int(storage_offset),
         "storage_size": int(storage_size),
@@ -368,15 +368,37 @@ def test_encode_structure():
     # 64-byte handle, base64-encoded, packed into the single `buffer` string.
     import pybase64
 
-    from tesseract_core.runtime.cuda.api import IPC_HANDLE_SIZE
+    from tesseract_core.runtime.cuda.api import IPC_HANDLE_SIZE, device_uuid
 
     unpacked = _unpack_cuda_ipc(data)
     assert len(pybase64.b64decode(unpacked["handle"])) == IPC_HANDLE_SIZE
-    assert isinstance(unpacked["device"], int)
+    assert unpacked["device"] == device_uuid(arr.device.id)
     assert unpacked["storage_size"] >= arr.nbytes
     assert unpacked["storage_offset"] >= 0
     # offset + array bytes must fit inside the reported allocation.
     assert unpacked["storage_offset"] + arr.nbytes <= unpacked["storage_size"]
+
+
+@requires_cuda
+def test_device_uuids_match_nvidia_smi():
+    """Descriptors name GPUs by the UUID nvidia-smi reports for them.
+
+    CUDA and nvidia-smi may order and filter devices differently (e.g. via
+    CUDA_VISIBLE_DEVICES), so this only checks that each UUID is one nvidia-smi
+    knows.
+    """
+    import subprocess
+
+    from tesseract_core.runtime.cuda.api import device_count, device_uuid
+
+    listed = subprocess.run(
+        ["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    for device in range(device_count()):
+        assert f"GPU-{device_uuid(device)}" in listed
 
 
 @requires_cuda
@@ -862,14 +884,18 @@ def test_empty_and_non_contiguous_torch_tensors_are_encoded():
     """Empty tensors cross by an empty descriptor, non-contiguous ones by a device copy."""
     import torch
 
+    from tesseract_core.runtime.cuda.api import device_uuid
     from tesseract_core.sdk.tesseract import _encode_payload
 
-    empty = torch.empty(0, 3, device="cuda")
+    empty = torch.empty(0, 3, device="cuda:0")
     transposed = torch.arange(6, dtype=torch.float32, device="cuda").reshape(2, 3).T
     with _encode_payload(
         {"e": empty, "t": transposed}, gpu_transport="cuda_ipc"
     ) as out:
-        assert out["e"]["data"] == {"buffer": "0::0:0", "encoding": "cuda_ipc"}
+        assert out["e"]["data"] == {
+            "buffer": f"{device_uuid(0)}::0:0",
+            "encoding": "cuda_ipc",
+        }
         assert out["t"]["data"]["encoding"] == "cuda_ipc"
         assert list(out["t"]["shape"]) == [3, 2]
 
@@ -1288,22 +1314,3 @@ def test_resolve_gpu_transport_falls_back_when_cuda_ipc_does_not_work(
 
             with pytest.raises(RuntimeError, match="does not work between"):
                 remote.with_encoding(gpu_transport="cuda_ipc").resolve_gpu_transport()
-
-
-@requires_cuda
-def test_requested_gpu_transport_is_unchecked_without_the_check_route(
-    free_port, serve_in_subprocess
-):
-    """A server that cannot take part in the check leaves a requested transport unchecked.
-
-    Runtimes from before the check have no route for it, like this server
-    without a GPU transport, so asking it gives no answer rather than a failure.
-    """
-    from tesseract_core.sdk.tesseract import HTTPClient
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        api_path = Path(tmpdir) / "tesseract_api.py"
-        api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
-        with serve_in_subprocess(api_path, free_port) as url:
-            check = HTTPClient(url).check_gpu_transport("cuda_ipc")
-            assert check.usable is None
