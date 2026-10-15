@@ -1013,10 +1013,11 @@ def serve(
         gpu_transport: GPU transport the served Tesseract accepts besides ``none``,
             which copies GPU arrays to the host. ``cuda_ipc`` passes them by
             reference and requires ``gpus`` and a shared IPC namespace. Responses
-            only use it for requests that ask for it. An explicit value (including
-            ``none``) wins over a ``gpu_transport`` in ``runtime_config``, and
-            leaving it unset (``None``) defers to ``runtime_config``, falling back
-            to ``none`` when neither sets it.
+            only use it for requests that ask for it. Anything but ``none`` needs
+            ``num_workers=1``. An explicit value (including ``none``) wins over a
+            ``gpu_transport`` in ``runtime_config``, and leaving it unset
+            (``None``) defers to ``runtime_config``, falling back to ``none``
+            when neither sets it.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
@@ -1165,11 +1166,16 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
+        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
+        if gpu_transport != "none" and num_workers > 1:
+            raise ValueError(
+                f"gpu_transport={gpu_transport!r} cannot be served by more than "
+                f"one worker (got num_workers={num_workers})."
+            )
+
         # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
         # between host and container. Wire both up whenever it is selected (the
         # only reason to enable it is IPC).
-        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
-
         if gpu_transport == "cuda_ipc":
             if not gpus:
                 raise ValueError(

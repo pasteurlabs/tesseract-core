@@ -232,6 +232,8 @@ def load_cudart() -> Any:
     cudart.cudaSetDevice.restype = ctypes.c_int
     cudart.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
     cudart.cudaGetDevice.restype = ctypes.c_int
+    cudart.cudaGetDeviceCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    cudart.cudaGetDeviceCount.restype = ctypes.c_int
     cudart.cudaIpcGetMemHandle.argtypes = [
         ctypes.POINTER(CudaIpcMemHandle),
         ctypes.c_void_p,
@@ -280,7 +282,7 @@ def load_cuda_driver() -> Any:
     required because IPC handles reference the *whole* allocation, while a given
     array may point partway into it (common with pooled allocators like CuPy and
     PyTorch). It also reports a device's total memory, which sizes the buffer
-    pools. Raises ``RuntimeError`` if libcuda cannot be found.
+    pools, and its UUID. Raises ``RuntimeError`` if libcuda cannot be found.
     """
     driver = None
     path = ctypes.util.find_library("cuda")
@@ -316,5 +318,12 @@ def load_cuda_driver() -> Any:
         ctypes.c_int,
     ]
     driver.cuDeviceTotalMem_v2.restype = ctypes.c_int
+    # CUuuid is a struct of 16 bytes. The _v2 entry point (CUDA 11.4+) tells MIG
+    # instances of one GPU apart.
+    for name in ("cuDeviceGetUuid_v2", "cuDeviceGetUuid"):
+        fn = getattr(driver, name, None)
+        if fn is not None:
+            fn.argtypes = [ctypes.POINTER(ctypes.c_char * 16), ctypes.c_int]
+            fn.restype = ctypes.c_int
     driver.cuInit(0)
     return driver
