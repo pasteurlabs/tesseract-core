@@ -73,7 +73,7 @@ Having trouble? Check [common issues](#installation-issues) for solutions.
 
 ### Build a container image
 
-To share a Tesseract with someone who doesn't have your environment, or to deploy it, build it into a container image. This step requires [Docker](#installation-docker):
+To share a Tesseract with someone who doesn't have your environment, or to deploy it, package it as a container image. This step requires [Docker](#installation-docker):
 
 ```bash
 $ tesseract build examples/helloworld
@@ -130,7 +130,7 @@ $ tesseract teardown tesseract-u7um375qt6dj5
 :::
 ::::
 
-Each built Tesseract auto-generates CLI and REST API docs. To view them:
+Every Tesseract auto-generates CLI and REST API docs. For a built image, view them with:
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -211,7 +211,7 @@ Contains metadata such as the Tesseract's name, description, version, and build 
 Lists the Python packages needed to run the Tesseract, whether in the environment `from_source` builds or in a container image, in [pip requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
 
 ```{note}
-This file is optional. `tesseract_api.py` can invoke functions written in any language. In that case, use the `build_config` section in [`tesseract_config.yaml`](quickstart-tr-config) to provide data files and install dependencies.
+This file is optional. `tesseract_api.py` can invoke functions written in any language. With `Tesseract.from_source`, non-Python dependencies have to be installed on your machine. To package them with the Tesseract, build a container image and use the `build_config` section in [`tesseract_config.yaml`](quickstart-tr-config) to provide data files and install system dependencies.
 ```
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_requirements.txt
@@ -243,7 +243,7 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 
 Depending on your needs:
 
-- [](../tutorials/create.md) — define schemas, implement endpoints, and build Tesseracts
+- [](../tutorials/create.md) — define schemas, implement endpoints, and run Tesseracts
 - [](../tutorials/interact.md) — invoke Tesseracts, compute derivatives, and read their schemas
 
 - [](../how-to/check-gradients.md) — verify a Tesseract's derivatives against finite differences

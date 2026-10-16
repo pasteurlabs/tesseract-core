@@ -12,7 +12,7 @@ Universal components for differentiable scientific computing 📦
 [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) |
 [Blog](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
-[Community forum](https://si-tesseract.discourse.group/) |
+[User Forum](https://si-tesseract.discourse.group/) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
@@ -22,9 +22,17 @@ Universal components for differentiable scientific computing 📦
 
 **Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.**
 
-Say you have a model in PyTorch or JAX and a solver that lives somewhere else, perhaps a Fortran code, a Julia package, a FEniCS model, or a commercial tool. You want to train or optimize through both, and the two won't share an environment. Tesseract's aim is that the solver keeps its own process and environment, yet crossing that boundary costs you nothing you'd notice: JAX and PyTorch differentiate through it as if it were native code, calls stay fast and gradients stay checked, and the same component runs on a laptop, a cluster, or a remote server.
+## How it works
 
-## What people have built with it
+- **Define** a component in `tesseract_api.py`: Pydantic schemas for its inputs and outputs, an `apply` function, and optional derivative endpoints, computed however you like (autodiff, adjoints, finite differences).
+- **Run** it in its own process and environment with `Tesseract.from_source`, build it as a container image, or serve it remotely. Each way exposes the same endpoints.
+- **Differentiate** through it with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), so one gradient can cross languages and frameworks. Overhead is typically a few milliseconds per call (see the [performance guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/performance/)).
+- **Check** every derivative endpoint against finite differences with `check-gradients`.
+
+> [!TIP]
+> Still unsure whether you need Tesseract? See [When to use Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/when-to-use/).
+
+## What you can do with it
 
 <table>
 <tr>
@@ -51,23 +59,6 @@ Ansys SpaceClaim geometry and PyMAPDL structural analysis in one optimization lo
 Sentaurus TCAD, a closed-source binary driven over SSH, differentiated with finite differences and Broyden updates to tune a transistor for a spiking network.
 </td>
 <td width="33%" valign="top">
-<a href="https://github.com/TAUIL-Abd-Elilah/coldplate"><img src="https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/docs/img/gallery/coldplate.jpg" alt="Cold plate material layout, coolant flow, and chip temperature"></a>
-<b><a href="https://github.com/TAUIL-Abd-Elilah/coldplate">Coldplate</a></b><br>
-A C++ fluid solver coupled both ways to a thermal solver in Fortran (via Enzyme) or JAX. Leaving the coupling out of the gradient flips a third of its signs.
-</td>
-<td width="33%" valign="top">
-<a href="https://github.com/arpastrana/normax"><img src="https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/docs/img/gallery/normax.jpg" alt="Three gridshell designs from different optimization strategies"></a>
-<b><a href="https://github.com/arpastrana/normax">Normax</a></b><br>
-JAX form finding, OpenSees structural analysis, and a Eurocode 3 check in one gradient, using 29–67% less material than resizing the tubes of a fixed shape.
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<a href="https://github.com/xwpken/opensees-shm-tesseract"><img src="https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/docs/img/gallery/opensees-shm.jpg" alt="Truss bridge response with candidate damage segments"></a>
-<b><a href="https://github.com/xwpken/opensees-shm-tesseract">OpenSees-SHM</a></b><br>
-An OpenSees finite element model, differentiated by its own sensitivity analysis, infers where and how badly a steel truss has corroded, with uncertainty estimates.
-</td>
-<td width="33%" valign="top">
 <a href="https://github.com/BrainCapture/NeuroLocate"><img src="https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/docs/img/gallery/neurolocate.jpg" alt="Recovered brain source location inside a head model"></a>
 <b><a href="https://github.com/BrainCapture/NeuroLocate">NeuroLocate</a></b><br>
 A PyTorch network proposes EEG sources, and JAX refines them with gradients through OpenMEEG, a C++ boundary element solver with no autodiff of its own.
@@ -80,22 +71,9 @@ Solvers in C++, Julia, JAX, and PyTorch, from deal.II and OpenFOAM to JAX-FEM an
 </tr>
 </table>
 
-## How it works
-
-- **A component declares its interface** as Pydantic input and output schemas and marks which fields are differentiable.
-- **It implements `apply`** and any of `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
-- **It runs in its own process**, as a subprocess (`from_source`), a container (`tesseract build`), or a remote service (`from_url`), exposing the same endpoints over HTTP and through the Python SDK in each case.
-- **It minimizes overhead at the boundary** by using shared memory for large arrays, leaving GPU data on device, and keeping the payload per call minimal. Tesseract overhead typically runs in milliseconds (see the [performance guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/performance/)).
-- **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)** turn it into a JAX primitive or a PyTorch operator, so one gradient can cross components written in different languages and frameworks.
-- **It makes everything differentiable** by exposing helpers for finite differences and integrating with JAX and PyTorch autodiff (see the [differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/differentiable-programming/)).
-- **`check-gradients`** compares every derivative endpoint against finite differences, and schemas and API docs are generated from the code, so a component can be tested and used without reading its source.
-
-> [!TIP]
-> Still unsure whether you need Tesseract? See our [decision guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/when-to-use/).
-
 ## Quick start
 
-No Docker needed. You need Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), which Tesseract uses to build an isolated environment for each component.
+You need Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), which Tesseract uses to build an isolated environment for each component.
 
 ```bash
 $ pip install tesseract-core tesseract-jax
@@ -154,7 +132,7 @@ $ TESSERACT_API_PATH=tesseract_api.py tesseract-runtime check-gradients '{"input
 ✅ Gradient check for vector_jacobian_product passed ✅ (0 failures / 1000 checks)
 ```
 
-When it's time to share the component or deploy it, the same folder builds into a container image (this step requires [Docker](https://docs.docker.com/engine/install/)), and `Tesseract.from_image("my-tesseract")` replaces `from_source`:
+To share or deploy the component, build the same folder as a container image (this step requires [Docker](https://docs.docker.com/engine/install/)), and `Tesseract.from_image("my-tesseract")` replaces `from_source`:
 
 ```bash
 $ tesseract build .

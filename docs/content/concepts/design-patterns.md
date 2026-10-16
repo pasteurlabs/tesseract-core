@@ -15,7 +15,7 @@ One of the most common questions is: _"Should I make one big Tesseract or many s
 - Operations are tightly coupled and always run together
 - Data transfer between steps would be expensive (e.g., large meshes or tensors)
 - The combined operation is what users actually want to call
-- You need maximum performance (fewer container invocations)
+- You need maximum performance (fewer calls across the process boundary)
 
 ### Prefer more, finer Tesseracts when:
 

@@ -30,7 +30,7 @@ $ pip install tesseract-jax    # or tesseract-torch
 
 ## Installing Docker (for container images)
 
-Building a Tesseract into a container image with `tesseract build`, and running it with `tesseract run`, `tesseract serve`, or `Tesseract.from_image`, requires a container engine. You can skip this section until you want to share or deploy a Tesseract as an image.
+Building a container image with `tesseract build`, and running it with `tesseract run`, `tesseract serve`, or `Tesseract.from_image`, requires a container engine. You can skip this section until you want to share or deploy a Tesseract as an image.
 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need, including the Docker Engine CLI, Docker Compose, and Docker Buildx.
 It is available for Windows, macOS, and Linux (Debian- and Fedora-based distros).
@@ -94,15 +94,16 @@ For GPU-accelerated workloads or maximum performance, consider using the [Window
 
 ### Conflicting executables
 
-Other software shares the "Tesseract" name (notably [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)). If both are installed, you may see errors like:
+Other software shares the "Tesseract" name (notably [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)). If both are installed, the `tesseract` command may run the other program. For example, `tesseract --version` then reports Tesseract OCR instead of the Tesseract Core version:
 
 ```
-$ tesseract build examples/vectoradd/ vectoradd
-
-read_params_file: Can't open vectoradd
-Error in findFileFormatStream: failed to read first 12 bytes of file
-Error during processing.
+$ tesseract --version
+tesseract 5.5.3
+ leptonica-1.87.0
+ ...
 ```
+
+Other `tesseract` commands fail with errors like `read_params_file: Can't open ...` or `Error during processing.`
 
 We recommend always using a dedicated Python virtual environment. If you use `zsh`, you may also need to refresh the shell's executable cache:
 
@@ -114,8 +115,7 @@ You can also bypass the name entirely and invoke Tesseract through the
 interpreter you installed it into, which is unambiguous:
 
 ```bash
-$ python -m tesseract_core build examples/vectoradd/ vectoradd
-$ python -m tesseract_core.runtime --help   # the runtime, likewise
+$ python -m tesseract_core --version
 ```
 
 To confirm which executable `tesseract` resolves to:

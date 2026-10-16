@@ -1,62 +1,59 @@
 ---
-og:title: "Do you need Tesseract?"
-og:description: "When a process boundary with gradients is worth it, when a custom_vjp or a rewrite is the better answer, and where containers fit in."
+og:title: "When to use Tesseract"
+og:description: "When wrapping a component as a Tesseract pays off, and when a custom_vjp or an in-framework rewrite is the better answer."
 ---
 
-# Do you need Tesseract?
+# When to use Tesseract
 
-Tesseract puts a process boundary between your code and a component, with a typed interface and derivative endpoints on the far side. A boundary is not free. Each call costs milliseconds, and someone has to write the schema. This page is meant to help you decide whether your problem needs one.
+Tesseract runs a component in its own process and lets JAX and PyTorch differentiate through it as if it were native code. In exchange, every call crosses a process boundary, and the component has to be written as a Tesseract. This page helps you decide when that trade pays off, and points to simpler answers where it doesn't.
 
-## The short version
+## When it fits
 
-Tesseract is most useful when four things hold at once:
+Tesseract pays off most when all four of these hold:
 
-1. **The component can't be replaced.** A rewrite would not be accepted as the same thing.
-2. **You need gradients through it**, typically because it sits inside an optimization, inference, or training loop.
-3. **It needs its own process**, because it wants a different interpreter, dependency set, language runtime, global state, or autodiff framework than the code calling it.
-4. **Each call is coarse enough** that a few milliseconds of overhead don't matter.
+| Condition                         | Typical reason                                                                                       | If it doesn't hold                                                                                                                                                                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A rewrite is off the table**    | The code is validated, proprietary, decades in the making, or a model trained on data you don't have | Rewrite it in JAX or PyTorch. Textbook functions and small ODE systems are better as native code.                                                                                                                           |
+| **You need gradients through it** | It sits inside an optimizer, a sampler, or a training loop                                           | A Tesseract without derivative endpoints still works, but a plain service or script may be all you need.                                                                                                                    |
+| **It needs its own process**      | Its dependencies, language runtime, global state, or autodiff framework clash with yours             | Wrap it in a `jax.custom_vjp` or `torch.autograd.Function` and call it in-process, or use a bridge the solver ships, such as Firedrake's `firedrake.ml.pytorch` and `firedrake.ml.jax`.                                     |
+| **Each call does real work**      | A call costs a few milliseconds plus the time to move its arrays                                     | Batch calls, or load the Tesseract in-process with `Tesseract.from_tesseract_api`. {doc}`/content/concepts/performance` has measurements and other options. Long chains of cheap calls, like MCMC steps, are the hard case. |
 
-If only some of these hold, there is often a simpler answer, and the sections below say what it is.
+A rewrite is rarely impossible, given enough time. It is off the table when the person who owns the problem wouldn't accept it as the same thing. That happens when the value lies in years of validation against experiment or regulatory acceptance, in capability like turbulence modeling, contact mechanics, or a CAD kernel that no project re-implements on the side, in a surrogate's training data, or in source code you can run but not read.
 
-## Would a rewrite be accepted?
+```{admonition} Beyond the obvious
+:class: tip
 
-Almost anything can be rewritten in JAX or PyTorch, given time. The useful question is whether the person who owns the problem would accept the rewrite as the same thing. Four kinds of value don't survive a rewrite:
+The above four conditions aren't the whole story. There are other ways in which Tesseract provides value:
 
-- **Validation.** Years of comparison against experiment, regulatory acceptance, or institutional trust belong to a specific code, and a faithful port is a different code to whoever certified the original.
-- **Encoded capability.** Person-decades of turbulence modeling, contact mechanics, meshing, unstructured discretizations, or a CAD kernel are not something a project re-implements on the side.
-- **Data and weights.** A surrogate trained on data you don't have can be called but not retrained.
-- **Source access.** Proprietary or partner-owned code can be run but not read.
+- **Testing a hand-written gradient.** A schema plus {doc}`check-gradients </content/how-to/check-gradients>` verifies a VJP or adjoint against finite differences, even if the component later runs in-process.
+- **Mixing differentiation strategies.** One gradient can combine finite differences through a cheap CAD geometry with a handful of parameters and an exact adjoint through the expensive solver behind it.
+- **Handing a component to someone else.** Schemas and generated API docs describe what a Tesseract expects and returns, without anyone reading its source.
 
-If the component's value is its mathematics, as with a textbook test function or a small ODE system, rewriting it in your framework is usually the better path. Several of our own tutorials wrap components like that, but only to teach the mechanics.
+In general, don't let the absence of one of the four main conditions discourage you from using Tesseract if you believe it's the right tool for your problem.
+```
 
-## Does it need its own process?
+## What it costs
 
-If the component imports cleanly into your model's environment, write a `jax.custom_vjp` or a `torch.autograd.Function` around it and call it in-process. Some solvers ship a bridge of their own for this. Firedrake, for example, provides `firedrake.ml.pytorch` and `firedrake.ml.jax`. Where such a bridge exists, prefer it, unless the process boundary is itself the requirement. That is the case when the two software stacks won't coexist in one environment, when the solver runs on another machine, or when several consumers need to share one component.
+- **Time per call.** A call to a Tesseract on the same machine costs a few milliseconds, plus the time to move its arrays. Shared-memory transport keeps the second part small for large arrays (see {doc}`/content/how-to/fast-local-runs`).
+- **A fixed structure.** A Tesseract is a folder with a `tesseract_api.py`, a `tesseract_config.yaml`, and a requirements file, and its inputs and outputs are declared as schemas. Much of this is boilerplate that a coding agent can draft from your existing code.
 
-When the component does need its own process, the usual first attempt is to write arrays to disk, call the other environment with `subprocess.run`, and read the results back. That is a reasonable afternoon's work and holds up for a few dozen calls. It stops holding up when the prototype becomes a training loop with thousands of VJP calls, each paying for a fresh process and a round trip through the filesystem, with the solver's state lost between calls and every shape and error handled by hand.
+The structure helps when the component is self-contained. Its environment and interface are then declared in one place, and anyone can run it without asking you how. It gets in the way when the component is one function inside a larger codebase that you are still changing, since the Tesseract has to depend on that codebase as a package, or when the natural interface has several entrypoints, which become several Tesseracts.
 
-The next step is usually a persistent server with a typed interface and a binary array protocol, which is what Tesseract provides. [`Tesseract.from_source`](#Tesseract.from_source) is the drop-in replacement for the subprocess approach. It serves a `tesseract_api.py` from its own environment, keeps it alive across calls, and plugs into JAX and PyTorch through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch).
+## Which way to run it
 
-## Is each call coarse enough?
+The same `tesseract_api.py` runs in four ways, without changes:
 
-A call to a Tesseract on the same machine costs a few milliseconds plus the time to move its arrays, and shared-memory transport keeps the second part small for large arrays. That is negligible for a solver that runs for seconds and dominant for a function that runs for microseconds. The hard case is a long sequence of cheap calls that can't be batched, such as the steps of an MCMC sampler. {doc}`/content/concepts/performance` explains what to do when overhead dominates and has measurements, and {doc}`/content/how-to/fast-local-runs` shows how to cut array transfer costs on one machine.
+| How                                                                   | What it does                                                                   | Use it when                                                                                                                       |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| [`Tesseract.from_source`](#Tesseract.from_source)                     | Serves it from a local process, in an environment built from its configuration | Developing and calling a Tesseract on your machine. This is the default.                                                          |
+| [`Tesseract.from_tesseract_api`](#Tesseract.from_tesseract_api)       | Imports it into your Python process                                            | Its dependencies fit into your environment, and you want the cheapest calls or a debugger (see {doc}`/content/how-to/debugging`). |
+| `tesseract build` and [`Tesseract.from_image`](#Tesseract.from_image) | Builds a container image and serves it from Docker                             | You share it with people who don't have your environment, need system packages or compiled toolchains, or deploy to the cloud.    |
+| [`Tesseract.from_url`](#Tesseract.from_url)                           | Connects to a Tesseract served elsewhere                                       | It runs on another machine or a cluster, or several programs share one instance (see {doc}`/content/how-to/deploy`).              |
 
-## What Tesseract doesn't do
+## What you get
 
-A few design choices are worth knowing before you commit to one:
+The usual first attempt at calling a component in another environment is to write arrays to disk, run the other environment with `subprocess.run`, and read the results back. That works for a few dozen calls. In a training loop with thousands of gradient calls, each one pays for a fresh process and a round trip through the filesystem, the solver's state is lost between calls, and every shape and error is handled by hand.
 
-- **One entrypoint per Tesseract.** Each Tesseract has a single `apply`. To expose several functions, build several Tesseracts and compose them (see {doc}`/content/concepts/design-patterns`).
-- **Python is always the glue.** A Tesseract can wrap any software, but the code between the runtime and the wrapped software is Python. Support for Python projects is more mature than for other languages.
-- **No knowledge of its context.** A Tesseract doesn't know which loop calls it or where it runs. Orchestration and the outer optimization or training loop stay in the calling code.
+With Tesseract, the component stays alive in its own process, its inputs and outputs are typed, and [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) make it a differentiable operation in your program. Its gradient can come from an adjoint solver, autodiff in another framework, or finite differences, and `jax.grad` or `torch.autograd` combine it with the rest of your program. A Fortran solver, a Julia package, and a PyTorch model can share one gradient without sharing an interpreter, and the component you wrote on your laptop runs unchanged on a cluster or in the cloud.
 
-## Smaller reasons
-
-Some benefits don't depend on all four conditions:
-
-- **Testing a differentiable component in isolation.** A schema plus {doc}`check-gradients </content/how-to/check-gradients>` is a quick way to verify a hand-written VJP or adjoint, even if the component later runs in-process via `Tesseract.from_tesseract_api`.
-- **Mixing differentiation strategies.** One gradient can combine finite differences on a cheap, low-dimensional link, such as a CAD geometry with a handful of parameters, with an exact adjoint on the expensive solver behind it.
-- **Handing a component to someone else.** Schemas and generated API docs describe what a Tesseract expects and returns without anyone reading its source.
-
-## Where containers fit in
-
-You don't need Docker to develop or use a Tesseract. A container is a deployment choice, and a good one when you want to share a component with someone who doesn't have your environment, serve it from cloud infrastructure, or pin system-level dependencies. The same `tesseract_api.py` serves all three paths, as a subprocess with `Tesseract.from_source`, as a container built with `tesseract build`, and as a remote service reached with `Tesseract.from_url`. See {doc}`/content/how-to/deploy` for the container path.
+Ready to try it? The {doc}`/content/tutorials/get-started` tutorial writes and calls a Tesseract from scratch.

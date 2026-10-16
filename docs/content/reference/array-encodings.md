@@ -75,7 +75,13 @@ Serialization and transfer overhead by encoding format and array size.
 
 ## Usage
 
-The default format is `json`. To use a different encoding, set the format flag:
+The default format is `json`. To use a different encoding, set the format flag. The CLI examples below call `tesseract-runtime` with `TESSERACT_API_PATH` pointing at the Tesseract:
+
+```bash
+$ export TESSERACT_API_PATH=examples/vectoradd/tesseract_api.py
+```
+
+`tesseract run <image-name>` accepts the same options for a Tesseract packaged as a container image (`-f` is short for `--output-format`, `-o` for `--output-path`).
 
 ### base64
 
@@ -84,7 +90,7 @@ The default format is `json`. To use a different encoding, set the format flag:
 :sync: cli
 
 ```bash
-$ tesseract run vectoradd apply -f "json+base64" @examples/vectoradd/example_inputs_b64.json
+$ tesseract-runtime --output-format json+base64 apply @examples/vectoradd/example_inputs_b64.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"AAAAAAAALEAAAAAAAAA2QAAAAAAAAD5A","encoding":"base64"}}}
 ```
 
@@ -96,7 +102,7 @@ $ tesseract run vectoradd apply -f "json+base64" @examples/vectoradd/example_inp
 $ curl \
   -H "Accept: application/json+base64" \
   -H "Content-Type: application/json" \
-  -d @examples/vectoradd/example_inputs.json \
+  -d @examples/vectoradd/example_inputs_b64.json \
   http://<tesseract-address>:<port>/apply
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"AAAAAAAALEAAAAAAAAA2QAAAAAAAAD5A","encoding":"base64"}}}
 ```
@@ -108,30 +114,26 @@ $ curl \
 
 The `json+binref` format stores array data in separate `.bin` files and puts only references in the JSON. This enables lazy loading via [LazySequence](#tesseract_core.runtime.experimental.LazySequence). See the [`Array` docstring](#tesseract_core.runtime.Array) for more details.
 
-Because the `.bin` files are written to disk, an output path is required: `tesseract run` and `tesseract serve` reject `json+binref` unless `--output-path` is set. Without it, the `.bin` files would be written inside the container and lost on teardown, leaving the JSON references dangling.
+The `.bin` files are written to the output path set with `--output-path`, and the references in the JSON are relative to it. `tesseract-runtime` uses the current working directory if no output path is set. For a containerized Tesseract, `tesseract run` and `tesseract serve` reject `json+binref` unless `--output-path` is set, since the `.bin` files would otherwise be written inside the container and lost on teardown.
 
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
 
 ```bash
-$ tesseract run vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
+$ tesseract-runtime --output-format json+binref --output-path /tmp/output apply @examples/vectoradd/example_inputs.json
+{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"7796fb36-849a-42ce-8288-a07426111f0c.bin:0","encoding":"binref"}}}
 
 $ ls /tmp/output
-7796fb36-849a-42ce-8288-a07426111f0c.bin results.json
-
-$ cat /tmp/output/results.json
-{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"7796fb36-849a-42ce-8288-a07426111f0c.bin:0","encoding":"binref"}}}
+7796fb36-849a-42ce-8288-a07426111f0c.bin logs
 ```
 
 :::
 :::{tab-item} REST API
 :sync: http
 
-Specify `--output-path` when serving so the `.bin` files are accessible on the host. Otherwise they're only available inside the container (under `/tesseract/output_path`).
-
 ```bash
-$ tesseract serve <tesseract-name> --output-path /tmp/output
+$ tesseract-runtime --output-path /tmp/output serve
 $ curl \
   -H "Accept: application/json+binref" \
   -H "Content-Type: application/json" \
@@ -139,7 +141,7 @@ $ curl \
   http://<tesseract-address>:<port>/apply
 ```
 
-The `.bin` file references are relative to the `--output-path`.
+The `.bin` file references are relative to the `--output-path`. When serving a container image with `tesseract serve`, pass `--output-path` so the `.bin` files are accessible on the host.
 :::
 ::::
 
@@ -156,15 +158,16 @@ Set the `TESSERACT_COMPRESSION=lz4` config variable to compress arrays in the ou
 
 `TESSERACT_COMPRESSION` only affects how a Tesseract encodes its _output_; inputs are always decoded according to their own per-array `compression` field, so no configuration is needed to read compressed data.
 
-Because it is a runtime config variable, it must be forwarded into the container with `-e` when using `tesseract run` (a plain shell prefix would stay on the host):
-
 ```bash
-$ tesseract run -e TESSERACT_COMPRESSION=lz4 vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
-$ cat /tmp/output/results.json
-{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"....bin:0:35","encoding":"binref","compression":"lz4"}}}
+$ TESSERACT_COMPRESSION=lz4 tesseract-runtime --output-format json+binref --output-path /tmp/output apply @examples/vectoradd/example_inputs.json
+{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"....bin:0:44","encoding":"binref","compression":"lz4"}}}
 ```
 
-When calling `tesseract-runtime` directly (e.g. inside a container), the plain `TESSERACT_COMPRESSION=lz4 tesseract-runtime ...` prefix works as usual.
+With `tesseract run`, forward the variable into the container with `-e` (a plain shell prefix would stay on the host):
+
+```bash
+$ tesseract run -e TESSERACT_COMPRESSION=lz4 <image-name> apply -f json+binref -o /tmp/output @examples/vectoradd/example_inputs.json
+```
 
 (choosing-the-encoding-per-request)=
 
@@ -189,7 +192,7 @@ In the Python SDK, `Tesseract.server_capabilities` reads what the server support
 ```python
 from tesseract_core import Tesseract
 
-with Tesseract.from_image("vectoradd") as tess:
+with Tesseract.from_source("examples/vectoradd/tesseract_api.py") as tess:
     print(tess.server_capabilities.compressions)  # ('none', 'lz4')
     result = tess.with_encoding(compression="lz4").apply(inputs)
 ```

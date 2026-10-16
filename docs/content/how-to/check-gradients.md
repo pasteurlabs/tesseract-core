@@ -1,15 +1,19 @@
 ---
 og:title: "Checking gradients"
-og:description: "Compare a Tesseract's Jacobian, JVP, and VJP endpoints against finite differences of its apply endpoint, with or without a container, and check a pipeline link by link."
+og:description: "Compare a Tesseract's Jacobian, JVP, and VJP endpoints against finite differences of its apply endpoint, with or without a container."
 ---
 
 # Checking gradients
 
-A wrong gradient rarely crashes anything. The optimizer slows down or settles somewhere odd, the training loss plateaus, and nothing in the forward result says why. `check-gradients` compares each derivative endpoint of a Tesseract against finite differences of its `apply` endpoint, so a wrong VJP can be caught on the day it is written rather than weeks into a training run.
+```{seealso}
+To implement gradients in the first place, see {doc}`/content/concepts/differentiable-programming` and the {doc}`finite-difference helpers </content/examples/building-blocks/finitediff>`.
+```
+
+A wrong gradient usually doesn't raise an error. The optimizer converges slowly or to the wrong point, while the forward results look fine. `check-gradients` compares each derivative endpoint of a Tesseract against finite differences of its `apply` endpoint, so you can test a gradient as soon as you write it.
 
 ## Check a `tesseract_api.py`
 
-No container is needed. Install the runtime into an environment that also has your Tesseract's dependencies, point `TESSERACT_API_PATH` at the file, and pass the inputs at which to check the gradients:
+Install the runtime into an environment that also has your Tesseract's dependencies, point `TESSERACT_API_PATH` at the file, and pass the inputs at which to check the gradients:
 
 ```bash
 $ pip install "tesseract-core[runtime]"
@@ -23,7 +27,7 @@ Every gradient endpoint the Tesseract implements is checked. Prefix the payload 
 
 ## Check a built image
 
-A Tesseract image runs the same command. Options for the check go through `--runtime-args`:
+To check a Tesseract inside its image, run the same command through `tesseract run`, and pass options for the check through `--runtime-args`:
 
 ```bash
 $ tesseract run my-tesseract check-gradients '{"inputs": {"x": [1.0, 2.0, 3.0]}}' \
@@ -90,33 +94,8 @@ A useful habit is to rerun a failing check with the step ten times larger and te
 - `--seed` makes the sampled indices reproducible, so a failure can be rerun exactly.
 - `--max-failures` (default `10`) controls how many failures are printed per endpoint.
 
-## Check a pipeline link by link
-
-`check-gradients` checks one Tesseract at a time, at the inputs you give it. In a pipeline, check each Tesseract at the inputs it actually receives there, since a gradient can be right in one region of input space and wrong in another. Save the inputs that reach each Tesseract during a forward pass, for instance by converting arrays with `.tolist()` and writing them to JSON, and pass that file to `check-gradients`.
-
-Links that pass on their own can still compose into a wrong gradient if the code between them is wrong. To test the chain as a whole, compare the gradient of the final loss with a central difference along a random direction:
-
-```python
-import jax
-import jax.numpy as jnp
-import numpy as np
-
-
-def directional_check(loss, x, eps=1e-3, seed=0):
-    """Compare jax.grad of a scalar loss with a central difference along a random direction."""
-    v = np.random.default_rng(seed).standard_normal(x.shape).astype(x.dtype)
-    v /= np.linalg.norm(v)
-    fd = (loss(x + eps * v) - loss(x - eps * v)) / (2 * eps)
-    ad = jnp.vdot(jax.grad(loss)(x), v)
-    return float(fd), float(ad)
-```
-
-The two numbers should agree to a few digits. This costs three forward passes and one backward pass however many inputs there are, which is what makes it affordable for a whole pipeline.
-
 ## Limitations
 
 - Finite differences are approximations, so a pass is evidence that the gradient is right and not proof. Functions with kinks, branches, or discontinuities near the checked point can fail even when the endpoint returns the correct one-sided or subgradient.
 - The check runs in the Tesseract's own process and environment. It cannot yet be pointed at a Tesseract that someone else serves over HTTP.
 - `apply` is called twice per sampled input element. For an expensive solver, start with a small `--max-evals` and a few targeted `--input-paths`.
-
-To implement gradients in the first place, see {doc}`/content/concepts/differentiable-programming` and the {doc}`finite-difference helpers </content/examples/building-blocks/finitediff>`.

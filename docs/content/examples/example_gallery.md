@@ -23,12 +23,12 @@ building-blocks/finitediff.md
 building-blocks/gradient-fallbacks.md
 ```
 
-This is a gallery of Tesseract examples that end at the `build` stage of the Tesseract lifecycle, and that can act as starting points to define and build your own Tesseracts.
+This is a gallery of small Tesseract examples, each showing one feature, that can act as starting points to define your own Tesseracts.
 
 You can also find these Tesseracts in the `examples` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
 
 ```{important}
-**Beyond the Build**: The real magic happens long after building a Tesseract. For some example applications that *use* Tesseracts in workflows, check out the [Demos & Tutorials](../demo/demo.md) and [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11).
+**Beyond the examples**: For applications that *use* Tesseracts in workflows, check out the [Demos & Tutorials](../demo/demo.md) and the [showcase on the User Forum](https://si-tesseract.discourse.group/c/showcase/11).
 ```
 
 ::::{grid} 2

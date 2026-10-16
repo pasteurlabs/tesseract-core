@@ -36,6 +36,14 @@ A Tesseract is a component defined in one file, `tesseract_api.py`:
 - **`abstract_eval`** returns the output structure without running `apply`. See [endpoints](../reference/endpoints.md) for the full list.
 - **A process boundary** separates it from its callers, who reach it over HTTP or through the Python SDK instead of importing it, so it keeps its own interpreter and dependencies.
 
+## Design decisions
+
+A few choices shape what working with a Tesseract is like. Each one helps in some settings and limits you in others.
+
+- **One `apply` per Tesseract.** A Tesseract exposes a single function, which keeps its interface and gradients easy to reason about. To expose several functions, build several Tesseracts and compose them (see [](../concepts/design-patterns.md)).
+- **Python is always the glue.** A Tesseract can wrap software in any language, but the code between the runtime and that software is Python. Every Tesseract gets the same schemas and tooling as a result, and Python projects are the easiest to wrap.
+- **No knowledge of its context.** A Tesseract doesn't know which loop calls it or where it runs. The same component works inside an optimizer, a training loop, or a sampler, and orchestration stays in the calling code.
+
 ## The workflow
 
 1. **Define** the schemas and endpoints in `tesseract_api.py`. See [](../tutorials/create.md) and [](../how-to/defining-apis.md).
@@ -78,7 +86,7 @@ If you use Tesseract in your research, please cite:
 :hidden:
 
 installation.md
-Tesseract User Forums <https://si-tesseract.discourse.group/>
+Tesseract User Forum <https://si-tesseract.discourse.group/>
 Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 

@@ -261,8 +261,8 @@ class Tesseract:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError(
             "Tesseract cannot be instantiated directly. "
-            "Use Tesseract.from_url(), Tesseract.from_image(), or "
-            "Tesseract.from_tesseract_api() instead."
+            "Use Tesseract.from_source(), Tesseract.from_image(), "
+            "Tesseract.from_url(), or Tesseract.from_tesseract_api() instead."
         )
 
     @classmethod
@@ -455,10 +455,10 @@ class Tesseract:
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
-        Warning: This does not use a containerized Tesseract, but rather
-        imports the Tesseract API directly. This is useful for debugging,
-        but requires a matching runtime environment + all dependencies to be
-        installed locally.
+        Unlike :meth:`from_source` and :meth:`from_image`, this imports the
+        Tesseract API into the calling process. This is useful for debugging,
+        but requires ``tesseract-core[runtime]`` and all of the Tesseract's
+        dependencies to be installed in the calling environment.
 
         Note: Uses a thread lock internally, so concurrent calls to Tesseracts
         created via `from_tesseract_api` will always run sequentially.
@@ -578,8 +578,9 @@ class Tesseract:
             >>> with Tesseract.from_source("tesseract_api.py") as tess:
             ...     tess.apply({"a": 1})
 
-        This is not a substitute for a container: the Tesseract inherits this
-        process's environment, working directory, filesystem access and user.
+        The Tesseract is not isolated the way a container would be. It inherits
+        this process's environment, working directory, filesystem access and
+        user.
 
         Args:
             tesseract_api: Path to the `tesseract_api.py` file. Unlike
@@ -1117,9 +1118,8 @@ def _subprocess_spawn_config(
     )
 
     # Debug mode gives full tracebacks from the child and enables the `test`
-    # endpoint, matching what the in-process path configures. The debugpy
-    # listener it would normally imply is disabled separately, in
-    # `local_client.serve`.
+    # endpoint, matching what the in-process path configures. It also starts a
+    # debugpy listener, which `local_client.serve` puts on a free port.
     config_kwargs: dict[str, Any] = {"debug": True}
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
