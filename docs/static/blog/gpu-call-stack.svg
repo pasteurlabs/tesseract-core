@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-gpu" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1040" fill="#ffffff"/>
+
+  <!-- Column headers -->
+  <text x="420" y="62" text-anchor="middle" font-size="24" letter-spacing="1" fill="#0f172a">TRAINING PROCESS</text>
+  <text x="1180" y="62" text-anchor="middle" font-size="24" letter-spacing="1" fill="#0f172a">SOLVER PROCESS</text>
+
+  <!-- Process boundary -->
+  <line x1="800" y1="40" x2="800" y2="770" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="10 8"/>
+  <text x="800" y="790" text-anchor="middle" font-size="17" fill="#64748b">process boundary</text>
+
+  <!-- Left column: the call going down -->
+  <g>
+    <rect x="180" y="100" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="420" y="142" text-anchor="middle" font-size="25" font-weight="bold" font-family="Menlo, DejaVu Sans Mono, monospace" fill="#1e293b">jax.grad(loss)</text>
+    <text x="420" y="173" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">your training step, under jax.jit</text>
+
+    <rect x="180" y="232" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="420" y="274" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">Tesseract-JAX primitive</text>
+    <text x="420" y="305" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">one primitive for apply, JVP, and VJP</text>
+
+    <rect x="180" y="364" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="420" y="406" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">XLA FFI custom call</text>
+    <text x="420" y="437" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">replaces the host callback on CUDA</text>
+
+    <rect x="180" y="496" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="420" y="538" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">C++ shim</text>
+    <text x="420" y="569" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">syncs the stream, wraps device pointers</text>
+
+    <rect x="180" y="628" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="420" y="670" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">Tesseract HTTP client</text>
+    <text x="420" y="701" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">exports inputs as IPC handles</text>
+
+    <line x1="420" y1="196" x2="420" y2="229" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="420" y1="328" x2="420" y2="361" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="420" y1="460" x2="420" y2="493" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="420" y1="592" x2="420" y2="625" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  </g>
+
+
+  <!-- Return path -->
+  <line x1="148" y1="700" x2="148" y2="128" stroke="#475569" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text transform="translate(128 414) rotate(-90)" text-anchor="middle" font-size="17" fill="#334155">results copied into XLA's output buffers</text>
+
+  <!-- Right column -->
+  <g>
+    <rect x="940" y="456" width="480" height="96" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+    <text x="1180" y="498" text-anchor="middle" font-size="25" font-weight="bold" font-family="Menlo, DejaVu Sans Mono, monospace" fill="#1e293b">tesseract_api.py</text>
+    <text x="1180" y="529" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">the solver's VJP, in JAX</text>
+
+    <rect x="940" y="628" width="480" height="96" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+    <text x="1180" y="670" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">Tesseract runtime</text>
+    <text x="1180" y="701" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">opens handles, exports outputs by handle</text>
+
+    <line x1="1180" y1="556" x2="1180" y2="624" stroke="#475569" stroke-width="3" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- HTTP request and response -->
+  <text x="800" y="648" text-anchor="middle" font-size="17" fill="#334155" paint-order="stroke" stroke="#ffffff" stroke-width="8">request</text>
+  <line x1="663" y1="660" x2="937" y2="660" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="937" y1="692" x2="663" y2="692" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="800" y="719" text-anchor="middle" font-size="17" fill="#334155" paint-order="stroke" stroke="#ffffff" stroke-width="8">response</text>
+  <text x="800" y="745" text-anchor="middle" font-size="17" font-style="italic" fill="#64748b" paint-order="stroke" stroke="#ffffff" stroke-width="8">JSON with 64-byte handles</text>
+
+  <!-- Shared GPU -->
+  <rect x="120" y="815" width="1360" height="195" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="146" y="850" font-size="22" letter-spacing="1" fill="#6d28d9">ONE GPU</text>
+
+  <rect x="180" y="880" width="480" height="96" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="420" y="922" text-anchor="middle" font-size="23" font-weight="bold" fill="#1e293b">XLA's buffers</text>
+  <text x="420" y="953" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">inputs, outputs, gradients</text>
+
+  <rect x="940" y="880" width="480" height="96" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1180" y="922" text-anchor="middle" font-size="23" font-weight="bold" fill="#1e293b">Solver's buffers</text>
+  <text x="1180" y="953" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">copies owned by the solver process</text>
+
+  <line x1="664" y1="928" x2="936" y2="928" stroke="#7c3aed" stroke-width="3" stroke-dasharray="8 6" marker-start="url(#arrow-gpu)" marker-end="url(#arrow-gpu)"/>
+  <text x="800" y="906" text-anchor="middle" font-size="17" fill="#6d28d9">device-to-device</text>
+  <text x="800" y="960" text-anchor="middle" font-size="17" fill="#6d28d9">via IPC mappings</text>
+
+  <!-- Pointers into GPU memory -->
+  <line x1="420" y1="724" x2="420" y2="877" stroke="#7c3aed" stroke-width="2" stroke-dasharray="3 5"/>
+  <line x1="1180" y1="724" x2="1180" y2="877" stroke="#7c3aed" stroke-width="2" stroke-dasharray="3 5"/>
+</svg>
