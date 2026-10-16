@@ -1,9 +1,8 @@
 """Smoke tests for the learned closure demo.
 
 Covers the solver Tesseract (forward, VJP) and the closure + solver composition.
-The solver is loaded in-process via ``Tesseract.from_tesseract_api`` so the tests
-run without Docker; the notebook serves the same solver over HTTP via
-``Tesseract.from_image``.
+The tests load the solver in-process via ``Tesseract.from_tesseract_api``, while
+the notebook serves it over HTTP via ``Tesseract.from_source``.
 """
 
 import sys

@@ -2,7 +2,7 @@
 
 # Creating Tesseracts
 
-This page walks through creating your own Tesseracts, starting from a basic example and building up to advanced patterns. We recommend reading the [Get Started page](tr-quickstart) first.
+This page walks through creating your own Tesseract: defining its schemas and endpoints, running and testing it, using arrays and nested data, and making it differentiable. We recommend reading the [Get Started page](tr-quickstart) first.
 
 ## Initialize a new Tesseract
 
@@ -19,7 +19,7 @@ $ tesseract init --name my_tesseract
 This creates three files:
 
 - `tesseract_api.py` — Python module defining the Tesseract's computations.
-- `tesseract_config.yaml` — metadata (name, version), build options (base image, custom build steps, external data), and more.
+- `tesseract_config.yaml` — metadata (name, version), how to install the Tesseract's requirements, and options for packaging it as a container image (base image, custom build steps, external data).
 - `tesseract_requirements.txt` — Python dependencies in [pip requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
 
 Use `--target-dir [DIRECTORY]` to create these files elsewhere. Other useful options:
@@ -96,40 +96,27 @@ Finally, set the name and version in `tesseract_config.yaml`:
 :end-before: build_config
 ```
 
-You're now ready to build your first Tesseract.
+(tr-create-run)=
 
-```{tip}
-Before building, you can test locally without containers using `tesseract-runtime`. See the [Debugging Guide](../how-to/debugging.md) for details.
-```
-
-## Build a Tesseract
-
-To build, run `tesseract build` from the directory containing `tesseract_api.py`:
+## Run your Tesseract
 
 % invisible-code-block: bash
 %
 % $ cp -r "$REPO_ROOT"/examples/helloworld/. .
 
-```bash
-$ tesseract build .
+To call your Tesseract while you work on it, load it with `Tesseract.from_source`. From the directory containing `tesseract_api.py`:
+
+```python
+>>> from tesseract_core import Tesseract
+>>>
+>>> with Tesseract.from_source("tesseract_api.py") as helloworld:
+...     helloworld.apply({"name": "Ozzy"})
+{'greeting': 'Hello Ozzy!'}
 ```
 
-The Tesseract name comes from `tesseract_config.yaml`. By default, the image is tagged with both the specified version (`1.0.0`) and `latest`, so you can reference it as `helloworld:1.0.0` or `helloworld:latest`.
+On first use, `from_source` creates a virtual environment in `.tesseract-venv` next to `tesseract_api.py` and installs the Tesseract runtime and the requirements from `tesseract_requirements.txt` into it. This needs [uv](https://docs.astral.sh/uv/getting-started/installation/). Later calls reuse the environment until the requirements change.
 
-### View built Tesseracts
-
-To list all locally available Tesseracts:
-
-```bash
-$ tesseract list
-┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID                  ┃ Tags                                      ┃ Name       ┃ Version ┃ Description         ┃
-┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
-│ sha256:d4bdc2c29eb1 │ ['helloworld:1.0.0', 'helloworld:latest'] │ helloworld │ 1.0.0   │ A sample Python app │
-└─────────────────────┴───────────────────────────────────────────┴────────────┴─────────┴─────────────────────┘
-```
-
-The output is a table of Tesseract images with their ID, tags, name, version, and description. For machine-readable output unaffected by rich formatting use `tesseract list --format json`.
+The Tesseract runs in a separate process that starts when the `with` block is entered and stops when it exits, so changes to `tesseract_api.py` take effect the next time you enter the block. To call the Tesseract from the command line or over HTTP instead, see [Interacting with Tesseracts](tr-interact).
 
 (testing-a-tesseract)=
 
@@ -143,10 +130,23 @@ A test case is a small JSON file. For the `helloworld` example, `test_cases/test
 :language: json
 ```
 
-Run it against a built image with `tesseract run ... test`, passing the spec as a file with the `@` prefix:
+From Python, pass the test case to the `test` method, which raises an `AssertionError` if the test fails:
+
+```python
+>>> import json
+>>>
+>>> with open("test_cases/test_apply.json") as f:
+...     test_case = json.load(f)
+>>>
+>>> with Tesseract.from_source("tesseract_api.py") as helloworld:
+...     helloworld.test(test_case)
+```
+
+From the command line, use `tesseract-runtime test` and pass the file with the `@` prefix. The environment that `from_source` created includes `tesseract-runtime`, which loads `tesseract_api.py` from the current directory unless `TESSERACT_API_PATH` says otherwise:
 
 ```bash
-$ tesseract run helloworld:latest test @test_cases/test_apply.json
+$ .tesseract-venv/bin/tesseract-runtime test @test_cases/test_apply.json
+{"status":"passed","message":"","endpoint":"apply"}
 ```
 
 The command prints a JSON result with a `status` of `"passed"`, `"failed"`, or `"error"`. It always exits with code 0 and reports the outcome in the payload, so a test runner must read `status` rather than the exit code.
@@ -156,21 +156,10 @@ A spec has a few more knobs:
 - **`atol` / `rtol`** — absolute and relative tolerances for numeric comparisons (defaults: `1e-8` and `1e-5`). Loosen these for endpoints whose outputs aren't bit-reproducible.
 - **`expected_exception`** (with optional **`expected_exception_regex`**) — assert that the endpoint _raises_ instead of returning. Give the exception's name (e.g. `"pydantic.ValidationError"`) and, optionally, a regex the message must match. Provide exactly one of `expected_outputs` or `expected_exception`.
 
-To test the Tesseract API directly from Python without building an image, which is convenient while iterating, use the SDK. It imports your `tesseract_api.py` in debug mode so the `test` endpoint is available:
-
-```python
-from tesseract_core import Tesseract
-
-tess = Tesseract.from_tesseract_api("./tesseract_api.py")
-tess.test({
-    "endpoint": "apply",
-    "payload": {"inputs": {"name": "Ozzy"}},
-    "expected_outputs": {"greeting": "Hello Ozzy!"},
-})  # raises AssertionError if the test fails
-```
+To run tests without starting a separate process, for example from pytest, `Tesseract.from_tesseract_api("tesseract_api.py")` imports the Tesseract into the current Python process and has the same `test` method. The Tesseract's requirements must then be installed in that process's environment.
 
 ```{note}
-Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../how-to/debugging.md) (`tesseract serve --debug`). `tesseract run ... test` and `Tesseract.from_tesseract_api(...)` enable it for you, a plain `tesseract serve` does not.
+Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../how-to/debugging.md). `Tesseract.from_source` and `Tesseract.from_tesseract_api` enable debug mode, and the `tesseract-runtime test` and `tesseract run ... test` commands always have the endpoint. A plain `tesseract-runtime serve` or `tesseract serve` does not expose it.
 ```
 
 Keeping a `test_cases/` directory next to each Tesseract and running every spec in CI is the pattern the [`cookiecutter-tesseract`](#building-a-multi-tesseract-project) template sets up for you.
@@ -328,5 +317,37 @@ Here, output `a` can be differentiated with respect to the scalar `x` and the ma
 ```
 
 Beyond marking fields, you also need to implement the derivative logic. With autodiff frameworks like JAX or PyTorch, these are usually one-liners. See [Differentiable Programming](tr-autodiff) for details on implementing `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
+
+## Package it as an image
+
+To share a Tesseract with people who don't have your environment, to deploy it, or to give it system dependencies that a Python environment can't provide, package it as a container image. This needs [Docker](#installation-docker). Run `tesseract build` from the directory containing `tesseract_api.py`:
+
+```bash
+$ tesseract build .
+```
+
+The image name comes from `tesseract_config.yaml`. By default, the image is tagged with both the specified version (`1.0.0`) and `latest`, so you can reference it as `helloworld:1.0.0` or `helloworld:latest`. Options that only apply to images, such as the base image, system packages, and data files, go in the `build_config` section of `tesseract_config.yaml` (see the [configuration reference](../reference/config.md)).
+
+To list all locally available Tesseract images:
+
+```bash
+$ tesseract list
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ ID                  ┃ Tags                                      ┃ Name       ┃ Version ┃ Description         ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ sha256:d4bdc2c29eb1 │ ['helloworld:1.0.0', 'helloworld:latest'] │ helloworld │ 1.0.0   │ A sample Python app │
+└─────────────────────┴───────────────────────────────────────────┴────────────┴─────────┴─────────────────────┘
+```
+
+The output is a table of Tesseract images with their ID, tags, name, version, and description. For machine-readable output unaffected by rich formatting use `tesseract list --format json`.
+
+To run the same test cases against the image, use `tesseract run`:
+
+```bash
+$ tesseract run helloworld:latest test @test_cases/test_apply.json
+{"status":"passed","message":"","endpoint":"apply"}
+```
+
+See [Interacting with Tesseracts](tr-interact) for the other ways to call an image, and [Deploying Tesseracts](../how-to/deploy.md) for sharing and running images on other machines.
 
 [^1]: "A Tesseract's input schema" refers to the input of its `apply` function. The other endpoints (`jacobian`, `jacobian_vector_product`, ...) are derivatives of `apply`, and their schemas are derived automatically.

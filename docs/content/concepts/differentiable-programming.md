@@ -239,6 +239,10 @@ computationally expensive than analytical methods or automatic differentiation. 
 For a full guide on finite difference algorithms and a complete example, see {doc}`/content/examples/building-blocks/finitediff`.
 ```
 
+### Checking gradient endpoints
+
+However a gradient endpoint is implemented, `check-gradients` can compare it against finite differences of `apply` at inputs of your choosing, with or without a container. See {doc}`/content/how-to/check-gradients`.
+
 ### Abstract Evaluation
 
 In some scenarios it can be useful to know what the shapes of arrays in the output of a Tesseract will be,
@@ -250,6 +254,8 @@ In order to do this, the {py:func}`abstract_eval <tesseract_core.runtime.app_cli
 can be implemented. This endpoint accepts the same inputs as the `apply` endpoint, except that
 array arguments are replaced by their shape and dtype (see {py:class}`ShapeDType <tesseract_core.runtime.ShapeDType>`).
 This makes it possible to infer output shapes from input shapes (and non-array arguments) before their actual data is known.
+
+Tesseract-JAX requires `abstract_eval` to use a Tesseract under JAX transformations such as `jit`, `grad`, and `vmap`, since JAX traces with shapes before any data exists.
 
 #### Example usage
 

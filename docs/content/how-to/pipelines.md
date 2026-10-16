@@ -1,6 +1,6 @@
 # Composing Tesseracts into Pipelines
 
-A single Tesseract packages one computation. Real work usually involves several components: a mesher feeds a solver, an encoder feeds a model, a simulation feeds a post-processor. This page is about the step _after_ you've built your Tesseracts, that is, calling them from your own code and chaining them into a larger workflow.
+A single Tesseract packages one computation. Real work usually involves several components: a mesher feeds a solver, an encoder feeds a model, a simulation feeds a post-processor. This page is about the step _after_ you've defined your Tesseracts, that is, calling them from your own code and chaining them into a larger workflow.
 
 Tesseract Core is deliberately unopinionated about what you build on top. A project that uses Tesseracts might be a training loop, an optimization routine, a notebook, a web service, or a full application, with as much or as little logic of its own as you like. What follows is the small amount of generic advice that applies regardless: _how to call and chain Tesseracts well_.
 
@@ -12,7 +12,7 @@ Every Tesseract exposes the same three interfaces: a [CLI, a REST API, and a Pyt
 
 ### If you're using JAX or PyTorch: use the framework bindings
 
-This is the recommended default when your surrounding code already lives in JAX or PyTorch. **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** and **[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)** wrap a Tesseract so it behaves like a native operation in that framework — traceable, and above all _differentiable_, so gradients flow through the containerized computation and into the rest of your program.
+This is the recommended default when your surrounding code already lives in JAX or PyTorch. **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** and **[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)** wrap a Tesseract so it behaves like a native operation in that framework — traceable, and above all _differentiable_, so gradients flow through the Tesseract's computation and into the rest of your program.
 
 Both expose the same one-function interface, `apply_tesseract(tesseract, inputs)`. With JAX:
 
@@ -22,11 +22,11 @@ import jax.numpy as jnp
 from tesseract_core import Tesseract
 from tesseract_jax import apply_tesseract
 
-t = Tesseract.from_image("vectoradd_jax")
+t = Tesseract.from_source("examples/vectoradd_jax/tesseract_api.py")
 t.serve()
 
 x = jnp.ones((1000,))
-y = jnp.ones((1000,))
+y = jnp.full((1000,), 2.0)
 
 def vector_sum(x, y):
     res = apply_tesseract(t, {"a": {"v": x}, "b": {"v": y}})
@@ -36,7 +36,7 @@ vector_sum(x, y)                  # call it like any JAX function
 jax.jit(vector_sum)(x, y)         # ... jit it
 jax.grad(vector_sum)(x, y)        # ... and differentiate through it
 
-t.teardown()                      # stop the container when you're done
+t.teardown()                      # stop the Tesseract when you're done
 ```
 
 The PyTorch equivalent integrates with autograd instead:
@@ -46,18 +46,18 @@ import torch
 from tesseract_core import Tesseract
 from tesseract_torch import apply_tesseract
 
-t = Tesseract.from_image("vectoradd_torch")
+t = Tesseract.from_source("examples/vectoradd_torch/tesseract_api.py")
 t.serve()
 
 x = torch.ones(1000, requires_grad=True)
-y = torch.ones(1000)
+y = torch.full((1000,), 2.0)
 
 res = apply_tesseract(t, {"a": {"v": x}, "b": {"v": y}})
 loss = res["vector_add"]["result"].sum()
 loss.backward()                   # gradients propagate back through the Tesseract
 print(x.grad)
 
-t.teardown()                      # stop the container when you're done
+t.teardown()                      # stop the Tesseract when you're done
 ```
 
 ```{tip}
@@ -72,16 +72,16 @@ When you're not inside JAX or PyTorch (a plain Python script, a service, a batch
 import numpy as np
 from tesseract_core import Tesseract
 
-with Tesseract.from_image("scaler") as scaler:
+with Tesseract.from_source("scaler/tesseract_api.py") as scaler:
     result = scaler.apply({"vector": np.array([1.0, 2.0, 3.0]), "scale_factor": 2.0})
 
 print(result["scaled_vector"])   # -> [2. 4. 6.]
 ```
 
-[`Tesseract.from_image`](#tesseract_core.Tesseract.from_image) references a built image by name; the `with` block starts the container and tears it down on exit. `apply` takes a dict of inputs and returns a dict of outputs: NumPy in, NumPy out, no manual serialization.
+[`Tesseract.from_source`](#tesseract_core.Tesseract.from_source) takes the path to a `tesseract_api.py`, and the `with` block starts the Tesseract in a separate process and stops it on exit. On first use, it builds an environment for the Tesseract from its `tesseract_config.yaml`. `apply` takes a dict of inputs and returns a dict of outputs: NumPy in, NumPy out, no manual serialization.
 
 ```{note}
-To call a Tesseract that already runs elsewhere (a shared service, a GPU node, a remote deployment), use [`Tesseract.from_url(...)`](#tesseract_core.Tesseract.from_url) instead of `from_image`. The calling code is otherwise identical, so a workflow developed locally moves to distributed execution without a rewrite.
+Once a Tesseract is packaged as a container image, [`Tesseract.from_image(...)`](#tesseract_core.Tesseract.from_image) is a drop-in replacement for `from_source`. To call a Tesseract that already runs elsewhere (a shared service, a GPU node, a remote deployment), use [`Tesseract.from_url(...)`](#tesseract_core.Tesseract.from_url). The calling code is otherwise identical, so a workflow developed locally moves to distributed execution without a rewrite.
 ```
 
 ## Chaining Tesseracts
@@ -91,8 +91,8 @@ A Tesseract's outputs are ordinary values (a dict of arrays), so you feed them i
 With the SDK:
 
 ```python
-with Tesseract.from_image("scaler") as scaler, \
-     Tesseract.from_image("normalizer") as normalizer:
+with Tesseract.from_source("scaler/tesseract_api.py") as scaler, \
+     Tesseract.from_source("normalizer/tesseract_api.py") as normalizer:
     scaled = scaler.apply({"vector": vector, "scale_factor": 2.0})
     normalized = normalizer.apply({"vector": scaled["scaled_vector"]})
 ```
@@ -154,5 +154,5 @@ Take the parts that fit your project and leave the rest. For anything beyond a h
 - [Interacting with Tesseracts](../tutorials/interact.md) — the full SDK, CLI, and REST interfaces.
 - [Differentiable Programming](../concepts/differentiable-programming.md) — propagating gradients through a composed, multi-Tesseract program.
 - [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) — the framework bindings.
-- [Performance](../concepts/performance.md) — minimizing container and data-transfer overhead in chained workflows.
-- Questions? Ask on the [Tesseract User Forums](https://si-tesseract.discourse.group/).
+- [Performance](../concepts/performance.md) — minimizing process-boundary and data-transfer overhead in chained workflows.
+- Questions? Ask on the [Tesseract User Forum](https://si-tesseract.discourse.group/).

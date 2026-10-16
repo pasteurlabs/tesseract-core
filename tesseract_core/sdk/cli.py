@@ -335,7 +335,7 @@ def build_image(
         ),
     ] = False,
 ) -> None:
-    """Build a new Tesseract from a context directory.
+    """Build a container image from a Tesseract source directory.
 
     The passed directory must contain the files `tesseract_api.py` and `tesseract_config.yaml`
     (can be created via `tesseract init`).
@@ -678,11 +678,13 @@ def serve(
         ),
     ] = None,
 ) -> None:
-    """Serve one or more Tesseract images.
+    """Serve a Tesseract image in a container.
 
-    A successful serve command will display on standard output a JSON object
-    with the Tesseract container name, which is required to run the teardown
-    command and its respective port.
+    On success, prints a JSON object with the container name, which
+    `tesseract teardown` needs, and the port.
+
+    To serve a Tesseract without building an image, run `tesseract-runtime serve`
+    from its source directory instead.
     """
     output_format: str | None = _enum_to_val(output_format)
 
@@ -845,7 +847,7 @@ def apidoc(
         typer.Option(help="Open the browser after serving the OpenAPI schema"),
     ] = True,
 ) -> None:
-    """Serve the OpenAPI schema for a Tesseract."""
+    """Serve the OpenAPI schema for a Tesseract image."""
     host_ip = "127.0.0.1"
     container_name, container = engine.serve(image_name, host_ip=host_ip)
     try:
@@ -1191,9 +1193,13 @@ def run_container(
         ),
     ] = False,
 ) -> None:
-    """Execute a command in a Tesseract.
+    """Execute a command in a Tesseract image.
 
-    This command starts a Tesseract instance and executes the given command.
+    This command starts a container from the given image, executes the command
+    in it, and removes the container afterwards.
+
+    To execute a command without building an image, run `tesseract-runtime <cmd>`
+    from the Tesseract's source directory instead.
     """
     cmd: str | None = _enum_to_val(cmd)
     output_format: str | None = _enum_to_val(output_format)
