@@ -59,6 +59,14 @@ OutputFormat: TypeAlias = engine.OutputFormat
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
 
+# Keep in sync with the runtime hint without requiring runtime dependencies.
+_SERVER_ERROR_HINT = (
+    "The traceback is in the server log. To include it in responses, enable "
+    "debug mode on the server (TESSERACT_DEBUG=1). See "
+    "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+    "content/how-to/debugging.html#debug-mode"
+)
+
 
 def _scratch_dirs(
     input_path: str | Path | None,
@@ -1985,9 +1993,15 @@ class HTTPClient:
                 )
 
         if not response.ok:
-            raise RuntimeError(
-                f"Error {response.status_code} from Tesseract: {response.text}"
-            )
+            message = f"Error {response.status_code} from Tesseract: {response.text}"
+            if (
+                response.status_code == requests.codes.internal_server_error
+                and _SERVER_ERROR_HINT not in response.text
+            ):
+                # Older runtimes return a bare 500. Preserve the original body,
+                # including any traceback, and add the same next step locally.
+                message += f"\n\n{_SERVER_ERROR_HINT}"
+            raise RuntimeError(message)
 
         data = from_json(response.content)
 
