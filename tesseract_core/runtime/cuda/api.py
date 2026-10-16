@@ -16,11 +16,13 @@ this without a real GPU, replace the functions in this module wholesale (see the
 
 import ctypes
 import functools
+import uuid
 from typing import Any
 
 from tesseract_core.runtime.cuda import loader
 
 # cudaMemcpyKind values.
+MEMCPY_HOST_TO_DEVICE = 1
 MEMCPY_DEVICE_TO_HOST = 2
 MEMCPY_DEVICE_TO_DEVICE = 3
 
@@ -94,6 +96,14 @@ def get_device() -> int:
     return device.value
 
 
+@functools.cache
+def device_count() -> int:
+    """Return the number of CUDA devices visible to this process."""
+    count = ctypes.c_int()
+    _check(_get_cudart().cudaGetDeviceCount(ctypes.byref(count)), "cudaGetDeviceCount")
+    return count.value
+
+
 def malloc(nbytes: int) -> int:
     """Allocate ``nbytes`` of device memory; return its device pointer."""
     ptr = ctypes.c_void_p()
@@ -124,6 +134,19 @@ def memcpy_device_to_device(dst: int, src: int, nbytes: int) -> None:
             ctypes.c_int(MEMCPY_DEVICE_TO_DEVICE),
         ),
         "cudaMemcpy (device->device)",
+    )
+
+
+def memcpy_host_to_device(dst: int, host_ptr: int, nbytes: int) -> None:
+    """Copy ``nbytes`` from host memory at ``host_ptr`` to a device pointer."""
+    _check(
+        _get_cudart().cudaMemcpy(
+            ctypes.c_void_p(dst),
+            ctypes.c_void_p(host_ptr),
+            ctypes.c_size_t(nbytes),
+            ctypes.c_int(MEMCPY_HOST_TO_DEVICE),
+        ),
+        "cudaMemcpy (host->device)",
     )
 
 
@@ -225,16 +248,36 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     return base.value, size.value
 
 
+def _device_handle(device: int) -> int:
+    """Return the driver API's handle (CUdevice) for CUDA device ``device``."""
+    handle = ctypes.c_int()
+    ret = _get_driver().cuDeviceGet(ctypes.byref(handle), device)
+    if ret != 0:
+        raise RuntimeError(f"cuDeviceGet failed with error code {ret}")
+    return handle.value
+
+
+@functools.cache
+def device_uuid(device: int) -> str:
+    """Return the UUID of CUDA device ``device``, e.g. ``"5f3b2c1a-..."``.
+
+    Processes may number the same device differently (a container given only
+    the host's GPU 2 calls it 0), but they all see the same UUID.
+    """
+    driver = _get_driver()
+    get_uuid = getattr(driver, "cuDeviceGetUuid_v2", None) or driver.cuDeviceGetUuid
+    raw = (ctypes.c_char * 16)()
+    ret = get_uuid(ctypes.byref(raw), _device_handle(device))
+    if ret != 0:
+        raise RuntimeError(f"cuDeviceGetUuid failed with error code {ret}")
+    return str(uuid.UUID(bytes=raw.raw))
+
+
 @functools.cache
 def device_total_memory(device: int) -> int:
     """Return the total memory of CUDA device ``device`` in bytes."""
-    driver = _get_driver()
-    handle = ctypes.c_int()
-    ret = driver.cuDeviceGet(ctypes.byref(handle), device)
-    if ret != 0:
-        raise RuntimeError(f"cuDeviceGet failed with error code {ret}")
     total = ctypes.c_size_t()
-    ret = driver.cuDeviceTotalMem_v2(ctypes.byref(total), handle.value)
+    ret = _get_driver().cuDeviceTotalMem_v2(ctypes.byref(total), _device_handle(device))
     if ret != 0:
         raise RuntimeError(f"cuDeviceTotalMem failed with error code {ret}")
     return total.value

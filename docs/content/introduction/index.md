@@ -86,7 +86,6 @@ If you use Tesseract in your research, please cite:
 :hidden:
 
 installation.md
-Tesseract User Forum <https://si-tesseract.discourse.group/>
 Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 

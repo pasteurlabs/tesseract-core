@@ -21,6 +21,7 @@ from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     EncodingContext,
     HTTPClient,
+    RequestedEncoding,
     _close_encoding_context,
     _decode_array,
     _encode_array,
@@ -529,9 +530,9 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     ],
 )
 def test_accept_header(encoding, expected):
-    from tesseract_core.sdk.tesseract import _RequestedEncoding
+    from tesseract_core.sdk.tesseract import RequestedEncoding
 
-    assert _RequestedEncoding(**encoding).accept_header() == expected
+    assert RequestedEncoding(**encoding).accept_header() == expected
 
 
 # What runtimes of each age advertise in their OpenAPI schema
@@ -557,17 +558,14 @@ _SCHEMA_CURRENT = {
         (_SCHEMA_BEFORE_1_13, {"gpu_transport": "cuda_ipc"}, ValueError),
         (_SCHEMA_BEFORE_1_13, {"compression": "lz4"}, ValueError),
         # Runtimes 1.13 and 1.14 parse parameters without advertising which
-        # values they accept, so the server gets the final say
+        # values they accept, so the server gets the final say. GPU transports
+        # are the exception, because these runtimes name GPUs in an older format
         (
             _SCHEMA_1_13,
             {"gpu_transport": "none"},
             "application/*; gpu_transport=none",
         ),
-        (
-            _SCHEMA_1_13,
-            {"gpu_transport": "cuda_ipc"},
-            "application/*; gpu_transport=cuda_ipc",
-        ),
+        (_SCHEMA_1_13, {"gpu_transport": "cuda_ipc"}, ValueError),
         (_SCHEMA_1_13, {"output_format": "msgpack"}, ValueError),
         (_SCHEMA_CURRENT, {"gpu_transport": "cuda_ipc"}, ValueError),
         (
@@ -579,19 +577,45 @@ _SCHEMA_CURRENT = {
 )
 def test_encoding_is_fit_to_what_the_server_advertises(schema, encoding, expected):
     from tesseract_core.sdk.tesseract import (
+        RequestedEncoding,
         ServerCapabilities,
         _fit_encoding_to_server,
-        _RequestedEncoding,
     )
 
     capabilities = ServerCapabilities.from_openapi_schema(schema)
-    requested = _RequestedEncoding(**encoding)
+    requested = RequestedEncoding(**encoding)
     if expected is ValueError:
         with pytest.raises(ValueError):
             _fit_encoding_to_server(requested, capabilities)
     else:
         fitted = _fit_encoding_to_server(requested, capabilities)
         assert fitted.accept_header() == expected
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [
+        (_SCHEMA_BEFORE_1_13, None),
+        (_SCHEMA_1_13, "application/*; gpu_transport=none"),
+        (_SCHEMA_CURRENT, "application/*; gpu_transport=none"),
+    ],
+)
+def test_calls_request_no_gpu_transport_unless_asked(mocker, schema, expected):
+    # Runtimes 1.13 and 1.14 use the GPU transport they serve unless a request
+    # names one, so calls that do not ask for a transport request "none"
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    tess = Tesseract.from_url("localhost")
+    tess._client.server_capabilities = ServerCapabilities.from_openapi_schema(schema)
+    response = mocker.Mock(ok=True, status_code=200, content=b"{}", headers={})
+    request = mocker.patch.object(
+        tess._client._session, "request", return_value=response
+    )
+
+    tess.apply({})
+
+    headers = request.call_args.kwargs.get("headers") or {}
+    assert headers.get("Accept") == expected
 
 
 def test_compression_warns_when_the_server_may_ignore_it():
@@ -615,6 +639,27 @@ def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_modul
         dummy_tesseract_module, gpu_transport="cuda_ipc"
     )
     assert local.server_capabilities is None
+
+
+def test_in_process_gpu_transport_is_the_one_it_was_created_with(
+    dummy_tesseract_module,
+):
+    # Integrations hand an in-process Tesseract GPU arrays as they are only if it
+    # was created to accept them, since only its creator knows whether the
+    # endpoints can handle them.
+    default = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert default.resolve_gpu_transport() == "none"
+    with pytest.raises(ValueError, match="does not accept gpu_transport='cuda_ipc'"):
+        default.with_encoding(gpu_transport="cuda_ipc")
+
+    enabled = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert enabled.resolve_gpu_transport() == "cuda_ipc"
+    assert enabled.current_encoding.gpu_transport == "cuda_ipc"
+    disabled = enabled.with_encoding(gpu_transport="none")
+    assert disabled.resolve_gpu_transport() == "none"
+    assert disabled.current_encoding.gpu_transport == "none"
 
 
 def test_HTTPClient_only_decodes_what_the_server_marks_as_an_array(mocker):
@@ -1463,11 +1508,7 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
     mock_pool = MagicMock()
     mock_slot = MagicMock(spec=BinrefSlot)
 
-    mock_cuda_mod = MagicMock()
-    monkeypatch.setattr(
-        "tesseract_core.sdk.tesseract._import_cuda_ipc",
-        lambda: mock_cuda_mod,
-    )
+    mock_transport = MagicMock()
 
     orig_unlink = Path.unlink
 
@@ -1483,7 +1524,8 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
         binref_pool=mock_pool,
         written_files=[f1, f2],
         checked_out_slots=[mock_slot],
-        exported_cuda_ipc=True,
+        device_transport=mock_transport,
+        device_exports=mock_transport.new_exports(),
     )
 
     with pytest.raises(OSError, match="permission denied"):
@@ -1491,8 +1533,11 @@ def test_encoding_context_partial_failure_resilience(tmp_path, monkeypatch):
 
     assert not f2.exists()
     mock_pool.checkin.assert_called_once_with(mock_slot)
-    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
-    assert ctx.exported_cuda_ipc is False
+    mock_transport.release.assert_called_once_with(
+        mock_transport.new_exports.return_value
+    )
+    assert ctx.device_transport is None
+    assert ctx.device_exports is None
 
 
 def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
@@ -1515,18 +1560,15 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "unlink", failing_unlink)
 
-    mock_cuda_mod = MagicMock()
-    monkeypatch.setattr(
-        "tesseract_core.sdk.tesseract._import_cuda_ipc",
-        lambda: mock_cuda_mod,
-    )
+    mock_transport = MagicMock()
 
     ctx = EncodingContext(
         input_dir=tmp_path,
         binref_pool=mock_pool,
         written_files=[f1],
         checked_out_slots=[mock_slot],
-        exported_cuda_ipc=True,
+        device_transport=mock_transport,
+        device_exports=mock_transport.new_exports(),
     )
 
     exception_group_cls = getattr(builtins, "ExceptionGroup", None)
@@ -1538,17 +1580,16 @@ def test_encoding_context_multiple_errors_collected(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match="Multiple errors occurred"):
             _close_encoding_context(ctx)
 
-    mock_cuda_mod.release_pinned_ipc_exports.assert_called_once()
-    assert ctx.exported_cuda_ipc is False
+    mock_transport.release.assert_called_once_with(
+        mock_transport.new_exports.return_value
+    )
+    assert ctx.device_transport is None
+    assert ctx.device_exports is None
 
 
 def test_http_client_binref_payload(tmp_path):
     """HTTPClient transmits payloads with binref encoding when output_format is json+binref."""
-    client = HTTPClient(
-        "http://localhost:8000",
-        output_format="json+binref",
-        input_path=tmp_path,
-    )
+    client = HTTPClient("http://localhost:8000", input_path=tmp_path)
     arr = np.array([1.0, 2.0], dtype=np.float32)
 
     mock_resp = Mock(spec=requests.Response)
@@ -1558,7 +1599,12 @@ def test_http_client_binref_payload(tmp_path):
     client._session.request = Mock(return_value=mock_resp)
 
     payload = {"disk": arr}
-    res = client._request("apply", method="POST", payload=payload)
+    res = client._request(
+        "apply",
+        method="POST",
+        payload=payload,
+        encoding=RequestedEncoding(output_format="json+binref"),
+    )
     assert res == {"result": "ok"}
 
     sent_body = orjson.loads(client._session.request.call_args[1]["data"])
@@ -1787,3 +1833,211 @@ def test_HTTPClient_timeout_fires(free_port):
         shutdown.set()
         httpd.shutdown()
         server_thread.join(timeout=5)
+
+
+# ── Choosing a GPU transport, with the server stubbed out ───────────────
+
+
+def _client_offering(gpu_transports):
+    """An HTTPClient whose server offers ``gpu_transports``, without a server."""
+    from tesseract_core.sdk.tesseract import ServerCapabilities
+
+    client = HTTPClient("http://127.0.0.1:1")
+    client.__dict__["server_capabilities"] = ServerCapabilities(
+        output_formats=("json",), gpu_transports=gpu_transports, compressions=None
+    )
+    return client
+
+
+def _fake_transport_check(monkeypatch, start=None):
+    """Replace the GPU side of the transport check with a no-op.
+
+    ``start`` replaces the client's export step, e.g. to make it fail.
+    """
+    from types import SimpleNamespace
+
+    import tesseract_core.sdk.tesseract as sdk
+
+    fake_check = SimpleNamespace(
+        start_transport_check=start or (lambda transport: ({}, b"", lambda: None)),
+        finish_transport_check=lambda transport, array, expected: None,
+    )
+    monkeypatch.setattr(sdk, "_import_runtime", lambda module, feature: fake_check)
+
+
+def _answer(status_code, content=b"", headers=None):
+    return Mock(
+        status_code=status_code,
+        ok=status_code < 400,
+        text=content.decode(),
+        content=content,
+        headers=headers or {},
+    )
+
+
+def test_transport_check_is_run_once_unless_the_server_answers_with_an_error(
+    monkeypatch,
+):
+    # An error answer (a proxy's 502 while the server is busy, say) says nothing
+    # about whether the transport works, so it raises rather than sticking for the
+    # client's lifetime. Any other answer is kept.
+    _fake_transport_check(monkeypatch)
+    answers = [_answer(502, b"Bad Gateway"), _answer(200, b'{"ok": true}')]
+    sent = []
+
+    def send(*args):
+        sent.append(args)
+        return answers[len(sent) - 1]
+
+    client = _client_offering(("none", "cuda_ipc"))
+    monkeypatch.setattr(client, "_send", send)
+
+    with pytest.raises(RuntimeError, match="Bad Gateway"):
+        client.check_gpu_transport("cuda_ipc")
+    assert client.check_gpu_transport("cuda_ipc") == (True, None)
+    assert client.check_gpu_transport("cuda_ipc") == (True, None)
+    assert len(sent) == 2
+
+
+def test_transport_check_failing_in_this_process_is_not_run_again(monkeypatch):
+    # What keeps this process from exporting GPU memory (no CUDA, no runtime
+    # extra) does not go away while it runs.
+    attempts = []
+
+    def start(transport):
+        attempts.append(transport)
+        raise RuntimeError("no CUDA device")
+
+    _fake_transport_check(monkeypatch, start=start)
+    client = _client_offering(("none", "cuda_ipc"))
+    for _ in range(2):
+        works, reason = client.check_gpu_transport("cuda_ipc")
+        assert not works
+        assert "no CUDA device" in reason
+    assert attempts == ["cuda_ipc"]
+
+
+def test_transport_the_server_does_not_offer_is_not_checked(monkeypatch):
+    # Checking would export GPU memory for nothing, and the server's refusal
+    # would read as a problem with this process rather than with the request.
+    _fake_transport_check(monkeypatch, start=Mock(side_effect=AssertionError))
+    client = _client_offering(("none",))
+    with pytest.raises(ValueError, match="does not accept gpu_transport='cuda_ipc'"):
+        client.resolve_gpu_transport(RequestedEncoding(gpu_transport="cuda_ipc"))
+
+
+def test_client_names_the_check_reply_as_done(monkeypatch):
+    # The server keeps the array it replies with until the client is done with
+    # it, like the arrays of a response.
+    _fake_transport_check(monkeypatch)
+    client, sent = _recording_client([""])
+    send = client._send
+
+    def answer_check(url, *args):
+        if url.endswith("/check_gpu_transport"):
+            return _answer(200, b'{"ok": true}', {"Tesseract-Exports": "check1"})
+        return send(url, *args)
+
+    monkeypatch.setattr(client, "_send", answer_check)
+    assert client.check_gpu_transport("cuda_ipc") == (True, None)
+    _call(client, gpu_transport=None)
+    assert sent[0]["Tesseract-Exports-Done"] == "check1"
+
+
+def test_transport_check_of_one_server_does_not_wait_for_another(monkeypatch):
+    # A check waits for the server to answer, which takes as long as whatever
+    # that server is busy with, so it must not hold up checks of other servers.
+    import threading
+
+    busy, idle = _client_offering(("cuda_ipc",)), _client_offering(("cuda_ipc",))
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_check(transport):
+        entered.set()
+        release.wait(timeout=10)
+        return True, None
+
+    monkeypatch.setattr(busy, "_run_transport_check", slow_check)
+    monkeypatch.setattr(idle, "_run_transport_check", lambda transport: (True, None))
+    waiting = threading.Thread(target=busy.check_gpu_transport, args=("cuda_ipc",))
+    waiting.start()
+    try:
+        assert entered.wait(timeout=10)
+        done = threading.Event()
+        threading.Thread(
+            target=lambda: (idle.check_gpu_transport("cuda_ipc"), done.set())
+        ).start()
+        assert done.wait(timeout=5), "the idle server's check waited for the busy one"
+    finally:
+        release.set()
+        waiting.join(timeout=10)
+
+
+def test_transport_fallback_warning_points_at_the_caller(monkeypatch):
+    tess = Tesseract.from_url("http://127.0.0.1:1")
+    client = tess._client
+    client.__dict__.update(_client_offering(("none", "cuda_ipc")).__dict__)
+    monkeypatch.setattr(
+        client, "check_gpu_transport", lambda transport: (False, "no shared GPU")
+    )
+    with pytest.warns(UserWarning, match="no shared GPU") as record:
+        assert tess.resolve_gpu_transport() == "none"
+    assert record[0].filename == __file__
+
+
+def _recording_client(answers):
+    """An HTTPClient whose requests are recorded and answered from ``answers``."""
+    client = _client_offering(("none", "cuda_ipc"))
+    sent = []
+
+    def request(**kwargs):
+        sent.append(kwargs.get("headers") or {})
+        answer = answers[len(sent) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return _answer(200, b"{}", {"Tesseract-Exports": answer})
+
+    client._session.request = request
+    return client, sent
+
+
+def _call(client, gpu_transport="cuda_ipc"):
+    client._request(
+        "apply",
+        "POST",
+        {"inputs": {}},
+        encoding=RequestedEncoding(gpu_transport=gpu_transport),
+    )
+
+
+def test_client_names_the_responses_it_has_decoded():
+    # The server keeps a response's GPU exports until the client says it is done
+    # with them, which it does on its next request, or when it closes.
+    client, sent = _recording_client(["id1", "id2", ""])
+    _call(client)
+    _call(client)
+    client.close()
+    assert [headers.get("Tesseract-Exports-Done") for headers in sent] == [
+        "",
+        "id1",
+        "id2",
+    ]
+
+
+def test_client_without_a_gpu_transport_sends_no_export_names():
+    client, sent = _recording_client([""])
+    _call(client, gpu_transport=None)
+    assert "Tesseract-Exports-Done" not in sent[0]
+
+
+def test_export_names_are_sent_again_after_a_failed_request():
+    client, sent = _recording_client(["id1", RuntimeError("connection refused"), "id3"])
+    _call(client)
+    with pytest.raises(RuntimeError, match="connection refused"):
+        _call(client)
+    _call(client)
+    assert [headers.get("Tesseract-Exports-Done") for headers in sent] == [
+        "",
+        "id1",
+        "id1",
+    ]

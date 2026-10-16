@@ -132,6 +132,7 @@ Multiple workers are useful when:
 Stick with a single worker when:
 
 - **GPU-bound computations** — GPUs typically can't run multiple processes efficiently. If your Tesseract uses a GPU, multiple workers will compete for GPU resources and may cause out-of-memory errors or slowdowns.
+- **GPU transports** — Serving a GPU transport other than `none` (such as `cuda_ipc`) requires a single worker.
 - **High memory usage** — Each worker loads its own copy of the model/data into memory. If your Tesseract uses 4GB of RAM, 4 workers will use 16GB total.
 - **Stateful operations** — Workers don't share state. If your computation requires shared state between requests, multiple workers won't work correctly.
 

@@ -11,8 +11,8 @@ Universal components for differentiable scientific computing 📦
 [API reference](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/reference/tesseract-api/) |
 [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) |
 [Blog](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/) |
-[Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [User Forum](https://si-tesseract.discourse.group/) |
+[Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
