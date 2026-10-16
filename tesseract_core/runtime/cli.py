@@ -722,6 +722,27 @@ def _configure_required_file_load() -> None:
         tesseract_core.runtime.experimental.SKIP_REQUIRED_FILE_CHECK = True
 
 
+def _apply_global_options() -> None:
+    """Apply the global config options in argv before any command is registered.
+
+    Typer only parses them when the app runs, which is after the Tesseract API
+    has been imported and the debugger would have to be attached.
+    """
+    command = typer.main.get_command(app)
+    try:
+        ctx = command.make_context(
+            "tesseract-runtime",
+            sys.argv[1:],
+            resilient_parsing=True,
+            auto_envvar_prefix="TESSERACT_RUNTIME",
+        )
+    except Exception:  # noqa: BLE001 - reported by the later parse
+        # Malformed options raise Click's exceptions, which Typer vendors under
+        # a private module, so they can't be caught by name.
+        return
+    main_callback(**ctx.params)
+
+
 def main() -> None:
     """Entrypoint for the command line interface."""
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
@@ -743,6 +764,7 @@ def main() -> None:
             sys.exit(1)
 
         _configure_required_file_load()
+        _apply_global_options()
 
         # Attach the debugger before the Tesseract API is imported below (during
         # command registration) so module-level code can be debugged too. The
