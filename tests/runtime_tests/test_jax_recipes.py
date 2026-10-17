@@ -278,6 +278,29 @@ class TestCacheCorrectness:
                 np.asarray(grad_hit_off[k]), np.asarray(grad_miss_off[k])
             ), "hit and miss inputs produced identical gradients; test is vacuous"
 
+    def test_cache_is_not_shared_between_functions(self):
+        # Two Tesseracts in one process, evaluated at the same inputs, must
+        # each get their own backward pass.
+        InputSchema, apply_f = _build_api()
+
+        @eqx.filter_jit
+        def apply_g(inputs):
+            return {"y": 3.0 * inputs["a"]["v"], "n": jnp.float32(0.0)}
+
+        inp = _make_inputs(InputSchema)
+        ct = {"y": np.ones(3, dtype=np.float32)}
+        expected = jax_vjp(apply_f, inp, {"a.v"}, {"y"}, ct)
+
+        set_jax_vjp_cache_size(2)
+        try:
+            jax_apply(apply_f, inp)
+            jax_apply(apply_g, inp)
+            got = jax_vjp(apply_f, inp, {"a.v"}, {"y"}, ct)
+        finally:
+            set_jax_vjp_cache_size(0)
+
+        np.testing.assert_allclose(np.asarray(got["a.v"]), np.asarray(expected["a.v"]))
+
     def test_cache_hit_actually_engages(self):
         # Sanity check that the cache fills and is read back, not silently
         # bypassed.
@@ -370,8 +393,11 @@ class TestCacheWithDeviceArrays:
         jax_recipes._jax_vjp_cache.put(_cache_key(tree), value)
 
     @staticmethod
-    def _lookup(tree):
-        return jax_recipes._jax_vjp_cache.get(_cache_key(tree))
+    def _lookup(tree, apply_jit=None):
+        key = _cache_key(tree)
+        return jax_recipes._jax_vjp_cache.get(
+            key if apply_jit is None else (apply_jit, key)
+        )
 
     def test_key_fingerprints_arrays_without_copying_them(self):
         a = {"x": jnp.array([1.0, 2.0])}
@@ -481,8 +507,8 @@ class TestCacheWithDeviceArrays:
         jax_recipes._set_jax_vjp_cache_size(1)
         try:
             jax_apply(apply_jit, inputs(0.0))
-            hit = self._lookup(as_jax_arrays(inputs(0.0).model_dump()))
-            miss = self._lookup(as_jax_arrays(inputs(0.5).model_dump()))
+            hit = self._lookup(as_jax_arrays(inputs(0.0).model_dump()), apply_jit)
+            miss = self._lookup(as_jax_arrays(inputs(0.5).model_dump()), apply_jit)
             got = jax_vjp(apply_jit, inputs(0.5), {"a.v", "b.v"}, {"y"}, ct)
         finally:
             jax_recipes._set_jax_vjp_cache_size(0)
