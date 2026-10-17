@@ -48,6 +48,39 @@ def simple_inputs():
     )
 
 
+def dict_apply(inputs: SimpleInputSchema) -> dict:
+    """Same as linear_apply, returning a dict as apply is allowed to."""
+    return {"result": inputs.a * inputs.s + inputs.b}
+
+
+@pytest.mark.parametrize("algorithm", ["central", "forward", "stochastic"])
+def test_apply_returning_a_dict(simple_inputs, algorithm):
+    kwargs = dict(algorithm=algorithm, eps=1e-6)
+    jac = finite_difference_jacobian(
+        dict_apply, simple_inputs, {"a"}, {"result"}, **kwargs
+    )
+    jvp = finite_difference_jvp(
+        dict_apply,
+        simple_inputs,
+        {"a"},
+        {"result"},
+        {"a": np.array([1.0, 0.0, 0.0])},
+        **kwargs,
+    )
+    vjp = finite_difference_vjp(
+        dict_apply,
+        simple_inputs,
+        {"a"},
+        {"result"},
+        {"result": np.array([1.0, 1.0, 1.0])},
+        **kwargs,
+    )
+
+    assert np.allclose(jac["result"]["a"], 2.0 * np.eye(3), atol=1e-4)
+    assert np.allclose(jvp["result"], [2.0, 0.0, 0.0], atol=1e-4)
+    assert np.allclose(vjp["a"], [2.0, 2.0, 2.0], atol=1e-4)
+
+
 class TestFiniteDifferenceJacobian:
     def test_linear_jacobian_central(self, simple_inputs):
         """Test Jacobian computation with central differences on a linear function."""
