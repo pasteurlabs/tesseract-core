@@ -11,7 +11,7 @@ from types import ModuleType
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, computed_field
 
 from tesseract_core.runtime import Array, Differentiable, Float32
 from tesseract_core.runtime.core import create_endpoints
@@ -161,6 +161,33 @@ def test_apply_endpoint(testmodule):
     inputs = EndpointSchema.model_validate({"inputs": test_input})
     result = apply_endpoint(inputs)
     np.testing.assert_equal(result.model_dump(), test_output)
+
+
+def test_apply_returns_model_with_computed_field():
+    class _InputSchema(BaseModel):
+        x: Differentiable[Array[(3,), Float32]]
+
+    class _OutputSchema(BaseModel):
+        y: Differentiable[Array[(3,), Float32]]
+
+        @computed_field
+        @property
+        def total(self) -> float:
+            return float(self.y.sum())
+
+    class FakeModule(ModuleType):
+        InputSchema = _InputSchema
+        OutputSchema = _OutputSchema
+
+        def apply(self, inputs):
+            return _OutputSchema(y=2 * inputs.x)
+
+    endpoints = create_endpoints(FakeModule("fake"))
+    apply_endpoint, EndpointSchema, _ = _find_endpoint(endpoints, "apply")
+
+    inputs = EndpointSchema.model_validate({"inputs": {"x": np.ones(3)}})
+    result = apply_endpoint(inputs)
+    assert result.model_dump()["total"] == 6.0
 
 
 def test_apply_returns_dict(testmodule):
