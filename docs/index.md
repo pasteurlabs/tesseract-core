@@ -39,9 +39,9 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 :::
 
 :::{div} landing-cta
-{bdg-ref-primary-line}`Get Started <content/tutorials/get-started>`
+{bdg-ref-primary-line}`Get started <content/tutorials/get-started>`
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
-{bdg-ref-primary-line}`API Reference <content/reference/tesseract-api>`
+{bdg-ref-primary-line}`API reference <content/reference/tesseract-api>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
 
@@ -236,7 +236,7 @@ $ tesseract run my-tesseract apply \
 :::::::
 
 :::{div} landing-cta
-{bdg-ref-primary-line}`Get Started <content/tutorials/get-started>`
+{bdg-ref-primary-line}`Get started <content/tutorials/get-started>`
 {bdg-ref-primary-line}`When to use Tesseract <content/concepts/when-to-use>`
 :::
 
@@ -312,7 +312,7 @@ behind one Tesseract interface, so a single harness can compare their gradients 
 :::{div} landing-divider
 :::
 
-## The Tesseract Ecosystem
+## The Tesseract ecosystem
 
 :::{div} section-intro
 Tesseract Core is the foundation. Additional packages extend its capabilities.
@@ -356,7 +356,7 @@ and [cookiecutter-tesseract](https://github.com/pasteurlabs/cookiecutter-tessera
 :::{div} landing-divider
 :::
 
-## Get Involved
+## Get involved
 
 :::{div} section-intro
 Wrap your solver or model as a Tesseract, or compose existing ones into a new pipeline.
@@ -377,10 +377,10 @@ Wrap your solver or model as a Tesseract, or compose existing ones into a new pi
 :::{grid-item}
 **Project**
 
-- {doc}`Get Started <content/tutorials/get-started>`
+- {doc}`Get started <content/tutorials/get-started>`
 - {doc}`Installation <content/introduction/installation>`
-- {doc}`API Reference <content/reference/tesseract-api>`
-- [JOSS Paper](https://doi.org/10.21105/joss.08385)
+- {doc}`API reference <content/reference/tesseract-api>`
+- [JOSS paper](https://doi.org/10.21105/joss.08385)
 - [Changelog](https://github.com/pasteurlabs/tesseract-core/releases)
   :::
 
@@ -391,8 +391,8 @@ Wrap your solver or model as a Tesseract, or compose existing ones into a new pi
 - {doc}`Blog <blog/index>`
 - [GitHub](https://github.com/pasteurlabs/tesseract-core)
 - [Contributing](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
-- [Code of Conduct](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
-- [Report an Issue](https://github.com/pasteurlabs/tesseract-core/issues)
+- [Code of conduct](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
+- [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues)
   :::
 
 :::{grid-item}

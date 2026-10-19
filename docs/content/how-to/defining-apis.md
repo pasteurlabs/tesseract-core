@@ -1,4 +1,4 @@
-# Tips for Defining Tesseract APIs
+# Tips for defining Tesseract APIs
 
 ## Advanced Pydantic features
 
@@ -258,7 +258,7 @@ The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) 
 For the full list of options and their defaults, see the [Configuration reference](../reference/config.md).
 ```
 
-For worked examples, see the [Package Data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran Integration](../examples/building-blocks/fortran.md) building blocks.
+For worked examples, see the [Package data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran integration](../examples/building-blocks/fortran.md) building blocks.
 
 ## Creating a Tesseract from a Python package
 

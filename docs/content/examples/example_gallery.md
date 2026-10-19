@@ -1,8 +1,8 @@
-# Example Gallery: Building Blocks
+# Example gallery: Building blocks
 
 ```{toctree}
 :name: example-gallery
-:caption: Example Gallery
+:caption: Example gallery
 :maxdepth: 2
 :hidden:
 :glob:
@@ -28,7 +28,7 @@ This is a gallery of small Tesseract examples, each showing one feature, that ca
 You can also find these Tesseracts in the `examples` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
 
 ```{important}
-**Beyond the examples**: For applications that *use* Tesseracts in workflows, check out the [Demos & Tutorials](../demo/demo.md) and the [showcase on the User Forum](https://si-tesseract.discourse.group/c/showcase/11).
+**Beyond the examples**: For applications that *use* Tesseracts in workflows, check out the [Demos & tutorials](../demo/demo.md) and the [showcase on the User Forum](https://si-tesseract.discourse.group/c/showcase/11).
 ```
 
 ::::{grid} 2
@@ -52,37 +52,37 @@ Tesseract performing vector addition. Highlighting simple array operations and h
 
 A Tesseract that wraps the univariate Rosenbrock function, which is a common test problem for optimization algorithms.
 :::
-:::{grid-item-card} Fortran Integration
+:::{grid-item-card} Fortran integration
 :link: building-blocks/fortran
 :link-type: doc
 
 Wrapping a Fortran heat equation solver. Demonstrates subprocess-based integration for legacy compiled code.
 :::
-:::{grid-item-card} Differentiating Compiled Code
+:::{grid-item-card} Differentiating compiled code
 :link: building-blocks/enzyme
 :link-type: doc
 
 Differentiating a Fortran solver with Enzyme. Demonstrates exact, machine-precision JVP and VJP for compiled code with no hand-written adjoints.
 :::
-:::{grid-item-card} MATLAB Integration
+:::{grid-item-card} MATLAB integration
 :link: building-blocks/matlab
 :link-type: doc
 
 Wrapping a MATLAB spring-mass-damper ODE solver. Demonstrates using the official MathWorks Docker image to run MATLAB code via `matlab -batch`.
 :::
-:::{grid-item-card} Package Data
+:::{grid-item-card} Package data
 :link: building-blocks/packagedata
 :link-type: doc
 
 A guide on including local files into a built Tesseract.
 :::
-:::{grid-item-card} Pyvista on ARM64
+:::{grid-item-card} PyVista on ARM64
 :link: building-blocks/arm64
 :link-type: doc
 
 A guide showcasing how to use custom build steps to install pyvista within an ARM64 Tesseract.
 :::
-:::{grid-item-card} Local Dependencies
+:::{grid-item-card} Local dependencies
 :link: building-blocks/localpackage
 :link-type: doc
 
@@ -96,14 +96,14 @@ A guide on installing local Python packages into a Tesseract.
 Install a Tesseract's dependencies from a PEP 751 lockfile (`pylock.toml`) for a
 fully pinned, resolution-free build.
 :::
-:::{grid-item-card} Data Loader
+:::{grid-item-card} Data loader
 :link: building-blocks/dataloader
 :link-type: doc
 
 Tesseract that loads in data samples from a folder without loading them into memory.
 :::
 
-:::{grid-item-card} Input/Output Path References
+:::{grid-item-card} Input/output path references
 :link: building-blocks/file_io
 :link-type: doc
 
@@ -113,7 +113,7 @@ Useful when inputs or outputs are large on disk, or consist of
 many (or a variable number of) files.
 :::
 
-:::{grid-item-card} On-disk Arrays with BinrefArray
+:::{grid-item-card} On-disk arrays with BinrefArray
 :link: building-blocks/binref_passthrough
 :link-type: doc
 
@@ -121,7 +121,7 @@ Return large arrays that a solver wrote to disk without reading them back into
 memory. The runtime forwards the on-disk bytes straight to the client. _(Experimental)_
 :::
 
-:::{grid-item-card} Finite Difference Gradients
+:::{grid-item-card} Finite difference gradients
 :link: building-blocks/finitediff
 :link-type: doc
 
@@ -129,7 +129,7 @@ Make any Tesseract differentiable without implementing analytical gradients.
 Useful for prototyping and complex nested schemas. _(Experimental)_
 :::
 
-:::{grid-item-card} Gradient Endpoint Derivation Fallbacks
+:::{grid-item-card} Gradient endpoint derivation fallbacks
 :link: building-blocks/gradient-fallbacks
 :link-type: doc
 

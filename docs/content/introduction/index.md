@@ -3,10 +3,10 @@ og:title: "Tesseract Core Documentation"
 og:description: "Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation."
 ---
 
-# Tesseract Core Documentation
+# Tesseract Core documentation
 
 Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
-New here? Start with the [Get Started](../tutorials/get-started.md) tutorial, or read [](../concepts/when-to-use.md) first.
+New here? Start with the [Get started](../tutorials/get-started.md) tutorial, or read [](../concepts/when-to-use.md) first.
 
 ## What is a Tesseract?
 
@@ -90,7 +90,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Tutorials & Examples
+:caption: Tutorials & examples
 :maxdepth: 2
 :hidden:
 
@@ -103,7 +103,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: How-to Guides
+:caption: How-to guides
 :maxdepth: 2
 :hidden:
 
@@ -138,7 +138,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Reference — Runtime
+:caption: Reference — runtime
 :maxdepth: 2
 :hidden:
 

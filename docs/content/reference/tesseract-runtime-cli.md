@@ -1,4 +1,4 @@
-# CLI Reference (`tesseract-runtime`)
+# CLI reference (`tesseract-runtime`)
 
 This is the command line interface of the Tesseract runtime, which serves a Tesseract from `Tesseract.from_source`, from your shell, or inside a container image.
 

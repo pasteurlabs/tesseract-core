@@ -139,7 +139,7 @@ $ tesseract build .
 $ tesseract run my-tesseract apply '{"inputs": {"x": [1.0, 2.0, 3.0]}}'
 ```
 
-## The Ecosystem
+## The ecosystem
 
 - **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)**: CLI, Python SDK, and runtime (this repo).
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)**: embed Tesseracts as JAX primitives, compatible with `jit`, `grad`, and `vmap`.

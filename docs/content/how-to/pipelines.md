@@ -1,10 +1,10 @@
-# Composing Tesseracts into Pipelines
+# Composing Tesseracts into pipelines
 
 A single Tesseract packages one computation. Real work usually involves several components: a mesher feeds a solver, an encoder feeds a model, a simulation feeds a post-processor. This page is about the step _after_ you've defined your Tesseracts, that is, calling them from your own code and chaining them into a larger workflow.
 
 Tesseract Core is deliberately unopinionated about what you build on top. A project that uses Tesseracts might be a training loop, an optimization routine, a notebook, a web service, or a full application, with as much or as little logic of its own as you like. What follows is the small amount of generic advice that applies regardless: _how to call and chain Tesseracts well_.
 
-The [Design Patterns](../concepts/design-patterns.md) page covers the complementary question of how to split a workflow into Tesseracts in the first place. Read that for the "how many, how granular" decisions, read this for "how do I wire them together."
+The [Design patterns](../concepts/design-patterns.md) page covers the complementary question of how to split a workflow into Tesseracts in the first place. Read that for the "how many, how granular" decisions, read this for "how do I wire them together."
 
 ## Choosing how to call a Tesseract
 
@@ -61,7 +61,7 @@ t.teardown()                      # stop the Tesseract when you're done
 ```
 
 ```{tip}
-These bindings are what makes Tesseracts *differentiable software components*. If your workflow is an optimization, calibration, or training problem, reaching for Tesseract-JAX or Tesseract-Torch usually means you get end-to-end gradients for free. See the [Differentiable Programming guide](../concepts/differentiable-programming.md).
+These bindings are what makes Tesseracts *differentiable software components*. If your workflow is an optimization, calibration, or training problem, reaching for Tesseract-JAX or Tesseract-Torch usually means you get end-to-end gradients for free. See the [differentiable programming guide](../concepts/differentiable-programming.md).
 ```
 
 ### Otherwise: use the Python SDK
@@ -150,9 +150,9 @@ Take the parts that fit your project and leave the rest. For anything beyond a h
 
 ## What's next
 
-- [Design Patterns](../concepts/design-patterns.md) — how to split a workflow into Tesseracts and design their interfaces.
+- [Design patterns](../concepts/design-patterns.md) — how to split a workflow into Tesseracts and design their interfaces.
 - [Interacting with Tesseracts](../tutorials/interact.md) — the full SDK, CLI, and REST interfaces.
-- [Differentiable Programming](../concepts/differentiable-programming.md) — propagating gradients through a composed, multi-Tesseract program.
+- [Differentiable programming basics](../concepts/differentiable-programming.md) — propagating gradients through a composed, multi-Tesseract program.
 - [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) — the framework bindings.
 - [Performance](../concepts/performance.md) — minimizing process-boundary and data-transfer overhead in chained workflows.
 - Questions? Ask on the [Tesseract User Forum](https://si-tesseract.discourse.group/).

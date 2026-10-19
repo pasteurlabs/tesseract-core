@@ -1,4 +1,4 @@
-# Advanced Usage
+# Advanced usage
 
 ## File aliasing
 

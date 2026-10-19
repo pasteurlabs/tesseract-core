@@ -1,6 +1,6 @@
 (tr-autodiff)=
 
-# Differentiable Programming Basics
+# Differentiable programming basics
 
 [Differentiable Programming](https://en.wikipedia.org/wiki/Differentiable_programming) (DP) is a technique to compute the derivative of a (software) function with respect to its inputs. It is a key ingredient in many optimization algorithms, such as gradient descent, and is widely used in machine learning and scientific computing. Automatic differentiation (autodiff or AD) is a technique to compute the derivative of a function automatically, without the need to manually derive and implement the derivative.
 
@@ -211,7 +211,7 @@ When inputs or outputs contain dicts or lists, the tangent and cotangent vectors
 
 For more information, see the API reference for the {py:func}`Jacobian-vector product endpoint <tesseract_core.runtime.app_cli.jacobian_vector_product>` and the {py:func}`Vector-Jacobian product endpoint <tesseract_core.runtime.app_cli.vector_jacobian_product>`.
 
-### Gradient Endpoint Derivation Fallbacks (Experimental)
+### Gradient endpoint derivation fallbacks (experimental)
 
 If you have already implemented one gradient endpoint but need the others, you can derive
 them automatically using the experimental fallback helpers:
@@ -224,7 +224,7 @@ For a practical guide with full examples and cost trade-offs, see
 {doc}`/content/examples/building-blocks/gradient-fallbacks`.
 ```
 
-### Finite Difference Gradients (Experimental)
+### Finite difference gradients (experimental)
 
 If implementing analytical gradients is too complex or time-consuming, you can use **finite differences**
 to approximate gradients numerically. This is useful for prototyping, complex nested schemas, and
@@ -243,7 +243,7 @@ For a full guide on finite difference algorithms and a complete example, see {do
 
 However a gradient endpoint is implemented, `check-gradients` can compare it against finite differences of `apply` at inputs of your choosing, with or without a container. See {doc}`/content/how-to/check-gradients`.
 
-### Abstract Evaluation
+### Abstract evaluation
 
 In some scenarios it can be useful to know what the shapes of arrays in the output of a Tesseract will be,
 without actually running the computation implemented in a Tesseract's `apply`. This can be particularly

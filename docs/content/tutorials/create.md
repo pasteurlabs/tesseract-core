@@ -2,7 +2,7 @@
 
 # Creating Tesseracts
 
-This page walks through creating your own Tesseract: defining its schemas and endpoints, running and testing it, using arrays and nested data, and making it differentiable. We recommend reading the [Get Started page](tr-quickstart) first.
+This page walks through creating your own Tesseract: defining its schemas and endpoints, running and testing it, using arrays and nested data, and making it differentiable. We recommend reading the [Get started page](tr-quickstart) first.
 
 ## Initialize a new Tesseract
 
@@ -316,7 +316,7 @@ Here, output `a` can be differentiated with respect to the scalar `x` and the ma
 `Differentiable` can only wrap {py:class}`tesseract_core.runtime.Array` types (including rank-0 aliases like {py:class}`Float64 <tesseract_core.runtime.Float64>`). Using it on Python base types (e.g., `Differentiable[float]`) will raise an error.
 ```
 
-Beyond marking fields, you also need to implement the derivative logic. With autodiff frameworks like JAX or PyTorch, these are usually one-liners. See [Differentiable Programming](tr-autodiff) for details on implementing `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
+Beyond marking fields, you also need to implement the derivative logic. With autodiff frameworks like JAX or PyTorch, these are usually one-liners. See [Differentiable programming basics](tr-autodiff) for details on implementing `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
 
 ## Package it as an image
 

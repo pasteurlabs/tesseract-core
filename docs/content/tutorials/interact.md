@@ -4,12 +4,12 @@
 
 This page shows how to call a Tesseract through all three interfaces (CLI, REST
 API, and Python SDK), compute its derivatives, and read its schema so you know
-exactly what it expects. We recommend working through [Get Started](tr-quickstart)
+exactly what it expects. We recommend working through [Get started](tr-quickstart)
 and [Creating Tesseracts](tr-create) first.
 
 We'll use the `vectoradd` Tesseract from the {gh-tree}`examples <examples/vectoradd>`,
 which computes `s·a + b` for two vectors `a`, `b` and a scalar `s`. As in
-[Get Started](tr-quickstart), commands on this page run from the directory that
+[Get started](tr-quickstart), commands on this page run from the directory that
 contains `examples/`.
 
 ## Invoke the `apply` endpoint
@@ -186,7 +186,7 @@ endpoint runs. Alongside `jacobian`, Tesseracts can expose the
 These are what [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and
 [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) use under the
 hood to make gradients flow through your Tesseract automatically. See
-[Differentiable Programming](tr-autodiff) for what each one computes.
+[Differentiable programming basics](tr-autodiff) for what each one computes.
 
 Not every Tesseract implements every endpoint. To check which ones a Tesseract
 supports:

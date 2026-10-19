@@ -1,4 +1,4 @@
-# Performance Trade-offs & Optimization
+# Performance trade-offs & optimization
 
 ## The short version
 

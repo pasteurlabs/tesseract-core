@@ -1,4 +1,4 @@
-# Demos & Tutorials
+# Demos & tutorials
 
 End-to-end demos, case studies with real engineering tools, and smaller tutorials that teach the mechanics.
 
@@ -36,7 +36,7 @@ JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-
 Solve inverse heat-transfer problems through a Fortran solver differentiated by Enzyme.
 :::
 
-:::{grid-item-card} Multi-Physics Optimization
+:::{grid-item-card} Multi-physics optimization
 :link: multiphysics-optimization
 :link-type: doc
 :class-card: demo-card
@@ -46,7 +46,7 @@ Solve inverse heat-transfer problems through a Fortran solver differentiated by 
 Differentiate through the equilibrium of coupled thermal and structural Tesseracts.
 :::
 
-:::{grid-item-card} Learned Closure (PyTorch)
+:::{grid-item-card} Learned closure (PyTorch)
 :link: learned-closure
 :link-type: doc
 :class-card: demo-card
@@ -56,7 +56,7 @@ Differentiate through the equilibrium of coupled thermal and structural Tesserac
 Train a PyTorch closure model through a Burgers' solver running in its own process.
 :::
 
-:::{grid-item-card} FEM Shape Optimization
+:::{grid-item-card} FEM shape optimization
 :link: fem-shape-optimization
 :link-type: doc
 :class-card: demo-card
@@ -73,7 +73,7 @@ Combine finite-difference geometry gradients with a jax-fem solver to minimize c
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Rocket Grid Fin Optimization
+:::{grid-item-card} Rocket grid fin optimization
 :link: ../../blog/2025-11-28-rocket-fin-optimization
 :link-type: doc
 :class-card: demo-card
@@ -91,7 +91,7 @@ Ansys SpaceClaim, a mesher, and PyMAPDL in one gradient, with three differentiat
 Winning entries, from NOAA's Fortran hydrology models to Sentaurus TCAD.
 :::
 
-:::{grid-item-card} Ansys Integration Gallery
+:::{grid-item-card} Ansys integration gallery
 :link: ../examples/ansys_gallery
 :link-type: doc
 :class-card: demo-card
@@ -109,7 +109,7 @@ These components are easy to rewrite in JAX or PyTorch, so read them as walkthro
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} 4D-Var Data Assimilation
+:::{grid-item-card} 4D-Var data assimilation
 :link: data-assimilation
 :link-type: doc
 :class-card: demo-card
@@ -129,7 +129,7 @@ Build a differentiable Lorenz-96 Tesseract and run 4D-Var through it.
 Recover a posterior with gradient-based MCMC in NumPyro, using the same Lorenz-96 Tesseract.
 :::
 
-:::{grid-item-card} CFD Flow Optimization
+:::{grid-item-card} CFD flow optimization
 :link: cfd-optimization
 :link-type: doc
 :class-card: demo-card

@@ -1,6 +1,6 @@
 (tr-quickstart)=
 
-# Get Started
+# Get started
 
 ## Quick install
 
