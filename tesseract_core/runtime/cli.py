@@ -405,7 +405,7 @@ def check_gradients(
         int,
         typer.Option(
             "--max-evals",
-            help="Maximum number of evaluations per input.",
+            help="Number of input elements to sample, split across differentiable inputs in proportion to their size.",
             show_default=True,
         ),
     ] = 1000,

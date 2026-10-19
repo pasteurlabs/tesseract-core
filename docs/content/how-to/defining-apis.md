@@ -249,7 +249,7 @@ This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenM
 The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) controls how the Tesseract image is built.
 
 ```{note}
-These options only affect built images. `Tesseract.from_source` ignores them, uses the system libraries on your machine, and reads data files in place.
+The options below only affect built images. `Tesseract.from_source` ignores them, uses the system libraries on your machine, and reads data files in place.
 ```
 
 Common reasons to customize it:

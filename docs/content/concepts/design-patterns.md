@@ -4,7 +4,7 @@ This page provides guidance on common questions around Tesseract design: what sh
 
 ## When to use a Tesseract
 
-{doc}`/content/concepts/when-to-use` covers when Tesseract is worth its overhead, and when a `jax.custom_vjp`, a `torch.autograd.Function`, or framework-native rewrite is the better answer. The same reasoning informs how to split a problem into Tesseracts. If an inner loop calls a function millions of times, that function likely shouldn't be a Tesseract (wrap the entire loop instead).
+{doc}`/content/concepts/when-to-use` covers when Tesseract is worth its overhead, and when a `jax.custom_vjp`, a `torch.autograd.Function`, or a framework-native rewrite is the better answer. The same reasoning informs how to split a problem into Tesseracts. If an inner loop calls a function millions of times, that function likely shouldn't be a Tesseract (wrap the entire loop instead).
 
 ## How granular should Tesseracts be?
 

@@ -208,7 +208,7 @@ Contains metadata such as the Tesseract's name, description, version, and build 
 
 ### `tesseract_requirements.txt`
 
-Lists the Python packages needed to run the Tesseract, whether in the environment `from_source` builds or in a container image, in [pip requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
+Lists the Python packages the Tesseract needs, in [pip requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/). Both `from_source` and `tesseract build` install them.
 
 ```{note}
 This file is optional. `tesseract_api.py` can invoke functions written in any language. With `Tesseract.from_source`, non-Python dependencies have to be installed on your machine. To package them with the Tesseract, build a container image and use the `build_config` section in [`tesseract_config.yaml`](quickstart-tr-config) to provide data files and install system dependencies.
@@ -217,27 +217,6 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 ```{literalinclude} ../../../examples/helloworld/tesseract_requirements.txt
 
 ```
-
-## Features and limitations
-
-::::{tab-set}
-:::{tab-item} Features
-
-- **Self-documenting** — Tesseracts announce their interfaces, so users can inspect them without reading source code and perform static validation without running the code.
-- **Auto-validating** — Input data is automatically validated against the schema, so internal logic can assume the data is in the expected format.
-- **Autodiff-native** — Tesseracts support [differentiable programming](../concepts/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
-- **Batteries included** — Every Tesseract comes with a CLI, a REST API, and a Python SDK, and runs as a subprocess, a container, or a remote service.
-
-:::
-:::{tab-item} Limitations
-
-- **Python as glue** — Tesseracts may use any software under the hood, but they always use Python as glue between the runtime and the wrapped functionality. Support for Python projects is more mature than other languages.
-- **Single entrypoint** — Each Tesseract has a single `apply` entrypoint. To expose N functions, create N Tesseracts.
-- **Context-free** — Tesseracts are not aware of outer-loop orchestration or runtime details.
-- **Runtime overhead** — Calls usually cross a process boundary, which costs milliseconds, so Tesseracts suit components whose calls take much longer than that (see [performance](../concepts/performance.md)).
-
-:::
-::::
 
 ## Next steps
 

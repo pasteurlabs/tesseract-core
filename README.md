@@ -132,7 +132,7 @@ $ TESSERACT_API_PATH=tesseract_api.py tesseract-runtime check-gradients '{"input
 ✅ Gradient check for vector_jacobian_product passed ✅ (0 failures / 1000 checks)
 ```
 
-To share or deploy the component, build the same folder as a container image (this step requires [Docker](https://docs.docker.com/engine/install/)), and `Tesseract.from_image("my-tesseract")` replaces `from_source`:
+To share or deploy the component, build the same folder as a container image, which requires [Docker](https://docs.docker.com/engine/install/). `Tesseract.from_image("my-tesseract")` then takes the place of `from_source`:
 
 ```bash
 $ tesseract build .

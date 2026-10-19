@@ -5,7 +5,7 @@ og:description: "When wrapping a component as a Tesseract pays off, and when a c
 
 # When to use Tesseract
 
-Tesseract runs a component in its own process and lets JAX and PyTorch differentiate through it as if it were native code. In exchange, every call crosses a process boundary (see {doc}`/content/concepts/performance`), and the component has to be written as a Tesseract: a folder with a `tesseract_api.py`, a `tesseract_config.yaml`, and a requirements file, with its inputs and outputs declared as schemas (see {doc}`/content/tutorials/create`). That structure suits a self-contained component, whose environment and interface it declares in one place. It gets in the way when the component is one function inside a larger codebase that you are still changing, or when its natural interface has several entrypoints, which become several Tesseracts.
+Tesseract runs a component in its own process and lets JAX and PyTorch differentiate through it as if it were native code. In exchange, calls usually cross a process boundary (see {doc}`/content/concepts/performance`), and the component has to be written as a Tesseract: a folder with a `tesseract_api.py`, a `tesseract_config.yaml`, and a requirements file, with its inputs and outputs declared as schemas (see {doc}`/content/tutorials/create`). That structure suits a self-contained component, since it declares the component's environment and interface in one place. It gets in the way when the component is one function inside a larger codebase that you are still changing, or when its natural interface has several entrypoints, which become several Tesseracts.
 
 This page helps you decide when that trade pays off, and points to simpler answers where it doesn't.
 
@@ -23,7 +23,7 @@ Tesseract pays off most when all four of these hold:
 ```{admonition} Beyond the obvious
 :class: tip
 
-The four conditions above aren't the whole story. Tesseract also helps with:
+Tesseract also helps with:
 
 - **Developing, testing, and shipping components in isolation.** Each Tesseract declares its environment and interface in one place, so it can be built and tested on its own, handed to someone who never reads its source, and deployed unchanged. Schemas and generated API docs tell its users what it expects and returns.
 - **Testing a hand-written gradient.** A schema plus {doc}`check-gradients </content/how-to/check-gradients>` verifies a VJP or adjoint against finite differences, even if the component later runs in-process.

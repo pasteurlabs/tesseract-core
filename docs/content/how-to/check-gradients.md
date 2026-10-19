@@ -64,7 +64,7 @@ First 2 failures:
 ❌ Some gradient checks failed ❌
 ```
 
-Each failure names the input path, the output path, and the input index that was perturbed. Both arrays hold the sensitivity of every output element to that input element. A constant ratio between them, 1.5 in this case, usually points to a missing or extra factor. A sign flip points to a transposed or negated term, and agreement in some columns but not others points to a coupling or indexing mistake.
+Each failure names the input path, the output path, and the input index that was perturbed. Both arrays hold the sensitivity of every output element to that input element. A constant ratio between them, 1.5 in this case, usually points to a missing or extra factor. A sign flip points to a negated term, and agreement in some columns but not others points to a coupling or indexing mistake.
 
 If an endpoint raises an exception, the check reports it with the file and line instead of the values.
 
@@ -98,4 +98,4 @@ A useful habit is to rerun a failing check with the step ten times larger and te
 
 - Finite differences are approximations, so a pass is evidence that the gradient is right and not proof. Functions with kinks, branches, or discontinuities near the checked point can fail even when the endpoint returns the correct one-sided or subgradient.
 - The check runs in the Tesseract's own process and environment. It cannot yet be pointed at a Tesseract that someone else serves over HTTP.
-- `apply` is called twice per sampled input element. For an expensive solver, start with a small `--max-evals` and a few targeted `--input-paths`.
+- `apply` is called twice per sampled input element, for each differentiable output and each endpoint checked. For an expensive solver, start with a small `--max-evals` and a few targeted `--input-paths`.

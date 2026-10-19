@@ -165,7 +165,7 @@ expected payload.
 
 ```{warning}
 Allocating too much memory relative to your RAM can crash your machine
-(we have observed crashes on macOS when using a 4GB hfs on 16GB machine).
+(we have observed crashes on macOS when using a 4GB hfs on a 16GB machine).
 With very large payloads it may be safer to stick with `json+binref` on an
 ordinary disk-backed directory.
 ```
