@@ -8,7 +8,7 @@ og:description: "Tesseract wraps any solver behind a typed interface with deriva
 Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
 New here? Start with the [Get Started](../tutorials/get-started.md) tutorial, or read [](../concepts/when-to-use.md) first.
 
-## What a Tesseract is
+## What is a Tesseract?
 
 ```{figure} ../../img/tesseract-interfaces.svg
 :alt: Tesseract interfaces
@@ -41,7 +41,7 @@ A Tesseract is a component defined in one file, `tesseract_api.py`:
 A few choices shape what working with a Tesseract is like. Each one helps in some settings and limits you in others.
 
 - **One `apply` per Tesseract.** A Tesseract exposes a single function, which keeps its interface and gradients easy to reason about. To expose several functions, build several Tesseracts and compose them (see [](../concepts/design-patterns.md)).
-- **Python is always the glue.** A Tesseract can wrap software in any language, but the code between the runtime and that software is Python. Every Tesseract gets the same schemas and tooling as a result, and Python projects are the easiest to wrap.
+- **Use Python as the glue.** A Tesseract can wrap software in any language, but the code between the runtime and that software is Python. Every Tesseract gets the same schemas and tooling as a result, and Python projects are the easiest to wrap.
 - **No knowledge of its context.** A Tesseract doesn't know which loop calls it or where it runs. The same component works inside an optimizer, a training loop, or a sampler, and orchestration stays in the calling code.
 
 ## The workflow

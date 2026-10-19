@@ -1,7 +1,6 @@
 [project]
 name = "tesseract-core"
 description = "A toolkit for universal, autodiff-native software components."
-readme = "README.md"
 authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
 ]
@@ -23,6 +22,8 @@ dependencies = [
 dynamic = [
     # Injected via hatch-vcs
     "version",
+    # Injected via hatch_build.py
+    "readme",
 ]
 
 [project.scripts]
@@ -109,6 +110,8 @@ fallback-version = "0.0.0+unknown"
 [tool.hatch.build.hooks.vcs]
 version-file = "tesseract_core/_version.py"
 
+[tool.hatch.metadata.hooks.custom]
+
 [tool.hatch.build.targets.wheel]
 packages = ["tesseract_core"]
 
@@ -118,6 +121,7 @@ include = [
     "examples/",
     "requirements.txt",
     "README.md",
+    "hatch_build.py",
     "LICENSE",
 ]
 

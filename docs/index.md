@@ -213,7 +213,7 @@ with Tesseract.from_source("tesseract_api.py") as t:
 ```
 
 :::
-:::{tab-item} Check & ship
+:::{tab-item} Check & package
 
 ```bash
 # Compare the VJP against finite differences
