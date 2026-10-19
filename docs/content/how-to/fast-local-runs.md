@@ -31,7 +31,12 @@ by keeping array data out of the HTTP body.
 
 ## Basic usage
 
-Select `json+binref` as the output format:
+Select `json+binref` as the output format. `Tesseract.from_source` and
+`Tesseract.from_image` take the same arguments:
+
+::::{tab-set}
+:::{tab-item} from_source
+:sync: source
 
 ```python
 import numpy as np
@@ -46,10 +51,29 @@ with Tesseract.from_source(
     # result["y"] is a NumPy array, decoded from a .bin file
 ```
 
+:::
+:::{tab-item} from_image
+:sync: image
+
+```python
+import numpy as np
+from tesseract_core import Tesseract
+
+x = np.random.default_rng(0).standard_normal(10_000_000)
+
+with Tesseract.from_image("my-tesseract", output_format="json+binref") as t:
+    result = t.apply({"x": x})
+    # result["y"] is a NumPy array, decoded from a .bin file
+```
+
+:::
+::::
+
 The `output_format` argument controls only how arrays are exchanged internally;
 `apply` still returns ordinary NumPy arrays, so the rest of your code does not
 change. Scratch directories for the `.bin` files are created in the system's
 temporary directory and removed when the Tesseract object is garbage collected.
+For a containerized Tesseract, they are bind-mounted into the container.
 
 This is enough to get most of the benefit. Measured on an Apple silicon laptop,
 a 40 MB `float64` round trip takes ~26 ms this way against ~168 ms for the
@@ -59,6 +83,10 @@ default `json+base64`.
 
 To keep the `.bin` files in memory, pass directories on a shared-memory
 filesystem as the input and output paths:
+
+::::{tab-set}
+:::{tab-item} from_source
+:sync: source
 
 ```python
 import tempfile
@@ -79,6 +107,42 @@ with (
     ) as t,
 ):
     result = t.apply({"x": x})
+```
+
+:::
+:::{tab-item} from_image
+:sync: image
+
+```python
+import tempfile
+from pathlib import Path
+
+shm = Path("/dev/shm")
+
+# Use TemporaryDirectory so the scratch dirs (and any .bin files left in them)
+# are removed on exit, rather than accumulating on /dev/shm.
+with (
+    tempfile.TemporaryDirectory(prefix="tess_in_", dir=shm) as input_dir,
+    tempfile.TemporaryDirectory(prefix="tess_out_", dir=shm) as output_dir,
+    Tesseract.from_image(
+        "my-tesseract",
+        input_path=input_dir,
+        output_path=output_dir,
+        output_format="json+binref",
+    ) as t,
+):
+    result = t.apply({"x": x})
+```
+
+:::
+::::
+
+```{note}
+For a containerized Tesseract, shared memory needs a Linux host. On macOS and
+Windows, the container runs inside a Linux VM, so the bind mounts cross the VM
+boundary and the container does not see the host's `tmpfs` as the same memory.
+`json+binref` on an ordinary directory still works there. The size cap of
+`/dev/shm` is separate from any container memory limit set with `memory=...`.
 ```
 
 Input `.bin` files written for each request are cleaned up after that request.
@@ -125,7 +189,7 @@ mkdir -p /tmp/tess-shm && mount -t hfs "$disk" /tmp/tess-shm
 # when finished:  umount /tmp/tess-shm && hdiutil detach "$disk"
 ```
 
-Then use `/tmp/tess-shm` in place of `/dev/shm` in the example above.
+Then use `/tmp/tess-shm` in place of `/dev/shm` in the `from_source` example above. A containerized Tesseract can't share this memory with the host (see the note above).
 
 ## The `experimental_binref_pool` fast path
 
@@ -133,6 +197,10 @@ By default, each request writes its input arrays to freshly allocated `.bin`
 files. Allocating and faulting in fresh pages for a large array is a significant
 part of the remaining cost. The opt-in `experimental_binref_pool=True` flag
 addresses this:
+
+::::{tab-set}
+:::{tab-item} from_source
+:sync: source
 
 ```python
 with Tesseract.from_source(
@@ -144,6 +212,24 @@ with Tesseract.from_source(
 ) as t:
     result = t.apply({"x": x})
 ```
+
+:::
+:::{tab-item} from_image
+:sync: image
+
+```python
+with Tesseract.from_image(
+    "my-tesseract",
+    input_path=input_dir,
+    output_path=output_dir,
+    output_format="json+binref",
+    experimental_binref_pool=True,
+) as t:
+    result = t.apply({"x": x})
+```
+
+:::
+::::
 
 With the pool enabled, the client reuses a small set of pre-faulted,
 memory-mapped input buffers instead of writing a fresh file per request, and
@@ -168,37 +254,9 @@ Two things to keep in mind when opting in:
 The pool needs the binref directory to be **memory-backed**. That is what makes
 its memory-mapped writes free; an ordinary disk-backed directory does not benefit
 from this. It has no effect for output formats other than `json+binref`. With
-`Tesseract.from_source`, the pool is available on any POSIX platform.
-
-## With a containerized Tesseract
-
-`Tesseract.from_image` takes the same arguments. `input_path` and `output_path`
-are bind-mounted into the container:
-
-```python
-with (
-    tempfile.TemporaryDirectory(prefix="tess_in_", dir=shm) as input_dir,
-    tempfile.TemporaryDirectory(prefix="tess_out_", dir=shm) as output_dir,
-    Tesseract.from_image(
-        "my-tesseract",
-        input_path=input_dir,
-        output_path=output_dir,
-        output_format="json+binref",
-        experimental_binref_pool=True,
-    ) as t,
-):
-    result = t.apply({"x": x})
-```
-
-Keeping the array data in shared memory this way needs a Linux host. On macOS
-and Windows, the container runs inside a Linux VM, so the bind mounts cross the
-VM boundary and the container does not see the host's `tmpfs` as the same
-memory. For the same reason, `experimental_binref_pool=True` raises an error for
-containerized Tesseracts on anything but Linux. `json+binref` on an ordinary
-directory works everywhere.
-
-The size cap of `/dev/shm` is separate from any container memory limit set with
-`memory=...`.
+`Tesseract.from_source`, the pool is available on any POSIX platform. With
+`Tesseract.from_image`, it raises an error on anything but Linux, for the same
+reason as shared memory above.
 
 ## When this helps
 

@@ -243,9 +243,9 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 
 Depending on your needs:
 
+- [Overview](../introduction/index.md) — how a Tesseract is structured, the design decisions behind it, and the ways to run one
 - [](../tutorials/create.md) — define schemas, implement endpoints, and run Tesseracts
 - [](../tutorials/interact.md) — invoke Tesseracts, compute derivatives, and read their schemas
-
 - [](../how-to/check-gradients.md) — verify a Tesseract's derivatives against finite differences
 
 Or jump into the [demos](../demo/demo.md), which differentiate through Fortran, PyTorch, and coupled solvers end to end.

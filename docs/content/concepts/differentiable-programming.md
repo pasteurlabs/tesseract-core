@@ -241,7 +241,7 @@ For a full guide on finite difference algorithms and a complete example, see {do
 
 ### Checking gradient endpoints
 
-However a gradient endpoint is implemented, `check-gradients` can compare it against finite differences of `apply` at inputs of your choosing, with or without a container. See {doc}`/content/how-to/check-gradients`.
+However a gradient endpoint is implemented, `check-gradients` can compare it against a finite difference approximation using only `apply` at inputs of your choosing, with or without a container. See {doc}`/content/how-to/check-gradients`.
 
 ### Abstract evaluation
 
@@ -255,7 +255,7 @@ can be implemented. This endpoint accepts the same inputs as the `apply` endpoin
 array arguments are replaced by their shape and dtype (see {py:class}`ShapeDType <tesseract_core.runtime.ShapeDType>`).
 This makes it possible to infer output shapes from input shapes (and non-array arguments) before their actual data is known.
 
-Tesseract-JAX requires `abstract_eval` to use a Tesseract under JAX transformations such as `jit`, `grad`, and `vmap`, since JAX traces with shapes before any data exists.
+Tesseract-JAX requires `abstract_eval` to use a Tesseract under JAX transformations such as `jit`, `grad`, and `vmap`, since JAX traces based on shapes and dtypes before any data is available (see the [Tesseract-JAX documentation](https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/content/get-started.html#sharp-edges)).
 
 #### Example usage
 

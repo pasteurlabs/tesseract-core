@@ -8,6 +8,10 @@ Compare the overhead of one call with the time the call itself takes. On one mac
 2. **Do more work per call.** Batch independent inputs into one request (see [Batch small operations](#batch-small-operations)).
 3. **Drop the process boundary.** Load the Tesseract in-process with `Tesseract.from_tesseract_api`, which costs about half a millisecond per call but needs all of its dependencies in your environment.
 
+```{warning}
+An in-process Tesseract shares your interpreter, global state, and dependencies, so it can fail in ways a served one cannot. For example, a Tesseract that uses JAX internally can deadlock when called through Tesseract-JAX, because its endpoints then run inside a JAX callback (see the [Tesseract-JAX sharp edges](https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/content/get-started.html#sharp-edges)). Concurrent calls to in-process Tesseracts also run one at a time.
+```
+
 The [rules of thumb](#rules-of-thumb-by-use-case) below map common workloads to these options.
 
 ## Overview

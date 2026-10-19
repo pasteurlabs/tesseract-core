@@ -40,8 +40,8 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
 :::{div} landing-cta
 {bdg-ref-primary-line}`Get started <content/tutorials/get-started>`
+{bdg-ref-primary-line}`Documentation <content/introduction/index>`
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
-{bdg-ref-primary-line}`API reference <content/reference/tesseract-api>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
 
@@ -61,20 +61,20 @@ Tesseract is for differentiable programs that need to reach outside their own fr
 ::::{grid} 1 2 3 3
 :gutter: 4
 
-:::{grid-item-card} Optimize through tools you can't replace
+:::{grid-item-card} Wrap tools you can't replace
 :class-card: feature-card
 
 Validated legacy codes, commercial CAD and FEA, closed-source binaries.
 Mix adjoints, autodiff, and finite differences in one gradient.
 :::
 
-:::{grid-item-card} Train through a solver in another stack
+:::{grid-item-card} Train through any solver
 :class-card: feature-card
 
 Put a Fortran, Julia, or C++ solver inside a PyTorch or JAX training loop.
 :::
 
-:::{grid-item-card} Check your gradients
+:::{grid-item-card} Verify gradients
 :class-card: feature-card
 
 Test every derivative against finite differences before an optimizer relies on it.
@@ -237,6 +237,7 @@ $ tesseract run my-tesseract apply \
 
 :::{div} landing-cta
 {bdg-ref-primary-line}`Get started <content/tutorials/get-started>`
+{bdg-ref-primary-line}`Overview <content/introduction/index>`
 {bdg-ref-primary-line}`When to use Tesseract <content/concepts/when-to-use>`
 :::
 

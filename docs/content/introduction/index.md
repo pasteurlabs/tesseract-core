@@ -52,7 +52,18 @@ A few choices shape what working with a Tesseract is like. Each one helps in som
 4. **Compose** it into JAX or PyTorch programs with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) or [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), or chain several Tesseracts into a [pipeline](../how-to/pipelines.md). [](../concepts/differentiable-programming.md) explains how gradients cross the boundary.
 5. **Ship** it once it needs to run somewhere else, as a container image built with `tesseract build` or as a remote service reached with `Tesseract.from_url`. See [](../how-to/deploy.md).
 
-For tests and debugging, `Tesseract.from_tesseract_api` imports a Tesseract directly into the calling process (see [](../how-to/debugging.md)).
+(ways-to-run)=
+
+## Ways to run a Tesseract
+
+The same `tesseract_api.py` runs in four ways, without changes:
+
+| How                                                                   | What it does                                                                   | Use it when                                                                                                                                                                                                   |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`Tesseract.from_source`](#Tesseract.from_source)                     | Serves it from a local process, in an environment built from its configuration | You develop it, or call it on your own machine without Docker.                                                                                                                                                |
+| [`Tesseract.from_tesseract_api`](#Tesseract.from_tesseract_api)       | Imports it into your Python process                                            | Its dependencies fit into your environment. Calls are cheapest, and `print`, debuggers, and tracebacks work as in any imported module, which suits notebooks and unit tests (see [](../how-to/debugging.md)). |
+| `tesseract build` and [`Tesseract.from_image`](#Tesseract.from_image) | Builds a container image and serves it from Docker                             | You share it with people who don't have your environment, need system packages or compiled toolchains, or deploy to the cloud.                                                                                |
+| [`Tesseract.from_url`](#Tesseract.from_url)                           | Connects to a Tesseract served elsewhere                                       | It runs on another machine or a cluster, or several programs share one instance (see [](../how-to/deploy.md)).                                                                                                |
 
 ## Where to go next
 
@@ -85,6 +96,7 @@ If you use Tesseract in your research, please cite:
 :maxdepth: 2
 :hidden:
 
+Overview <self>
 installation.md
 Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```

@@ -29,7 +29,7 @@ Tesseract wraps any solver behind a typed interface with derivative endpoints, r
 - Differentiate through it with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), so one gradient can cross languages and frameworks. Overhead is typically a few milliseconds per call (see the [performance guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/performance/)).
 - Check every derivative endpoint against finite differences with `check-gradients`.
 
-## What you can do with it
+## Built with Tesseract
 
 <table>
 <tr>
@@ -139,7 +139,7 @@ $ tesseract build .
 $ tesseract run my-tesseract apply '{"inputs": {"x": [1.0, 2.0, 3.0]}}'
 ```
 
-## The ecosystem
+## The Tesseract ecosystem
 
 - **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)**: CLI, Python SDK, and runtime (this repo).
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)**: embed Tesseracts as JAX primitives, compatible with `jit`, `grad`, and `vmap`.
@@ -150,6 +150,7 @@ Also see [Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamli
 ## Learn more
 
 - [Get started](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/tutorials/get-started/)
+- [Overview: how Tesseracts work and the ways to run them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/)
 - [Checking gradients](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/how-to/check-gradients/)
 - [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/differentiable-programming/)
 - [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/)

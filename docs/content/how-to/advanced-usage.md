@@ -1,6 +1,6 @@
 # Advanced usage
 
-## File aliasing
+## Reading and writing files
 
 Payloads can refer to files by path instead of containing all data inline. A Tesseract reads the files its inputs refer to from its input path, and writes output files to its output path. With `Tesseract.from_source`, set them with `input_path` and `output_path`:
 
@@ -32,14 +32,16 @@ $ tesseract run file_io apply \
 
 See the [`file_io` example](../examples/building-blocks/file_io) for a complete walkthrough.
 
-On the command line, prefix a payload with `@` to read it from a file. This works for local paths and any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource (HTTP, FTP, S3, etc.). The `--output-path` of `tesseract run` also accepts fsspec-compatible targets:
+```{seealso}
+For handling large datasets that don't fit in memory, see the [out-of-core dataloading tutorial](https://si-tesseract.discourse.group/t/out-of-core-dataloading/52) which demonstrates streaming data through Tesseracts using file references and volume mounts.
+```
+
+## File aliasing
+
+On the command line, prefix a payload with `@` to read it from a file instead of passing it inline. This works for local paths and any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource (HTTP, FTP, S3, etc.). The `--output-path` of `tesseract run` also accepts fsspec-compatible targets:
 
 ```bash
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
-```
-
-```{seealso}
-For handling large datasets that don't fit in memory, see the [out-of-core dataloading tutorial](https://si-tesseract.discourse.group/t/out-of-core-dataloading/52) which demonstrates streaming data through Tesseracts using file references and volume mounts.
 ```
 
 ## Logging metrics and artifacts
@@ -238,7 +240,7 @@ If this doesn't work for your setup, override it with the `--user` argument to s
 If the container user is neither `root` nor the file owner, you may encounter permission errors on mounted volumes. Fix this by setting the correct UID/GID with `--user`, or by making the files readable by all users.
 ```
 
-## Tesseracts on HPC clusters
+## Tesseract on HPC clusters
 
 Common HPC use cases for Tesseracts include:
 

@@ -7,7 +7,6 @@ This page covers strategies for interactive development and debugging of Tessera
 `Tesseract.from_source` and containers run a Tesseract in a separate process.
 To step through it with a debugger, it is usually simpler to run it in your current environment, either by importing it into your Python process or with the `tesseract-runtime` CLI.
 Both need the Tesseract's dependencies installed in the current environment.
-If you have already called `Tesseract.from_source`, the environment it built in `.tesseract-venv` next to `tesseract_api.py` has them, along with `tesseract-runtime`.
 To attach a debugger to the separate process instead, see [Debug mode](#debug-mode).
 
 ### Importing into the current process
@@ -39,6 +38,8 @@ This approach is particularly useful for:
    $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py
    $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
    ```
+
+If you have served the Tesseract with `Tesseract.from_source` before, you can skip the first two steps. The environment it built in `.tesseract-venv`, next to `tesseract_api.py`, already contains the runtime and the Tesseract's dependencies, so `.tesseract-venv/bin/tesseract-runtime` works as is.
 
 (debug-mode)=
 

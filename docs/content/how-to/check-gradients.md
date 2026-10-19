@@ -70,7 +70,7 @@ If an endpoint raises an exception, the check reports it with the file and line 
 
 ## Choose a step size
 
-`--eps` (default `1e-4`) is an absolute step, applied unscaled to every input. No single step suits every problem. A step that is too large measures curvature as well as slope, while one that is too small drowns the difference in rounding error. The second problem is common with `float32` inputs. With `--eps 1e-7`, the correct VJP above fails:
+`--eps` (default `1e-4`) is an absolute step, applied unscaled to every input. No single step suits every problem. A step that is too large measures curvature as well as slope, while one that is too small drowns the difference in rounding error. The second problem is especially common with `float32` inputs. With `--eps 1e-7`, the correct VJP above fails:
 
 ```
   vector_jacobian_product value: [0. 4. 0.]

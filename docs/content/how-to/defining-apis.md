@@ -229,7 +229,7 @@ secrets. Use `host_credentials` and `--secret` for credentials.
 
 ## Setting environment variables
 
-Use the top-level `env` field in `tesseract_config.yaml` to set environment variables for the Tesseract. `Tesseract.from_source` sets them in the Tesseract's process. In a built image, they are baked in as `ENV` directives and available at both build time (during `RUN` steps after injection) and runtime.
+Use the top-level `env` field in `tesseract_config.yaml` to set environment variables for the Tesseract, whether it runs with `Tesseract.from_source` or from a built image.
 
 ```yaml
 # tesseract_config.yaml
@@ -246,7 +246,13 @@ This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenM
 
 ## Customizing the build process
 
-The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) controls how the Tesseract image is built. The options below apply only to images. `Tesseract.from_source` ignores them, uses the system libraries on your machine, and reads data files in place. Common reasons to customize it:
+The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) controls how the Tesseract image is built.
+
+```{note}
+These options only affect built images. `Tesseract.from_source` ignores them, uses the system libraries on your machine, and reads data files in place.
+```
+
+Common reasons to customize it:
 
 - **Your code needs system libraries** (e.g., `gfortran`, `libgomp1`) — use `extra_packages` to install them via `apt-get`.
 - **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
