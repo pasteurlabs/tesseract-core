@@ -236,7 +236,9 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     out = eqx.combine(diff_primals, static_primals)
 
     cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
-    _jax_vjp_cache.put(_cache_key(inputs_dict), (vjp_func, cotangent_template))
+    _jax_vjp_cache.put(
+        (apply_jit, _cache_key(inputs_dict)), (vjp_func, cotangent_template)
+    )
     return out
 
 
@@ -264,7 +266,8 @@ def jax_vjp(
     # vjp calls per output basis vector.
     if (
         _jax_vjp_cache is not None
-        and (cached := _jax_vjp_cache.get(_cache_key(inputs_dict))) is not None
+        and (cached := _jax_vjp_cache.get((apply_jit, _cache_key(inputs_dict))))
+        is not None
     ):
         vjp_func, cotangent_template = cached
         full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)

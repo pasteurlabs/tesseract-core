@@ -539,7 +539,8 @@ def test_multiple_workers(tmpdir, free_port, serve_in_subprocess):
         assert len(pids) > 1, "All requests were handled by the same worker"
 
 
-def test_debug_mode(dummy_tesseract_module, monkeypatch):
+@pytest.mark.parametrize("accept", ["application/json", "text/html, application/json"])
+def test_debug_mode(dummy_tesseract_module, monkeypatch, accept):
     from tesseract_core.runtime.config import update_config
 
     def apply_that_raises(inputs):
@@ -553,6 +554,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
 
     response = http_client.post(
         "/apply",
+        headers={"Accept": accept},
         json={
             "inputs": model_to_json(
                 dummy_tesseract_module.InputSchema.model_validate(test_input)
@@ -560,7 +562,12 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         },
     )
     assert response.status_code == 500, response.text
-    assert response.text == "Internal Server Error"
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.text.startswith("Internal Server Error.")
+    assert "server log" in response.text
+    assert "TESSERACT_DEBUG=1" in response.text
+    assert "content/how-to/debugging.html#debug-mode" in response.text
+    assert "Traceback" not in response.text
     assert "This is a test error" not in response.text
     assert "/test" not in rest_api.openapi()["paths"]
 
@@ -570,6 +577,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
 
     response = http_client.post(
         "/apply",
+        headers={"Accept": accept},
         json={
             "inputs": model_to_json(
                 dummy_tesseract_module.InputSchema.model_validate(test_input)
@@ -578,8 +586,69 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     )
     assert response.status_code == 500, response.text
     assert "This is a test error" in response.text
-    assert "Traceback" in response.text
+    if "text/html" in accept:
+        assert response.headers["content-type"] == "text/html; charset=utf-8"
+    else:
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert "Traceback" in response.text
+    assert "TESSERACT_DEBUG=1" not in response.text
     assert "/test" in rest_api.openapi()["paths"]
+
+
+@pytest.mark.parametrize("debug", [False, True])
+@pytest.mark.parametrize("error_size", [0, 128 * 1024])
+def test_server_error_over_http(
+    tmp_path, free_port, serve_in_subprocess, capsys, debug, error_size
+):
+    """Real HTTP errors give guidance without losing tracebacks in server logs."""
+    from tesseract_core import Tesseract
+
+    api_file = tmp_path / "tesseract_api.py"
+    api_file.write_text(
+        dedent(
+            f"""\
+            from pydantic import BaseModel
+
+            class InputSchema(BaseModel):
+                x: float
+
+            class OutputSchema(BaseModel):
+                y: float
+
+            def apply(inputs: InputSchema) -> OutputSchema:
+                raise ValueError("boom" + "x" * {error_size})
+            """
+        ),
+        encoding="utf-8",
+    )
+    with serve_in_subprocess(
+        api_file,
+        free_port,
+        env={"TESSERACT_DEBUG": str(int(debug))},
+    ) as url:
+        response = requests.post(f"{url}/apply", json={"inputs": {"x": 1}}, timeout=10)
+        assert response.status_code == 500
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        if debug:
+            assert "Traceback" in response.text
+            assert "ValueError: boom" in response.text
+            assert "TESSERACT_DEBUG=1" not in response.text
+        else:
+            assert response.text.count("TESSERACT_DEBUG=1") == 1
+            assert "Traceback" not in response.text
+            assert "boom" not in response.text
+
+        with (
+            Tesseract.from_url(url, timeout=10) as tess,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            tess.apply({"x": 1})
+        message = str(exc_info.value)
+        assert message == f"Error 500 from Tesseract: {response.text}"
+
+    server_logs = capsys.readouterr().out
+    assert "Traceback" in server_logs
+    assert "ValueError: boom" in server_logs
 
 
 def test_custom_validation_error_over_http(dummy_tesseract_module):
