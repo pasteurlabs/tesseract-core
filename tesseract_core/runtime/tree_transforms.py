@@ -138,22 +138,23 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
         key, path = path[0], path[1:]
         method, idx = path_to_index_op(key)
         if method in ("seq", "dict"):
-            if not path:
-                tree[idx] = value
-                return
-            return _set_recursive(tree[idx], path, value)
+            child = _set_recursive(tree[idx], path, value) if path else value
+            if isinstance(tree, tuple):
+                # Tuples cannot be assigned to, so rebuild this one
+                return (*tree[:idx], child, *tree[idx + 1 :])
+            tree[idx] = child
+            return tree
         elif method == "getattr":
             if isinstance(tree, dict):
                 # Dumped models are dicts, so look up keys before attributes like dict.values
-                if not path:
-                    tree[key] = value
-                    return
-                return _set_recursive(tree[key], path, value)
+                tree[key] = _set_recursive(tree[key], path, value) if path else value
+                return tree
             elif hasattr(tree, key):
-                if not path:
-                    setattr(tree, key, value)
-                    return
-                return _set_recursive(getattr(tree, key), path, value)
+                child = (
+                    _set_recursive(getattr(tree, key), path, value) if path else value
+                )
+                setattr(tree, key, child)
+                return tree
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -161,7 +162,7 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
 
     for path, value in values.items():
         path_parts = split_path(path)
-        _set_recursive(tree, path_parts, value)
+        tree = _set_recursive(tree, path_parts, value)
 
     return tree
 
