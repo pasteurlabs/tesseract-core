@@ -228,7 +228,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         # twice (once in the user code, once in the endpoint wrapper). This is not ideal but
         # should be the lesser evil to ensure validation of the final output.
         if isinstance(out, api_module.OutputSchema):
-            out = out.model_dump()
+            # round_trip leaves out computed fields, which are not inputs to validate
+            out = out.model_dump(round_trip=True)
         result = ApplyOutputSchema.model_validate(out)
         _trace("apply() returned:", result)
         return result

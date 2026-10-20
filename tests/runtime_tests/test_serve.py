@@ -12,11 +12,12 @@ from textwrap import dedent
 import numpy as np
 import pytest
 import requests
+import uvicorn
 from fastapi.testclient import TestClient
 from typeguard import suppress_type_checks
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.serve import create_rest_api
+from tesseract_core.runtime.serve import create_rest_api, serve
 
 test_input = {
     "a": [1.0, 2.0, 3.0],
@@ -308,11 +309,52 @@ def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):
         "shape": [3],
         "dtype": "float64",
         # Well-formed descriptor for a handle that does not exist
-        "data": {"buffer": f"0:{'A' * 88}:0:24", "encoding": "cuda_ipc"},
+        "data": {
+            "buffer": f"00000000-0000-0000-0000-000000000000:{'A' * 88}:0:24",
+            "encoding": "cuda_ipc",
+        },
     }
     response = client.post("/apply", json={"inputs": inputs})
     assert response.status_code == 422, response.text
     assert "not enabled" in response.text
+
+
+def test_check_gpu_transport_route(dummy_tesseract_module):
+    """Clients check a GPU transport at a route that exists only when one is enabled.
+
+    It stays out of the schema clients read endpoints from, and answers requests
+    it cannot serve without touching the GPU, so this needs no GPU.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    assert client.post("/check_gpu_transport", json={}).status_code == 404
+
+    update_config(gpu_transport="cuda_ipc")
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    assert "/check_gpu_transport" not in client.get("/openapi.json").json()["paths"]
+
+    reply = client.post("/check_gpu_transport", json={"gpu_transport": "none"})
+    assert reply.json()["ok"] is False
+    assert "not enabled" in reply.json()["reason"]
+
+    malformed = {"gpu_transport": "cuda_ipc", "array": {"dtype": "float32"}}
+    reply = client.post("/check_gpu_transport", json=malformed)
+    assert reply.json()["ok"] is False
+    assert "expected a uint8 array" in reply.json()["reason"]
+
+
+def test_serve_gpu_transport_refuses_several_workers(monkeypatch):
+    """A GPU transport needs a single worker, which keeps every response's exports."""
+    from tesseract_core.runtime.config import update_config
+
+    def fail_run(*args, **kwargs):
+        pytest.fail("the server was started")
+
+    monkeypatch.setattr(uvicorn, "run", fail_run)
+    update_config(gpu_transport="cuda_ipc")
+    with pytest.raises(ValueError, match="more than one worker"):
+        serve("localhost", 8000, num_workers=2)
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
@@ -621,6 +663,8 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
     tess = Tesseract.from_url("http://testserver")
     test_client.headers["Content-Type"] = "application/json"
     tess._client._session = test_client
+    # httpx responses lack the .ok the SDK checks when fetching the schema
+    tess._client.openapi_schema = rest_api.openapi()
 
     # Send a properly structured encoded array with non-numeric data in the buffer
     # to trigger a custom PydanticCustomError (array_decode_error) on the server

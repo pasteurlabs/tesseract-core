@@ -15,6 +15,11 @@ from pydantic import BaseModel
 
 from .config import get_config
 from .core import create_endpoints
+from .cuda.serving import (
+    EXPORTS_DONE_HEADER,
+    ResponseExports,
+    add_gpu_transport_handling,
+)
 from .file_interactions import (
     available_compressions,
     available_formats,
@@ -122,6 +127,7 @@ def create_response(
     encoding: NegotiatedEncoding,
     base_dir: str | None,
     binref_dir: str | None,
+    device_exports: Any = None,
 ) -> Response:
     """Create a response in the given (already negotiated) encoding."""
     if base_dir is None:
@@ -134,6 +140,7 @@ def create_response(
         binref_dir=binref_dir,
         compression=encoding.compression,
         gpu_transport=encoding.gpu_transport,
+        device_exports=device_exports,
     )
     # Name the format actually produced, which is not necessarily what the
     # client asked for: an Accept header may hold several media ranges.
@@ -175,20 +182,21 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ]
 
         @wraps(endpoint_func)
-        async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
+        async def wrapper(
+            *args: Any,
+            accept: str,
+            run_id: str | None,
+            exports_done: str | None,
+            **kwargs: Any,
+        ):
             config = get_config()
             encoding = negotiate_encoding(accept)
 
-            # Release device buffers exported by the previous request's GPU
-            # transport. Releasing at the start of each request keeps every
-            # export alive long enough for a serial client to copy it out of the
-            # response before it is reclaimed. See cuda_ipc for the assumptions
-            # this relies on. Gated on a configured GPU transport so the default
-            # path never imports the CUDA machinery.
+            exports = None
             if config.gpu_transport != "none":
-                from tesseract_core.runtime.device_transport import get_transport
-
-                get_transport(config.gpu_transport).release()
+                exports = ResponseExports(
+                    encoding.gpu_transport, acknowledged=exports_done is not None
+                )
 
             if run_id is None:
                 run_id = str(uuid.uuid4())
@@ -203,12 +211,19 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # Print profiling stats inside start_run context
                 # so they go through stdio redirection to the log file
                 profiler.print_stats()
-            return create_response(
-                result,
-                encoding,
-                base_dir=output_path,
-                binref_dir=rundir_name,
-            )
+
+            def make_response(device_exports: Any = None) -> Response:
+                return create_response(
+                    result,
+                    encoding,
+                    base_dir=output_path,
+                    binref_dir=rundir_name,
+                    device_exports=device_exports,
+                )
+
+            if exports is None:
+                return make_response()
+            return exports.respond(make_response)
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
@@ -230,10 +245,20 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 default=None,
                 annotation=Annotated[str | None, Query(include_in_schema=False)],
             )
+            exports_done = inspect.Parameter(
+                "exports_done",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=Header(
+                    default=None, alias=EXPORTS_DONE_HEADER, include_in_schema=False
+                ),
+                annotation=str | None,
+            )
             # Other header parameters common to computational endpoints
             # could be defined and appended here as well.
             new_params = original_sig.parameters.copy()
-            new_params.update({"accept": accept, "run_id": run_id})
+            new_params.update(
+                {"accept": accept, "run_id": run_id, "exports_done": exports_done}
+            )
             # Update the signature of the wrapper
             new_sig = original_sig.replace(parameters=list(new_params.values()))
             wrapper.__signature__ = new_sig
@@ -249,6 +274,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         wrapped_endpoint = wrap_endpoint(endpoint_func)
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
+
+    if config.gpu_transport != "none":
+        add_gpu_transport_handling(app)
 
     generate_openapi = app.openapi
 
@@ -267,6 +295,15 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
 def serve(host: str, port: int, num_workers: int) -> None:
     """Start the REST API."""
+    gpu_transport = get_config().gpu_transport
+    if gpu_transport != "none" and num_workers > 1:
+        # A client names the responses it is done with on a later request,
+        # which may reach a different worker than the one keeping their GPU
+        # memory, so that memory would only be freed when it times out.
+        raise ValueError(
+            f"gpu_transport={gpu_transport!r} cannot be served by more than one "
+            f"worker (got num_workers={num_workers})."
+        )
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",
         host=host,
