@@ -61,7 +61,7 @@ def pytest_collection_modifyitems(config, items):
 
         try:
             docker = docker_client_module.CLIDockerClient()
-            docker.info()
+            docker.version()
             return True
         except (docker_client_module.APIError, OSError):
             return False
@@ -431,17 +431,21 @@ def _docker_cleanup(docker_client, request):
                     f"Failed to remove container {container}: {pprint_exc(e)}"
                 )
 
-        # Remove images
-        for image in context["images"]:
-            try:
-                if isinstance(image, str):
-                    image_obj = docker_client.images.get(image)
-                else:
-                    image_obj = image
+        # Remove images -- skipped when TESSERACT_TEST_KEEP_IMAGES is set (as on CI,
+        # where the runner is ephemeral): each `rmi` adds seconds of CLI startup +
+        # layer unlink work (especially slow on rootless podman).
+        keep_images = os.environ.get("TESSERACT_TEST_KEEP_IMAGES", "") not in ("", "0")
+        if not keep_images:
+            for image in context["images"]:
+                try:
+                    if isinstance(image, str):
+                        image_obj = docker_client.images.get(image)
+                    else:
+                        image_obj = image
 
-                docker_client.images.remove(image_obj.id)
-            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
-                failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
+                    docker_client.images.remove(image_obj.id)
+                except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
+                    failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
 
         # Remove volumes
         for volume in context["volumes"]:
@@ -561,8 +565,8 @@ def mocked_docker(monkeypatch):
         """Mock CLIDockerClient class."""
 
         @staticmethod
-        def info() -> tuple:
-            """Mock info method for DockerClient."""
+        def version() -> tuple:
+            """Mock version method for DockerClient."""
             return "", ""
 
         class volumes:
