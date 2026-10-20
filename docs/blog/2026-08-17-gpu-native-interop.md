@@ -147,16 +147,16 @@ Asking for `gpu_transport="cuda_ipc"` also makes the setup fail loudly. Before i
 
 ## Results
 
-We timed one training step, a batch of 32 rollouts forward and backward plus the optimizer update, on an NVIDIA A100 80GB with CUDA 13 and JAX 0.11.2 ([benchmark script](https://github.com/dionhaefner/Multi-Agent-DPC/blob/dca8d074eacc9ea97a1cd43740f115340c437dff/examples/heat1d/decentralized/benchmark.py)). For comparison, the last column runs the same script with everything on the CPU of an Apple M1 Pro laptop. With JAX on both sides of the boundary, the rows differ only in how the solver is called, which is what makes this a clean test, even though it isn't a setup anyone should build on purpose.
+We timed one training step, a batch of 32 rollouts forward and backward plus the optimizer update, on an NVIDIA A100 80GB with CUDA 13 and JAX 0.11.2 ([benchmark script](https://github.com/dionhaefner/Multi-Agent-DPC/blob/dca8d074eacc9ea97a1cd43740f115340c437dff/examples/heat1d/decentralized/benchmark.py)). With JAX on both sides of the boundary, the rows differ only in how the solver is called, which is what makes this a clean test, even though it isn't a setup anyone should build on purpose.
 
-| Setup                                                 | A100 GPU | M1 Pro CPU |
-| ----------------------------------------------------- | -------: | ---------: |
-| Solver imported directly, one process                 |   106 ms |     183 ms |
-| Solver in its own process, arrays through host memory |   265 ms |     369 ms |
-| Solver in its own process, `cuda_ipc`                 |   209 ms |          – |
-| Same, with the solver's VJP cache                     |   126 ms |          – |
+| Setup                                                 | Time per training step |
+| ----------------------------------------------------- | ---------------------: |
+| Solver imported directly, one process                 |                 106 ms |
+| Solver in its own process, arrays through host memory |                 265 ms |
+| Solver in its own process, `cuda_ipc`                 |                 209 ms |
+| Same, with the solver's VJP cache                     |                 126 ms |
 
-Removing the host round trip closes about a third of the gap to the single-process version on the GPU. Most of what the third row still pays for is compute rather than transport. To compute the VJP, the solver reruns the entire 300-step forward pass before it can go backward. The last row turns on an experimental option in Tesseract's JAX recipe, the {py:func}`VJP cache <tesseract_core.runtime.experimental.set_jax_vjp_cache_size>`, which keeps the residuals from the forward pass so the VJP call can reuse them, and together the two close almost 90% of the gap.
+Removing the host round trip closes about a third of the gap to the single-process version. Most of what the third row still pays for is compute rather than transport. To compute the VJP, the solver reruns the entire 300-step forward pass before it can go backward. The last row turns on an experimental option in Tesseract's JAX recipe, the {py:func}`VJP cache <tesseract_core.runtime.experimental.set_jax_vjp_cache_size>`, which keeps the residuals from the forward pass so the VJP call can reuse them, and together the two close almost 90% of the gap.
 
 ### Where the remaining time goes
 
