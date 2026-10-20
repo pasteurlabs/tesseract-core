@@ -365,10 +365,11 @@ def test_serve_hands_config_to_spawned_workers(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: seen.update(os.environ))
     monkeypatch.setattr(os, "environ", {})
-    update_config(input_path=str(tmp_path), debug=False)
+    update_config(input_path=str(tmp_path), debug=False, compression=None)
     serve("localhost", 8000, num_workers=2)
     assert seen["TESSERACT_INPUT_PATH"] == str(tmp_path)
     assert seen["TESSERACT_DEBUG"] == "0"
+    assert "TESSERACT_COMPRESSION" not in seen
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
