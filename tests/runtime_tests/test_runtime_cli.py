@@ -289,7 +289,15 @@ def test_input_path_known_before_api_import(monkeypatch, tmpdir, form):
     monkeypatch.setattr(sys, "argv", ["tesseract-runtime", *args, "apply", "{}"])
     with override_config():
         _configure_required_file_load()
-        assert get_config().input_path == Path(tmpdir).as_posix()
+        assert Path(get_config().input_path) == Path(tmpdir)
+
+
+def test_input_path_without_value(monkeypatch):
+    from tesseract_core.runtime.cli import _configure_required_file_load
+
+    monkeypatch.setattr(sys, "argv", ["tesseract-runtime", "--input-path"])
+    with pytest.raises(ValueError, match="No input path provided"):
+        _configure_required_file_load()
 
 
 @pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])

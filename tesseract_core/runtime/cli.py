@@ -3,6 +3,7 @@
 
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
+import argparse
 import inspect
 import io
 import os
@@ -18,6 +19,7 @@ from typing import (
     Annotated,
     Any,
     Literal,
+    NoReturn,
     Union,
     get_args,
     get_origin,
@@ -708,17 +710,16 @@ def _configure_required_file_load() -> None:
     ]
     # Make sure input_path is available when loading tesseract_api.py for the first time
     # (needed to resolve required files)
-    for i, arg in enumerate(sys.argv):
-        if arg.startswith("--input-path="):
-            input_path = Path(arg.partition("=")[2])
-        elif arg == "--input-path":
-            if len(sys.argv) <= i + 1:
-                raise ValueError("No input path provided after --input-path argument.")
-            input_path = Path(sys.argv[i + 1])
-        else:
-            continue
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--input-path", type=Path)
+
+    def fail(message: str) -> NoReturn:
+        raise ValueError("No input path provided after --input-path argument.")
+
+    parser.error = fail
+    input_path = parser.parse_known_args(sys.argv[1:])[0].input_path
+    if input_path is not None:
         update_config(input_path=input_path.as_posix())
-        break
     if (
         any(arg in sys.argv for arg in skip_required_file_load_args)
         or os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
