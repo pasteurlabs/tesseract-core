@@ -215,6 +215,12 @@ class TestSetAtPath:
     def test_dict_method_names_are_keys(self, key):
         assert set_at_path({key: 1}, {key: 2}) == {key: 2}
 
+    def test_tuples(self):
+        """Tuples, as a dumped tuple field leaves them, are rebuilt rather than assigned to."""
+        tree = {"pair": ({"a": 1}, {"a": 2}), "flat": (1, 2, 3)}
+        result = set_at_path(tree, {"pair.[1].a": 20, "flat.[0]": 10})
+        assert result == {"pair": ({"a": 1}, {"a": 20}), "flat": (10, 2, 3)}
+
     def test_set_at_path_creates_deep_copy(self, sample_tree):
         """Test that set_at_path creates a deep copy and doesn't modify original."""
         original_value = sample_tree["root_key"]
