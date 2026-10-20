@@ -414,22 +414,21 @@ def _docker_cleanup(docker_client, request):
                     f"Failed to remove container {container}: {pprint_exc(e)}"
                 )
 
-        # Remove images -- skipped under CI: the runner is ephemeral so the image
-        # store is wiped with the VM anyway, and each `rmi` adds seconds of CLI
-        # startup + layer unlink work (especially slow on rootless podman).
-        skip_image_cleanup = os.environ.get("CI") == "true"
-        for image in context["images"]:
-            if skip_image_cleanup:
-                continue
-            try:
-                if isinstance(image, str):
-                    image_obj = docker_client.images.get(image)
-                else:
-                    image_obj = image
+        # Remove images -- skipped when TESSERACT_TEST_KEEP_IMAGES is set (as on CI,
+        # where the runner is ephemeral): each `rmi` adds seconds of CLI startup +
+        # layer unlink work (especially slow on rootless podman).
+        keep_images = os.environ.get("TESSERACT_TEST_KEEP_IMAGES", "") not in ("", "0")
+        if not keep_images:
+            for image in context["images"]:
+                try:
+                    if isinstance(image, str):
+                        image_obj = docker_client.images.get(image)
+                    else:
+                        image_obj = image
 
-                docker_client.images.remove(image_obj.id)
-            except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
-                failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
+                    docker_client.images.remove(image_obj.id)
+                except Exception as e:  # noqa: BLE001 -- collect all failures, raised together below
+                    failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
 
         # Remove volumes
         for volume in context["volumes"]:
