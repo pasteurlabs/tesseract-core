@@ -57,6 +57,7 @@ class FakeNixlAgent:
         self.removed_agents = []
         self.known_agents = set()
         self.xfers = []
+        self.xfer_threads = []
         self.released_xfers = []
 
     def register_memory(self, descs, mem_type):
@@ -90,6 +91,7 @@ class FakeNixlAgent:
     def initialize_xfer(self, op, local, remote, peer, notif):
         handle = object()
         self.xfers.append((handle, op, local, remote, peer))
+        self.xfer_threads.append(threading.current_thread().name)
         return handle
 
     def transfer(self, handle):
@@ -106,7 +108,23 @@ class FakeNixlAgent:
 def fake_agent(monkeypatch):
     agent = FakeNixlAgent()
     monkeypatch.setattr(nixl_transport, "_NIXL_AGENT", agent)
+    monkeypatch.setattr(nixl_transport, "_PARALLEL_READ_AGENT", agent)
     return agent
+
+
+def _nixl_val(shape, dtype="float32"):
+    """A nixl array dict for an array the fake producer exported on its device 3."""
+    import pybase64
+
+    return {
+        "object_type": "array",
+        "shape": list(shape),
+        "dtype": dtype,
+        "data": {
+            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
+            "encoding": "nixl",
+        },
+    }
 
 
 def test_nixl_registered_as_transport():
@@ -251,19 +269,8 @@ def test_empty_descriptor_for_a_non_empty_array_is_rejected(mocked_cuda):
 
 def test_load_reads_onto_the_active_device(mocked_cuda, fake_agent):
     """The consumer reads into its own buffer on its active device and cleans up."""
-    import pybase64
-
     mocked_cuda.current_device = 2
-    val = {
-        "object_type": "array",
-        "shape": [4],
-        "dtype": "float64",
-        "data": {
-            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
-            "encoding": "nixl",
-        },
-    }
-    arr = nixl_transport.load_nixl_arraydict(val)
+    arr = nixl_transport.load_nixl_arraydict(_nixl_val((4,), "float64"))
 
     assert arr.device == 2
     assert arr.shape == (4,)
@@ -287,45 +294,121 @@ def test_decoding_never_unpickles(mocked_cuda, fake_agent, monkeypatch):
     """A message from another process must not be able to run code here."""
     import pickle
 
-    import pybase64
-
     def refuse(*args, **kwargs):
         raise AssertionError("decoding a nixl array must not unpickle")
 
     monkeypatch.setattr(pickle, "loads", refuse)
     monkeypatch.setattr(fake_agent, "deserialize_descs", refuse, raising=False)
-    val = {
-        "object_type": "array",
-        "shape": [2],
-        "dtype": "float32",
-        "data": {
-            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:0",
-            "encoding": "nixl",
-        },
-    }
-    nixl_transport.load_nixl_arraydict(val)
+    nixl_transport.load_nixl_arraydict(_nixl_val((2,)))
 
 
 def test_failed_transfer_frees_the_buffer(mocked_cuda, fake_agent):
-    import pybase64
-
     fake_agent.final_state = "ERR"
-    val = {
-        "object_type": "array",
-        "shape": [4],
-        "dtype": "float32",
-        "data": {
-            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
-            "encoding": "nixl",
-        },
-    }
     with pytest.raises(RuntimeError, match="nixl transfer failed"):
-        nixl_transport.load_nixl_arraydict(val)
+        nixl_transport.load_nixl_arraydict(_nixl_val((4,)))
 
     assert len(mocked_cuda.calls["free"]) == 1
     assert len(fake_agent.released_xfers) == 1
     assert fake_agent.deregistered == fake_agent.registered
     assert fake_agent.removed_agents == ["producer"]
+
+
+def test_large_array_is_read_in_parallel_spans(mocked_cuda, fake_agent):
+    """An array of at least nixl_parallel_min_bytes is split into reads on the read pool."""
+    from tesseract_core.runtime import config
+
+    config.update_config(nixl_parallel_reads=4, nixl_parallel_min_bytes=0)
+    mocked_cuda.current_device = 2
+    nixl_transport.load_nixl_arraydict(_nixl_val((16,)))
+
+    [owned_ptr] = [desc[0] for desc in fake_agent.registered[0].descs]
+    spans = sorted(
+        (remote[1][0], local[1][0]) for _, _, local, remote, _ in fake_agent.xfers
+    )
+    assert spans == [
+        ((0x7000 + offset, 16, 3), (owned_ptr + offset, 16, 2))
+        for offset in (0, 16, 32, 48)
+    ]
+    assert all(
+        name.startswith("tesseract-nixl-read") for name in fake_agent.xfer_threads
+    )
+    assert len(fake_agent.released_xfers) == 4
+    assert fake_agent.deregistered == fake_agent.registered
+    assert fake_agent.removed_agents == ["producer"]
+
+
+def test_only_split_reads_use_the_parallel_read_agent(mocked_cuda, monkeypatch):
+    from tesseract_core.runtime import config
+
+    main, parallel = FakeNixlAgent(), FakeNixlAgent()
+    monkeypatch.setattr(nixl_transport, "_NIXL_AGENT", main)
+    monkeypatch.setattr(nixl_transport, "_PARALLEL_READ_AGENT", parallel)
+    config.update_config(nixl_parallel_reads=4, nixl_parallel_min_bytes=64)
+
+    nixl_transport.load_nixl_arraydict(_nixl_val((8,)))
+    assert (len(main.xfers), len(parallel.xfers)) == (1, 0)
+
+    nixl_transport.load_nixl_arraydict(_nixl_val((16,)))
+    assert (len(main.xfers), len(parallel.xfers)) == (1, 4)
+
+
+def test_parallel_spans_cover_an_uneven_array(fake_agent):
+    from tesseract_core.runtime import config
+
+    config.update_config(nixl_parallel_reads=3, nixl_parallel_min_bytes=0)
+    assert nixl_transport._read_spans(40) == [(0, 14), (14, 14), (28, 12)]
+
+    config.update_config(nixl_parallel_min_bytes=41)
+    assert nixl_transport._read_spans(40) == [(0, 40)]
+
+
+def test_failed_parallel_read_waits_for_every_read(mocked_cuda, fake_agent):
+    from tesseract_core.runtime import config
+
+    config.update_config(nixl_parallel_reads=4, nixl_parallel_min_bytes=0)
+    fake_agent.final_state = "ERR"
+    with pytest.raises(RuntimeError, match="nixl transfer failed"):
+        nixl_transport.load_nixl_arraydict(_nixl_val((16,)))
+
+    assert len(fake_agent.released_xfers) == 4
+    assert len(mocked_cuda.calls["free"]) == 1
+
+
+def test_agents_use_the_configured_workers_and_tcp_segments(monkeypatch):
+    """The parallel-read agent gets one UCX worker per read, the main agent one.
+
+    Both use the configured TCP segment size, unless a UCX variable is already set.
+    """
+    from types import SimpleNamespace
+
+    from tesseract_core.runtime import config
+
+    backends = []
+
+    class Agent:
+        def __init__(self, name, conf):
+            assert conf.backends == []
+
+        def create_backend(self, name, params):
+            backends.append((name, params))
+
+    fake_api = SimpleNamespace(
+        nixl_agent=Agent,
+        nixl_agent_config=lambda **kwargs: SimpleNamespace(**kwargs),
+        nixl_thread_sync_t=SimpleNamespace(NIXL_THREAD_SYNC_STRICT="strict"),
+    )
+    environ = {"UCX_TCP_RX_SEG_SIZE": "64k"}
+    monkeypatch.setattr(nixl_transport.os, "environ", environ)
+    monkeypatch.setattr(nixl_transport, "_NIXL_AGENT", None)
+    monkeypatch.setattr(nixl_transport, "_PARALLEL_READ_AGENT", None)
+    monkeypatch.setattr(nixl_transport, "_import_nixl_api", lambda: fake_api)
+    config.update_config(nixl_parallel_reads=3, nixl_ucx_tcp_seg_size="2m")
+
+    nixl_transport._get_nixl_agent()
+    nixl_transport._get_parallel_read_agent()
+
+    assert backends == [("UCX", {"num_workers": "1"}), ("UCX", {"num_workers": "3"})]
+    assert environ == {"UCX_TCP_RX_SEG_SIZE": "64k", "UCX_TCP_TX_SEG_SIZE": "2m"}
 
 
 def test_concurrent_reads_from_one_producer_take_turns(fake_agent):

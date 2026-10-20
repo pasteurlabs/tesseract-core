@@ -204,7 +204,9 @@ def test_resolve_gpu_transport_uses_nixl_when_it_works(free_port, serve_in_subpr
 
             # Repeated calls exercise the client re-adding the server's agent,
             # whose metadata changes as it registers each response's exports.
-            for n in (4, 1000, 0):
+            # The largest array is above nixl_parallel_min_bytes, so it crosses
+            # in parallel reads.
+            for n in (4, 1000, 0, 5_000_000):
                 x = cupy.arange(n, dtype=cupy.float32)
                 result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
                 assert isinstance(result["y"], IpcDeviceArray)

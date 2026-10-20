@@ -67,6 +67,19 @@ class RuntimeConfig(BaseModel):
     # exported and for received arrays. Applies per process, so a client and a
     # server on the same GPU can each keep this much. ``0`` disables reuse.
     cuda_ipc_pool_fraction: float = Field(default=0.25, ge=0, le=1)
+    # How many parallel reads the ``nixl`` transport splits an array of at least
+    # ``nixl_parallel_min_bytes`` into. Each gets its own UCX worker, and
+    # so its own connection when UCX uses TCP, where one connection can be far
+    # slower than the link. Smaller arrays skip the extra workers, which take
+    # longer to connect. Read when the process first splits an array.
+    nixl_parallel_reads: int = Field(default=4, ge=1)
+    nixl_parallel_min_bytes: int = Field(default=16 * 2**20, ge=0)
+    # UCX's TCP segment size for the ``nixl`` transport, used unless
+    # ``UCX_TCP_TX_SEG_SIZE`` or ``UCX_TCP_RX_SEG_SIZE`` are set. With UCX's
+    # smaller defaults, GPU memory crosses TCP at a fraction of the link speed
+    # however many parallel reads run. An empty string keeps UCX's defaults.
+    # Read when the process first uses ``nixl``.
+    nixl_ucx_tcp_seg_size: str = "1m"
 
     @field_validator("input_path", "output_path")
     @classmethod
