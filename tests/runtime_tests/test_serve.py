@@ -592,7 +592,7 @@ def test_server_error_over_http(
             assert "ValueError: boom" in response.text
             assert "TESSERACT_DEBUG=1" not in response.text
         else:
-            assert "TESSERACT_DEBUG=1" in response.text
+            assert response.text.count("TESSERACT_DEBUG=1") == 1
             assert "Traceback" not in response.text
             assert "boom" not in response.text
 
@@ -602,8 +602,7 @@ def test_server_error_over_http(
         ):
             tess.apply({"x": 1})
         message = str(exc_info.value)
-        assert message.startswith(f"Error 500 from Tesseract: {response.text}")
-        assert message.count("TESSERACT_DEBUG=1") == 1
+        assert message == f"Error 500 from Tesseract: {response.text}"
 
     server_logs = capsys.readouterr().out
     assert "Traceback" in server_logs

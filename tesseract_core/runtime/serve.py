@@ -28,7 +28,6 @@ from .profiler import Profiler
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
 
-# Keep in sync with the SDK hint without coupling the two distributions.
 _SERVER_ERROR_HINT = (
     "The traceback is in the server log. To include it in responses, enable "
     "debug mode on the server (TESSERACT_DEBUG=1). See "
