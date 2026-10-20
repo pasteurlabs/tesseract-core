@@ -10,10 +10,10 @@ backend by itself: CUDA IPC or shared memory on one host, and UCX across hosts
 Tesseract encodes or decodes a NIXL array.
 
 The consumer initiates the transfer, a READ. The producer registers the array's
-device memory with its NIXL agent and sends its agent metadata, the array's
-address and its device in the JSON message. The consumer adds the producer as a
-remote agent and reads the bytes into a buffer of its own, which it returns as
-the same :class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray` that
+device memory with its NIXL agent and sends its agent's name and metadata, the
+array's address and its device in the JSON message. The consumer adds the
+producer as a remote agent and reads the bytes into a buffer of its own, which it
+returns as the same :class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray` that
 ``cuda_ipc`` returns. The producer's registration does nothing until then, so
 this fits the request lifecycle of ``cuda_ipc``.
 
@@ -60,9 +60,11 @@ from tesseract_core.runtime.device_transport import DeviceTransport
 _NIXL_AGENT: Any = None
 _NIXL_AGENT_LOCK = threading.Lock()
 
-# Reads in flight from each remote agent, by name (see _remote_agent).
-_REMOTE_READS: collections.Counter[str] = collections.Counter()
-_REMOTE_READS_LOCK = threading.Lock()
+# A lock per producer agent, so that reads from one producer take turns (see
+# _remote_agent), and the number of reads using each lock.
+_PRODUCER_LOCKS: dict[str, threading.Lock] = {}
+_PRODUCER_READS: collections.Counter[str] = collections.Counter()
+_PRODUCER_LOCKS_LOCK = threading.Lock()
 
 # How long a consumer waits for a posted READ to complete. It only runs out when
 # a transfer stalls, e.g. because the producer died, not on a slow large one.
@@ -187,7 +189,7 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
     if info.nbytes == 0:
         # An empty array has no memory to register, so its descriptor is empty
         # and the consumer recreates it without a transfer.
-        buffer = "::"
+        buffer = ":::"
     else:
         agent = _get_nixl_agent()
         registration = agent.register_memory(
@@ -202,7 +204,7 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
             cuda_api.device_synchronize()
 
         meta_b64 = pybase64.b64encode_as_string(agent.get_agent_metadata())
-        buffer = f"{meta_b64}:{info.data_ptr}:{info.device}"
+        buffer = f"{agent.name}:{meta_b64}:{info.data_ptr}:{info.device}"
 
     return {
         "object_type": "array",
@@ -218,30 +220,43 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
 
 
 @contextlib.contextmanager
-def _remote_agent(agent: Any, metadata: bytes) -> Iterator[str]:
-    """Load a producer's agent metadata for the block, yielding the producer's name.
+def _remote_agent(agent: Any, name: str, metadata: bytes) -> Iterator[None]:
+    """Load a producer's agent metadata for the duration of one read.
 
-    NIXL refuses metadata that describes a memory region it already knows under
-    another registration, which a producer sends whenever its pooled allocator
-    hands out the same buffer again. So the producer is forgotten once no read
-    from it is in flight, and each message's metadata loads afresh.
+    NIXL cannot load metadata for a producer it already knows, and a producer's
+    metadata changes with every message, as its pooled allocator registers the
+    same buffers anew. So each read loads its message's metadata and forgets the
+    producer afterwards, and reads from one producer take turns.
     """
-    with _REMOTE_READS_LOCK:
-        name = agent.add_remote_agent(metadata)
-        _REMOTE_READS[name] += 1
+    with _PRODUCER_LOCKS_LOCK:
+        lock = _PRODUCER_LOCKS.setdefault(name, threading.Lock())
+        _PRODUCER_READS[name] += 1
     try:
-        yield name
+        with lock:
+            loaded_name = agent.add_remote_agent(metadata)
+            # NIXL returns the name as bytes, though it annotates it as str.
+            if isinstance(loaded_name, bytes):
+                loaded_name = loaded_name.decode()
+            try:
+                if loaded_name != name:
+                    raise ValueError(
+                        f"nixl descriptor names producer {name!r}, but its "
+                        f"metadata describes {loaded_name!r}"
+                    )
+                yield
+            finally:
+                agent.remove_remote_agent(loaded_name)
     finally:
-        with _REMOTE_READS_LOCK:
-            _REMOTE_READS[name] -= 1
-            if not _REMOTE_READS[name]:
-                del _REMOTE_READS[name]
-                agent.remove_remote_agent(name)
+        with _PRODUCER_LOCKS_LOCK:
+            _PRODUCER_READS[name] -= 1
+            if not _PRODUCER_READS[name]:
+                del _PRODUCER_READS[name]
+                del _PRODUCER_LOCKS[name]
 
 
 def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
     """Read the array a NIXL descriptor describes into a new buffer on the active device."""
-    meta_b64, address, remote_device = val["data"]["buffer"].split(":")
+    peer_name, meta_b64, address, remote_device = val["data"]["buffer"].split(":")
     dtype = np.dtype(val["dtype"])
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
@@ -267,7 +282,7 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
 
     # Entering the device also makes its primary context current on this
     # thread, which the allocation and UCX's CUDA transport need.
-    with _remote_agent(agent, remote_meta) as peer_name, on_device(device):
+    with _remote_agent(agent, peer_name, remote_meta), on_device(device):
         owned_ptr = cuda_api.malloc(nbytes)
         try:
             local_reg = agent.register_memory([(owned_ptr, nbytes, device, "")], "VRAM")

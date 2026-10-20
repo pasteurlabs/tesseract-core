@@ -11,6 +11,8 @@ agent and the ``mocked_cuda`` runtime instead of a GPU and NIXL. The GPU tests i
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 import pytest
 
@@ -39,7 +41,13 @@ class FakeRegistration:
 
 
 class FakeNixlAgent:
-    """Records how the transport drives a NIXL agent."""
+    """Records how the transport drives a NIXL agent.
+
+    Every remote agent it loads is named ``"producer"``, and loading it again
+    while it is known fails, as in NIXL.
+    """
+
+    name = "local"
 
     def __init__(self, final_state="DONE"):
         self.final_state = final_state
@@ -47,6 +55,7 @@ class FakeNixlAgent:
         self.deregistered = []
         self.remote_agents = []
         self.removed_agents = []
+        self.known_agents = set()
         self.xfers = []
         self.released_xfers = []
 
@@ -63,10 +72,15 @@ class FakeNixlAgent:
         return b"agent-metadata"
 
     def add_remote_agent(self, metadata):
+        if "producer" in self.known_agents:
+            raise RuntimeError("NIXL_ERR_NOT_ALLOWED")
+        self.known_agents.add("producer")
         self.remote_agents.append(metadata)
-        return "producer"
+        # NIXL returns the name as bytes.
+        return b"producer"
 
     def remove_remote_agent(self, name):
+        self.known_agents.remove(name)
         self.removed_agents.append(name)
 
     def get_xfer_descs(self, descs, mem_type):
@@ -105,17 +119,28 @@ def test_nixl_registered_as_transport():
     assert isinstance(transport, DeviceTransport)
 
 
-@pytest.mark.parametrize("buffer", ["YWJj:139872:0", "::"])
+@pytest.mark.parametrize("buffer", ["tesseract-12-ab3f:YWJj:139872:0", ":::"])
 def test_nixl_array_schema_accepts_valid_descriptors(buffer):
     from tesseract_core.runtime.array_encoding import NixlArrayData
 
-    # <agent_meta_b64>:<address>:<device>, or "::" for an empty array
+    # <agent_name>:<agent_meta_b64>:<address>:<device>, or ":::" for an empty array
     data = NixlArrayData(buffer=buffer, encoding="nixl")
     assert data.encoding == "nixl"
 
 
 @pytest.mark.parametrize(
-    "bad", ["notpacked", "YWJj:12", "YWJj:ZGVm:0", "YWJj:12:x", ":12:0", ":", "a b:1:0"]
+    "bad",
+    [
+        "notpacked",
+        "YWJj:12:0",
+        "p:YWJj:12",
+        "p:YWJj:ZGVm:0",
+        "p:YWJj:12:x",
+        ":YWJj:12:0",
+        "p::12:0",
+        "::",
+        "a b:YWJj:1:0",
+    ],
 )
 def test_nixl_array_schema_rejects_malformed(bad):
     from pydantic import ValidationError
@@ -178,7 +203,8 @@ def test_dump_registers_syncs_and_keeps_the_array(mocked_cuda, fake_agent):
     assert out["shape"] == [2, 3]
     assert out["dtype"] == "float32"
     assert out["data"]["encoding"] == "nixl"
-    meta_b64, address, device = out["data"]["buffer"].split(":")
+    name, meta_b64, address, device = out["data"]["buffer"].split(":")
+    assert name == "local"
     assert pybase64.b64decode(meta_b64) == b"agent-metadata"
     assert (int(address), int(device)) == (0x4000, 0)
 
@@ -204,7 +230,7 @@ def test_empty_array_crosses_without_nixl(mocked_cuda, monkeypatch):
 
     group = nixl_transport.NixlExportGroup()
     out = nixl_transport.dump_nixl_arraydict(FakeCudaArray((0, 3), data_ptr=0), group)
-    assert out["data"]["buffer"] == "::"
+    assert out["data"]["buffer"] == ":::"
     assert not group
 
     arr = nixl_transport.load_nixl_arraydict(out)
@@ -214,9 +240,10 @@ def test_empty_array_crosses_without_nixl(mocked_cuda, monkeypatch):
 
 def test_empty_descriptor_for_a_non_empty_array_is_rejected(mocked_cuda):
     val = {
+        "object_type": "array",
         "shape": [3],
         "dtype": "float32",
-        "data": {"buffer": "::", "encoding": "nixl"},
+        "data": {"buffer": ":::", "encoding": "nixl"},
     }
     with pytest.raises(ValueError, match="descriptor is empty"):
         nixl_transport.load_nixl_arraydict(val)
@@ -228,10 +255,11 @@ def test_load_reads_onto_the_active_device(mocked_cuda, fake_agent):
 
     mocked_cuda.current_device = 2
     val = {
+        "object_type": "array",
         "shape": [4],
         "dtype": "float64",
         "data": {
-            "buffer": f"{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
+            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
             "encoding": "nixl",
         },
     }
@@ -267,10 +295,11 @@ def test_decoding_never_unpickles(mocked_cuda, fake_agent, monkeypatch):
     monkeypatch.setattr(pickle, "loads", refuse)
     monkeypatch.setattr(fake_agent, "deserialize_descs", refuse, raising=False)
     val = {
+        "object_type": "array",
         "shape": [2],
         "dtype": "float32",
         "data": {
-            "buffer": f"{pybase64.b64encode_as_string(b'meta')}:{0x7000}:0",
+            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:0",
             "encoding": "nixl",
         },
     }
@@ -282,10 +311,11 @@ def test_failed_transfer_frees_the_buffer(mocked_cuda, fake_agent):
 
     fake_agent.final_state = "ERR"
     val = {
+        "object_type": "array",
         "shape": [4],
         "dtype": "float32",
         "data": {
-            "buffer": f"{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
+            "buffer": f"producer:{pybase64.b64encode_as_string(b'meta')}:{0x7000}:3",
             "encoding": "nixl",
         },
     }
@@ -298,19 +328,36 @@ def test_failed_transfer_frees_the_buffer(mocked_cuda, fake_agent):
     assert fake_agent.removed_agents == ["producer"]
 
 
-def test_producer_is_forgotten_once_no_read_from_it_is_in_flight(fake_agent):
-    """A producer's metadata is dropped only when its last concurrent read ends.
+def test_concurrent_reads_from_one_producer_take_turns(fake_agent):
+    """A second read from a producer loads its metadata only after the first ends."""
+    second_loaded = threading.Event()
 
-    NIXL rejects reloading a memory region under a new registration, so each
-    message's metadata must load into a fresh view of the producer, but not
-    while another read still uses the current one.
-    """
-    with nixl_transport._remote_agent(fake_agent, b"meta") as first:
-        with nixl_transport._remote_agent(fake_agent, b"meta") as second:
-            assert first == second == "producer"
-        assert fake_agent.removed_agents == []
+    def second_read():
+        with nixl_transport._remote_agent(fake_agent, "producer", b"meta-2"):
+            second_loaded.set()
+
+    with nixl_transport._remote_agent(fake_agent, "producer", b"meta-1"):
+        thread = threading.Thread(target=second_read)
+        thread.start()
+        assert not second_loaded.wait(timeout=0.2)
+        assert fake_agent.remote_agents == [b"meta-1"]
+    thread.join(timeout=5)
+
+    assert second_loaded.is_set()
+    assert fake_agent.remote_agents == [b"meta-1", b"meta-2"]
+    assert fake_agent.removed_agents == ["producer", "producer"]
+    assert not nixl_transport._PRODUCER_LOCKS
+    assert not nixl_transport._PRODUCER_READS
+
+
+def test_metadata_must_describe_the_named_producer(fake_agent):
+    with (
+        pytest.raises(ValueError, match="describes 'producer'"),
+        nixl_transport._remote_agent(fake_agent, "someone-else", b"meta"),
+    ):
+        pass
     assert fake_agent.removed_agents == ["producer"]
-    assert not nixl_transport._REMOTE_READS
+    assert not nixl_transport._PRODUCER_LOCKS
 
 
 def test_missing_nixl_points_at_the_extra(monkeypatch):

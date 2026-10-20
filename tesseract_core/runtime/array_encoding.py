@@ -164,19 +164,22 @@ class CudaIpcArrayData(BaseModel):
 class NixlArrayData(BaseModel):
     """Data structure for a NIXL GPU transfer descriptor.
 
-    The buffer field packs ``<agent_metadata>:<address>:<device>``, which are the
-    producer's base64-encoded NIXL agent metadata, the device address of the
-    array's registered bytes, and the producer's ordinal for the device holding
-    them. All three are empty for an empty array. The base64 alphabet never
-    contains ``:``, so it is safe as a delimiter.
+    The buffer field packs ``<agent_name>:<agent_metadata>:<address>:<device>``,
+    which are the name of the producer's NIXL agent, its base64-encoded agent
+    metadata, the device address of the array's registered bytes, and the
+    producer's ordinal for the device holding them. All four are empty for an
+    empty array. Neither the name nor the base64 alphabet contains ``:``, so it is
+    safe as a delimiter.
 
     This is only the JSON *schema* for the encoding. The machinery that produces
     and consumes it lives in :mod:`tesseract_core.runtime.nixl_transport`.
     """
 
     buffer: StrictStr = Field(
-        pattern=r"^([A-Za-z0-9+/=]+:\d+:\d+|::)$",
-        description="Packed NIXL descriptor: <agent_metadata>:<address>:<device>",
+        pattern=r"^([A-Za-z0-9_.-]+:[A-Za-z0-9+/=]+:\d+:\d+|:::)$",
+        description=(
+            "Packed NIXL descriptor: <agent_name>:<agent_metadata>:<address>:<device>"
+        ),
     )
     encoding: Literal["nixl"]
     compression: None = None
