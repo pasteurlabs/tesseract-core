@@ -566,7 +566,7 @@ def mocked_docker(monkeypatch):
 
         @staticmethod
         def version() -> tuple:
-            """Mock info method for DockerClient."""
+            """Mock version method for DockerClient."""
             return "", ""
 
         class volumes:
