@@ -52,6 +52,11 @@ class GradientCheckResult(NamedTuple):
     exception: str | None
 
 
+def _dump_outputs(outputs: BaseModel | Mapping) -> Mapping:
+    """Outputs of apply as a dict, since apply may return one directly."""
+    return outputs if isinstance(outputs, Mapping) else outputs.model_dump()
+
+
 def _is_sequence(value: Any) -> bool:
     """Check whether a value can be walked by a `[]` path part."""
     return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
@@ -249,8 +254,8 @@ def _compute_central_diff_row(
     inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
     inputs_minus = _perturb_input(inputs_dict, input_path, idx, -eps)
 
-    outputs_plus = apply_fn(input_schema.model_validate(inputs_plus)).model_dump()
-    outputs_minus = apply_fn(input_schema.model_validate(inputs_minus)).model_dump()
+    outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
+    outputs_minus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_minus)))
 
     return (
         get_at_path(outputs_plus, output_path) - get_at_path(outputs_minus, output_path)
@@ -283,7 +288,7 @@ def _compute_forward_diff_row(
         The gradient of output_path with respect to input_path[idx].
     """
     inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
-    outputs_plus = apply_fn(input_schema.model_validate(inputs_plus)).model_dump()
+    outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
 
     return (
         get_at_path(outputs_plus, output_path) - get_at_path(base_outputs, output_path)
