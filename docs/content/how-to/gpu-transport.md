@@ -313,7 +313,7 @@ line).
   memory by default (set `TESSERACT_CUDA_IPC_POOL_FRACTION` to change it).
 - **A fixed cost per call.** Each call still pays for an HTTP request and
   validation, and for exchanging handles on both sides, several milliseconds in
-  total. For small arrays, the host round trip can be faster. See
+  total. For small arrays, below about 30,000 float32 elements in our measurements, the host round trip can be faster. See
   {doc}`/content/concepts/performance`.
 
 ## Troubleshooting

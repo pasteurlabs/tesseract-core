@@ -67,6 +67,14 @@ Removing the host round trip closes about a third of the gap to the single-proce
 
 What remains, about 20 ms per step, is almost all fixed cost. A Tesseract with the same inputs and outputs that computes nothing costs about 16 ms per step this way, against under a millisecond in-process. Roughly 5 ms of that goes to the two HTTP requests and their validation, 7 ms to exchanging handles and copying arrays on both sides, and 4 ms to the JAX recipe's endpoints, which adopt the inputs, key the VJP cache, and launch the forward and backward programs. Compute adds only a few milliseconds on balance. Running the forward pass and the VJP as two separate XLA programs costs about 10 ms more than the single program XLA builds when it sees both at once, but the Tesseract's version of the rollout compiles to a faster program than the team's direct code, which offsets most of that. The fixed cost is roughly constant per call, so it matters less the more work the solver does per call. Here each call runs an entire 300-step rollout, which is about as coarse as calls get.
 
+With `cuda_ipc`, the size of the arrays matters much less. The figure below times a single call to a Tesseract that only doubles its input. Through the host, the call takes longer in proportion to the array, up to 3.4 s for a hundred million float32 values. With `cuda_ipc`, it stays near 4 ms up to a few million elements and reaches 18 ms at a hundred million, 190 times faster than the host path. At small sizes, almost all of those 4 ms are per-call overhead, since the same doubling takes about a tenth of a millisecond in-process. Below about 30,000 elements, the host round trip is still the faster of the two.
+
+```{figure} ../static/blog/gpu-ipc-benchmark.png
+:alt: "Log-log plot of median time per call against array size, from 1,000 to 100 million float32 elements. The host round trip rises from about 3 ms to about 3.4 s. cuda_ipc stays near 4 ms up to a few million elements and rises to about 18 ms at 100 million, 190 times faster than the host round trip. The host round trip is faster below about 30,000 elements. The same computation in-process takes between 0.13 and 0.6 ms."
+
+Median time of one jitted `apply_tesseract` call to a Tesseract that doubles a float32 vector, on an NVIDIA A100 80GB, over five fresh processes per setup. The {download}`benchmark script </downloads/gpu-ipc-benchmark.py>` reproduces the figure.
+```
+
 ## Why would you ever do that
 
 The pipeline above has JAX on both sides of a process boundary, and nobody should build that on purpose. If both halves are JAX, you own both, and they can share an environment, import the solver. The Multi-Agent-DPC team came to the same conclusion. [CINOC](https://github.com/SOLARIS-JHU/CINOC), the ICML 2026 paper that grew out of the project, imports its solvers directly, which is the right call for two JAX components with the same authors.
