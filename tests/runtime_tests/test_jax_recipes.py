@@ -278,7 +278,7 @@ class TestCacheCorrectness:
                 np.asarray(grad_hit_off[k]), np.asarray(grad_miss_off[k])
             ), "hit and miss inputs produced identical gradients; test is vacuous"
 
-    def test_cache_is_not_shared_between_functions(self):
+    def test_cache_is_not_shared_between_functions(self, monkeypatch):
         # Two Tesseracts in one process, evaluated at the same inputs, must
         # each get their own backward pass.
         InputSchema, apply_f = _build_api()
@@ -291,10 +291,14 @@ class TestCacheCorrectness:
         ct = {"y": np.ones(3, dtype=np.float32)}
         expected = jax_vjp(apply_f, inp, {"a.v"}, {"y"}, ct)
 
+        def no_fallback(*args, **kwargs):
+            raise AssertionError("vjp missed the cache")
+
         set_jax_vjp_cache_size(2)
         try:
             jax_apply(apply_f, inp)
             jax_apply(apply_g, inp)
+            monkeypatch.setattr(jax_recipes, "_vjp_jit", no_fallback)
             got = jax_vjp(apply_f, inp, {"a.v"}, {"y"}, ct)
         finally:
             set_jax_vjp_cache_size(0)
