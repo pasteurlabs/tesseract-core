@@ -706,14 +706,19 @@ def _configure_required_file_load() -> None:
         "-v",
         "openapi-schema",
     ]
-    if "--input-path" in sys.argv:
-        # Make sure input_path is available when loading tesseract_api.py for the first time
-        # (needed to resolve required files)
-        input_path_index = sys.argv.index("--input-path")
-        if len(sys.argv) <= input_path_index + 1:
-            raise ValueError("No input path provided after --input-path argument.")
-        input_path = Path(sys.argv[input_path_index + 1])
+    # Make sure input_path is available when loading tesseract_api.py for the first time
+    # (needed to resolve required files)
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith("--input-path="):
+            input_path = Path(arg.partition("=")[2])
+        elif arg == "--input-path":
+            if len(sys.argv) <= i + 1:
+                raise ValueError("No input path provided after --input-path argument.")
+            input_path = Path(sys.argv[i + 1])
+        else:
+            continue
         update_config(input_path=input_path.as_posix())
+        break
     if (
         any(arg in sys.argv for arg in skip_required_file_load_args)
         or os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
