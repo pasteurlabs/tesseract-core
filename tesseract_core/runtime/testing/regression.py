@@ -489,7 +489,9 @@ def _compare_leaf_values(
             return f"{'.'.join(path)}\n{array_msg}"
     else:
         if is_inexact_numeric:
-            close = np.allclose(obtained_val, expected_val, atol=atol, rtol=rtol)
+            close = np.allclose(
+                obtained_val, expected_val, equal_nan=True, atol=atol, rtol=rtol
+            )
         else:
             close = obtained_val == expected_val
 
