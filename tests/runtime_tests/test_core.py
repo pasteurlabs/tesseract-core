@@ -6,6 +6,8 @@
 Test a couple of edge cases and failure modes regarding schema validation and AD inputs / outputs.
 """
 
+import io
+import sys
 from collections.abc import Sequence
 from types import ModuleType
 
@@ -14,7 +16,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.core import create_endpoints
+from tesseract_core.runtime.core import create_endpoints, use_utf8_stdio
 from tesseract_core.runtime.tree_transforms import get_at_path
 
 
@@ -436,3 +438,11 @@ def test_gradient_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
     with pytest.raises(ValidationError, match=msg):
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
+
+
+def test_use_utf8_stdio(monkeypatch):
+    for name in ("stdout", "stderr"):
+        monkeypatch.setattr(sys, name, io.TextIOWrapper(io.BytesIO(), encoding="ascii"))
+    use_utf8_stdio()
+    assert sys.stdout.encoding == sys.stderr.encoding == "utf-8"
+    print("\N{GREEK SMALL LETTER RHO}")

@@ -54,6 +54,13 @@ def _trace(msg: str, obj: BaseModel) -> None:
     get_logger().debug("%s\n%s", msg, formatted)
 
 
+def use_utf8_stdio() -> None:
+    """Write stdout and stderr as UTF-8, which is how callers read them back."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 @contextmanager
 def redirect_fd(from_: TextIO, to_: TextIO | int) -> Generator[TextIO, None, None]:
     """Redirect a file descriptor at OS level.
