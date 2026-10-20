@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from tesseract_core.runtime.testing.finite_differences import (
     _compute_central_diff_row,
     _compute_forward_diff_row,
+    _dump_outputs,
 )
 from tesseract_core.runtime.tree_transforms import get_at_path, set_at_path
 
@@ -129,7 +130,7 @@ def finite_difference_jacobian(
     eps = _resolve_eps(eps, jac_inputs)
 
     # Get reference outputs for shape information and for forward differences
-    base_outputs = apply_fn(inputs).model_dump()
+    base_outputs = _dump_outputs(apply_fn(inputs))
 
     # Build the result structure
     result: dict[str, dict[str, ArrayLike]] = {}
@@ -326,12 +327,12 @@ def _compute_jacobian_stochastic(
             )
 
         # Evaluate function at perturbed points
-        outputs_plus = apply_fn(
-            type(inputs).model_validate(inputs_plus_dict)
-        ).model_dump()
-        outputs_minus = apply_fn(
-            type(inputs).model_validate(inputs_minus_dict)
-        ).model_dump()
+        outputs_plus = _dump_outputs(
+            apply_fn(type(inputs).model_validate(inputs_plus_dict))
+        )
+        outputs_minus = _dump_outputs(
+            apply_fn(type(inputs).model_validate(inputs_minus_dict))
+        )
 
         # Update Jacobian estimate for each (output, input) pair
         for out_path in jac_outputs:
@@ -437,7 +438,7 @@ def finite_difference_jvp(
 
     base_outputs = None
     if algorithm == "forward" or not groups:
-        base_outputs = apply_fn(inputs).model_dump()
+        base_outputs = _dump_outputs(apply_fn(inputs))
 
     if not groups:
         return {
@@ -466,14 +467,14 @@ def finite_difference_jvp(
                 )
 
         # Evaluate at perturbed points
-        outputs_plus = apply_fn(
-            type(inputs).model_validate(inputs_plus_dict)
-        ).model_dump()
+        outputs_plus = _dump_outputs(
+            apply_fn(type(inputs).model_validate(inputs_plus_dict))
+        )
 
         if algorithm == "central":
-            reference_outputs = apply_fn(
-                type(inputs).model_validate(inputs_minus_dict)
-            ).model_dump()
+            reference_outputs = _dump_outputs(
+                apply_fn(type(inputs).model_validate(inputs_minus_dict))
+            )
             denominator = 2 * group_eps
         else:
             reference_outputs = base_outputs
@@ -580,7 +581,9 @@ def finite_difference_vjp(
         )
     else:
         # Only needed for forward differences
-        base_outputs = apply_fn(inputs).model_dump() if algorithm == "forward" else None
+        base_outputs = (
+            _dump_outputs(apply_fn(inputs)) if algorithm == "forward" else None
+        )
 
         # VJP = sum over outputs of cotangent[output] @ J[output, input]
         # We need to compute each row of J (one per input element) and contract with cotangent
@@ -730,12 +733,12 @@ def _compute_vjp_stochastic(
             )
 
         # Evaluate function at perturbed points
-        outputs_plus = apply_fn(
-            type(inputs).model_validate(inputs_plus_dict)
-        ).model_dump()
-        outputs_minus = apply_fn(
-            type(inputs).model_validate(inputs_minus_dict)
-        ).model_dump()
+        outputs_plus = _dump_outputs(
+            apply_fn(type(inputs).model_validate(inputs_plus_dict))
+        )
+        outputs_minus = _dump_outputs(
+            apply_fn(type(inputs).model_validate(inputs_minus_dict))
+        )
 
         # Compute weighted output difference (weighted by cotangent)
         # This is the directional derivative in the direction of the cotangent

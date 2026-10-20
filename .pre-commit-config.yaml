@@ -29,7 +29,7 @@ repos:
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.17.0
+    rev: v0.17.1
     hooks:
       # Run the linter.
       - id: ruff
@@ -49,7 +49,7 @@ repos:
       # Update production.uv.lock after pyproject.toml changes
       - id: update-uv-env
         name: update-uv-env
-        files: pyproject.toml$
+        files: ^pyproject.toml$
         stages: [pre-commit]
         language: python
         entry: |
