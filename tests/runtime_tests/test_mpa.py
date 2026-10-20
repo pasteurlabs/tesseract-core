@@ -198,6 +198,18 @@ def test_log_metric_content():
     assert int(metrics[1]["step"]) == 1
 
 
+def test_log_metric_key_outside_the_default_encoding():
+    """The metrics file is UTF-8 even where that is not the platform's default."""
+    key = "\N{GREEK SMALL LETTER RHO}_max"
+    backend = mpa.FileBackend()
+    backend.log_metric(key, 1.0)
+
+    with open(backend.metrics_file, encoding="utf-8", newline="") as f:
+        metrics = list(csv.DictReader(f))
+
+    assert metrics[0]["key"] == key
+
+
 def test_log_artifact_content(tmpdir):
     """Test artifact logging copies files correctly."""
     backend = mpa.FileBackend()

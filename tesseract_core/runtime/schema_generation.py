@@ -487,7 +487,8 @@ def _path_to_pattern(path: Sequence[str | object]) -> str:
 def _pattern_to_type(pattern: str) -> type:
     """Convert a string pattern (which may be a literal or regex) to a type that can be used for validation."""
     if _is_regex_pattern(pattern):
-        return Annotated[str, Field(pattern=pattern)]
+        # Anchored, since a pattern is searched for and not matched in full.
+        return Annotated[str, Field(pattern=f"^{pattern}$")]
     else:
         return Literal[pattern]
 
@@ -616,9 +617,11 @@ def create_gradient_schema(
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
+                    # No dtype check: GPU arrays pass through validation unconverted,
+                    # and their dtype (e.g. torch.float32) need not be a NumPy name.
                     try:
                         result[output_path][input_path] = _exact_array_adapter(
-                            expected_shape, str(arr.dtype)
+                            expected_shape, None
                         ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(
@@ -746,9 +749,19 @@ def create_gradient_schema(
                         "Unable to validate tangent vector as jvp_inputs either missing or invalid"
                     ) from e
 
+                if "inputs" not in info.data:
+                    raise ValueError(
+                        "Unable to validate tangent vector as inputs either missing or invalid"
+                    )
+
                 validated = {}
                 for path, arr in tangent_vector.items():
-                    ref_arr = get_at_path(info.data["inputs"], path)
+                    try:
+                        ref_arr = get_at_path(info.data["inputs"], path)
+                    except (LookupError, AttributeError) as e:
+                        raise ValueError(
+                            f"Could not find tangent_vector path {path} in inputs."
+                        ) from e
                     if hasattr(ref_arr, "shape"):
                         ref_shape = ref_arr.shape
                     elif isinstance(ref_arr, dict):

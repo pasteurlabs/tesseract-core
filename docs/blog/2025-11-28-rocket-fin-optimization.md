@@ -6,6 +6,7 @@ blog_date: "2026-05-12"
 blog_author: "@andrinr"
 blog_title: "Optimizing rocket fins across CAD, mesher, and FEA with end-to-end gradients"
 blog_description: "We show how to chain adjoint, finite-difference, and AD gradients across Ansys SpaceClaim, PyMAPDL, and JAX to optimize rocket grid fins end-to-end."
+forum_topic: 109
 ---
 
 # Optimizing rocket fins across CAD, mesher, and FEA with end-to-end gradients

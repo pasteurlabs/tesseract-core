@@ -26,6 +26,7 @@ from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, serving, venv_provision
 from tesseract_core.sdk.api_parse import TesseractBuildConfig
 from tesseract_core.sdk.exceptions import UserError
+from tesseract_core.sdk.tesseract import RequestedEncoding
 from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
 
 pytestmark = pytest.mark.timeout(120)
@@ -50,10 +51,7 @@ def test_serve_and_remove(dummy_api_path):
         served.remove(force=True)
 
     assert not local_client.is_running(served)
-    if os.name != "nt":
-        # Windows refuses to delete a file a just-killed child may still hold, so
-        # removal tolerates that and leaves it in the temp directory.
-        assert not served.log_path.exists()
+    assert not served.log_path.exists()
     # uvicorn announces itself on startup; if we captured nothing, log capture
     # is broken even though the health check passed.
     assert logs.strip()
@@ -143,12 +141,22 @@ def test_remove_is_idempotent(dummy_api_path):
     served.remove(force=True)
     # Must not raise, even though the process and its log file are gone
     served.remove(force=True)
-    if os.name != "nt":
-        # The logs really are gone, as they are for a removed container. Except
-        # on Windows, which refuses to delete a file a just-killed child may
-        # still hold -- removal tolerates that and leaves it behind.
-        with pytest.raises(FileNotFoundError):
-            served.logs()
+    # The logs really are gone, as they are for a removed container.
+    with pytest.raises(FileNotFoundError):
+        served.logs()
+
+
+def test_a_log_that_cannot_be_deleted_is_left_at_once(tmp_path):
+    """Only a file still held open is waited for; any other failure is final.
+
+    A directory stands in for a log that cannot be deleted, since unlinking one
+    fails on every platform.
+    """
+    started = time.monotonic()
+    local_client._unlink_once_released(tmp_path)
+
+    assert tmp_path.exists()
+    assert time.monotonic() - started < local_client._LOG_RELEASE_TIMEOUT
 
 
 # Nothing listens on port 1, so the health poll fails at once rather than
@@ -246,7 +254,7 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
         child = serving.runtime_config_to_env(runtime_config).get(
             "TESSERACT_GPU_TRANSPORT"
         )
-        client = tess._client.default_encoding.gpu_transport
+        client = tess.current_encoding.gpu_transport
 
     assert child == expected
     # A client that does not ask gets the server's default of "none"
@@ -273,6 +281,18 @@ def test_server_capabilities_reflect_the_server(
             assert capabilities.compressions == ("none", "lz4")
 
 
+def test_no_gpu_transport_without_one_on_the_server(dummy_api_path):
+    """Without a GPU transport on the server, there is nothing to check or use."""
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable
+    ) as tess:
+        assert tess.resolve_gpu_transport() == "none"
+        remote = Tesseract.from_url(tess._client.url)
+        assert remote.resolve_gpu_transport() == "none"
+        # A plain from_url client leaves everything to the server
+        assert remote.current_encoding == RequestedEncoding()
+
+
 def test_with_encoding_applies_to_the_view_only(
     dummy_api_path, sample_inputs, tmp_path
 ):
@@ -282,6 +302,8 @@ def test_with_encoding_applies_to_the_view_only(
         assert list(tmp_path.rglob("*.bin")) == []
 
         binref = tess.with_encoding(output_format="json+binref")
+        assert binref.current_encoding.output_format == "json+binref"
+        assert tess.current_encoding.output_format == "json+base64"
         result = binref.apply(sample_inputs)
         np.testing.assert_allclose(result["result"], [5.0, 8.0])
         num_files = len(list(tmp_path.rglob("*.bin")))
@@ -351,6 +373,18 @@ def test_endpoints_over_subprocess(dummy_api_path, sample_inputs):
         # debug mode is on by default, mirroring the in-process path, so the
         # test endpoint must be available
         assert "test" in tess.available_endpoints
+
+
+def test_config_metadata_reaches_the_schema(dummy_api_path):
+    """As in an image, the config's name, version and description describe the Tesseract."""
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable
+    ) as tess:
+        info = tess.openapi_schema["info"]
+
+    assert info["title"] == "unit_vectoradd"
+    assert info["version"] == "1.2.3"
+    assert info["description"].strip() == "Simple tesseract that adds two vectors."
 
 
 def test_runs_in_a_different_process(dummy_tesseract_package, sample_inputs):

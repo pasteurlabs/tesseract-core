@@ -85,6 +85,18 @@ def test_prepare_build_context_build_env(tmp_path_factory):
     assert "UV_INDEX_STRATEGY" not in run_stage
 
 
+def test_prepare_build_context_writes_utf8(tmp_path_factory):
+    """The Dockerfile is UTF-8 even where that is not the platform's default."""
+    src_dir = tmp_path_factory.mktemp("src")
+    build_dir = tmp_path_factory.mktemp("build")
+    description = "Density \N{GREEK SMALL LETTER RHO}"
+
+    config = TesseractConfig(name="foobar", description=description)
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    assert description in (build_dir / "Dockerfile").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("provider", ["uv-pip", "conda"])
 def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
     """host_credentials render secret mounts + a credentials file, no tokens (#675).
@@ -1880,6 +1892,20 @@ def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
             output_format="json+base64",
             gpus=None,
             runtime_config={"gpu_transport": "cuda_ipc"},
+            skip_health_check=True,
+        )
+
+
+def test_serve_gpu_transport_errors_with_several_workers(monkeypatch):
+    """A GPU transport needs a single worker, which keeps every response's exports."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="more than one worker"):
+        engine.serve(
+            "my-image",
+            gpus=["all"],
+            gpu_transport="cuda_ipc",
+            num_workers=2,
             skip_health_check=True,
         )
 

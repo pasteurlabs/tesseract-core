@@ -39,18 +39,18 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # NOTE: Upper bounds (<=) on runtime deps are periodically updated via .github/workflows/bump_lockfile.yml,
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
-    "pydantic<=2.13.5,>=2.10",
-    "fastapi<=0.142.2,>=0.115",
+    "pydantic<=2.14.1,>=2.10",
+    "fastapi<=0.146.0,>=0.115",
     "requests<=2.34.2,>=2.32.4",
     "uvicorn<=0.54.0,>=0.34",
-    "typer<=0.27.2,>=0.26.8",  # sphinxcontrib-typer needs >=0.26.8
+    "typer<=0.27.3,>=0.26.8",  # sphinxcontrib-typer needs >=0.26.8
     "fsspec[http,s3]<=2026.9.0,>=2024.12",
     "s3fs<=2026.9.0,>=2024.12",  # enters via fsspec[s3]; pin explicitly so the oldest resolution can't pair an ancient s3fs with a modern aiobotocore
     "pybase64<=1.5.1,>=1.4",
-    "orjson<=3.12.0,>=3.10",
-    "numpy<=2.5.3,>=1.26",
+    "orjson<=3.13.0,>=3.10",
+    "numpy<=2.5.4,>=1.26",
     "debugpy<=1.8.22,>=1.8.14",
-    "mlflow-skinny<=3.16.1,>=3.7.0",
+    "mlflow-skinny<=3.17.1,>=3.7.0",
     "lz4<=4.4.5,>=4.0.0",
 ]
 # END RUNTIME DEPENDENCIES
@@ -68,6 +68,7 @@ docs = [
     "sphinxext_opengraph[social_cards]",
     "sphinx-sitemap",
     "sphinx-reredirects",
+    "sphinx-markdown-builder",
     "tesseract-core[runtime]",
 ]
 dev = [
@@ -81,6 +82,7 @@ dev = [
     "pytest-mock",
     "pytest-benchmark",
     "pytest-timeout",
+    "sybil",  # required to test docs snippets (tests/endtoend_tests/test_docs.py)
     "moto[server]",
     "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
     "typeguard",
@@ -137,6 +139,8 @@ filterwarnings = [
     # sometimes, dependencies leak resources
     "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
     "ignore:.*sqlite3\\.Connection.*:pytest.PytestUnraisableExceptionWarning",
+    # pydantic-core declares SerSchema as a string alias that typeguard cannot resolve
+    "ignore:Skipping type check against 'SimpleSerSchema:typeguard.TypeHintWarning",
 ]
 
 [tool.coverage.run]
