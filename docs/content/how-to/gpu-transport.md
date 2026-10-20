@@ -17,10 +17,10 @@ handle that the other process uses to map the same device memory. Shapes,
 dtypes, and schema validation stay in the JSON payload as usual, and CPU arrays
 in the same payload are still encoded according to `output_format`.
 
-```{warning}
-The GPU transport is experimental. Its interface may change or be removed in
-future releases.
-```
+Each call still pays a fixed cost of a few milliseconds for the HTTP request,
+validation, and handle exchange. For small arrays, below about 30,000 float32
+elements in our measurements, the host round trip can be faster (see
+{doc}`/content/concepts/performance`).
 
 ## Requirements
 
@@ -41,87 +41,141 @@ future releases.
 
 The runtime exports any output array that lives in GPU memory and exposes
 `__cuda_array_interface__`, which includes CuPy, PyTorch, and JAX arrays. Inputs
-that arrive by handle reach your `apply` function as framework-agnostic device
-arrays that expose both `__cuda_array_interface__` and DLPack, so adopt them with
-your framework before computing:
+that arrive by handle reach your endpoints as `IpcDeviceArray` objects, which
+expose both `__cuda_array_interface__` and DLPack, so adopt them with your
+framework before computing. The [CuPy](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_gpu_cupy),
+[JAX](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_gpu_jax),
+and [PyTorch](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_gpu_torch)
+examples compute `s * a + b` for two float32 vectors `a` and `b`:
 
-```python
-import cupy as cp
-from pydantic import BaseModel, Field
+::::{tab-set}
+:::{tab-item} CuPy
+:sync: cupy
 
-from tesseract_core.runtime import Array, Float32
-
-
-class InputSchema(BaseModel):
-    a: Array[(None,), Float32] = Field(description="An arbitrary vector.")
-    b: Array[(None,), Float32] = Field(description="Same shape as a.")
-    s: float = Field(description="A scalar.", default=3.0)
-
-
-class OutputSchema(BaseModel):
-    result: Array[(None,), Float32] = Field(description="s * a + b, on the GPU.")
-
-
-def apply(inputs: InputSchema) -> OutputSchema:
-    # Inputs may arrive as NumPy arrays (host encodings) or as device arrays
-    # (cuda_ipc). cp.asarray keeps device arrays on the GPU and moves host
-    # arrays onto it.
-    a = cp.asarray(inputs.a)
-    b = cp.asarray(inputs.b)
-    return OutputSchema(result=inputs.s * a + b)
+```{literalinclude} ../../../examples/_gpu_cupy/tesseract_api.py
+:pyobject: apply
+:language: python
 ```
 
-With PyTorch, adopt inputs with `torch.as_tensor(x, device="cuda")` or
-`torch.from_dlpack(x)`. With JAX, use `jnp.asarray(x)` or `jnp.from_dlpack(x)`.
-Tesseracts built on the JAX recipe (`tesseract init --recipe jax`) adopt their
-inputs this way already. Avoid `np.asarray` and anything else that goes through
-`__array__`, since the device arrays support it for convenience by copying to
-host.
+`cp.asarray` keeps device arrays on the GPU and moves host arrays onto it.
 
+:::
+:::{tab-item} JAX
+:sync: jax
+
+```{literalinclude} ../../../examples/_gpu_jax/tesseract_api.py
+:pyobject: apply
+:language: python
+```
+
+`as_jax_array` adopts device arrays through DLPack and moves host arrays onto the
+default device. Tesseracts built on the JAX recipe (`tesseract init --recipe jax`)
+use it for all their inputs already.
+
+:::
+:::{tab-item} PyTorch
+:sync: torch
+
+```{literalinclude} ../../../examples/_gpu_torch/tesseract_api.py
+:pyobject: apply
+:language: python
+```
+
+`torch.as_tensor(x, device="cuda")` and `torch.from_dlpack(x)` both adopt device
+arrays without a copy.
+
+:::
+::::
+
+Avoid `np.asarray` and anything else that goes through `__array__`. The device
+arrays support it for convenience, by copying to host.
+
+```{warning}
 Input dtypes must match the schema exactly. The host encodings cast an input to
 the dtype its schema declares, but `cuda_ipc` does not cast on the device and
 rejects a mismatched input instead.
+```
 
-The repository contains complete examples for CuPy, PyTorch, and JAX in
-`examples/_gpu_cupy`, `examples/_gpu_torch`, and `examples/_gpu_jax`.
+(serve-with-gpu-transport)=
 
-## Serve with the GPU transport
+## Serve with GPU transport
 
-### From Python
+Enable the transport where the Tesseract is served:
 
-Pass `gpu_transport="cuda_ipc"` when you create the Tesseract. For a container,
-also give it GPU access:
+::::{tab-set}
+:::{tab-item} from_image
+:sync: from-image
 
 ```python
 from tesseract_core import Tesseract
 
-with Tesseract.from_image(
+tess = Tesseract.from_image(
     "my-gpu-tesseract", gpus=["all"], gpu_transport="cuda_ipc"
-) as tess:
+)
+with tess:
     ...
 ```
 
 The SDK runs the container with `--ipc=host` whenever the GPU transport is
 enabled, and raises a `ValueError` if no GPUs were requested.
 
-Without a container, `Tesseract.from_source` serves the Tesseract in a
-subprocess. By default, that subprocess runs in an environment built from the
-Tesseract's own requirements. To share your environment instead, including its
-CUDA-enabled libraries, point it at your interpreter:
+:::
+:::{tab-item} from_source
+:sync: from-source
 
 ```python
+import os
 import sys
 
-with Tesseract.from_source(
+# A JAX client and a JAX Tesseract share the GPU, so neither should claim 75% of
+# its memory at startup. The Tesseract inherits this variable from the client.
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+from tesseract_core import Tesseract
+
+tess = Tesseract.from_source(
     "path/to/tesseract_api.py",
     python_executable=sys.executable,
     gpu_transport="cuda_ipc",
-) as tess:
+)
+with tess:
     ...
 ```
 
+`from_source` serves the Tesseract in a subprocess, without a container. By
+default, that subprocess runs in an environment built from the Tesseract's own
+requirements. `python_executable=sys.executable` shares your environment
+instead, including its CUDA-enabled libraries.
+
+:::
+:::{tab-item} tesseract serve
+:sync: cli
+
+```bash
+$ tesseract serve my-gpu-tesseract --gpus all -e TESSERACT_GPU_TRANSPORT=cuda_ipc
+```
+
+As with the SDK, the container is started with `--ipc=host`. Enabling the
+transport doesn't make the server use it for every request. Each request asks for
+it, as the SDK and HTTP clients [below](#call-it) do.
+
+:::
+::::
+
 `gpu_transport` can also be set through `runtime_config={"gpu_transport": "cuda_ipc"}`.
 If both are given, the keyword argument wins.
+
+With a JAX client and a JAX Tesseract on one GPU, disable preallocation (or lower
+`XLA_PYTHON_CLIENT_MEM_FRACTION`) in both processes before JAX initializes, as
+the `from_source` example does. Otherwise the second process runs out of memory
+at startup. For a container, pass the variable with `environment=` (or `-e` on
+the command line).
+
+```{warning}
+A Tesseract serving the GPU transport must run with a single worker (the
+default), and asking for more raises an error. That worker can serve concurrent
+requests.
+```
 
 A Tesseract created with `gpu_transport="cuda_ipc"` asks for the transport on
 every call. To check that it works between the two processes, call
@@ -130,29 +184,17 @@ server and raises a `RuntimeError` with the reason if the exchange fails.
 Tesseract-JAX and Tesseract-Torch run this check before their first call with
 GPU arrays.
 
-### From the command line
-
-`tesseract serve` enables the transport through the `TESSERACT_GPU_TRANSPORT`
-environment variable:
-
-```bash
-$ tesseract serve my-gpu-tesseract --gpus all -e TESSERACT_GPU_TRANSPORT=cuda_ipc
-```
-
-As with the SDK, the container is started with `--ipc=host`. Enabling the
-transport doesn't make the server use it for every request. Each request asks for
-it, as `Tesseract.from_url` clients and [raw HTTP](#raw-http) clients do below.
-A Tesseract serving the GPU transport must run with a single worker (the
-default), and asking for more raises an error.
+(call-it)=
 
 ## Call it
 
-### Python SDK
+::::{tab-set}
+:::{tab-item} Python SDK
+:sync: python
 
 When the inputs you pass to `apply` (or any other endpoint) live on the GPU, the
-client sends them by handle. GPU outputs come back as device arrays that expose
-`__cuda_array_interface__` and DLPack, so any framework can adopt them without a
-copy:
+client sends them by handle. GPU outputs come back as `IpcDeviceArray` objects,
+which any framework can adopt without a copy:
 
 ```python
 import cupy as cp
@@ -160,9 +202,10 @@ import cupy as cp
 a = cp.arange(10_000_000, dtype=cp.float32)
 b = cp.ones_like(a)
 
-with Tesseract.from_image(
+tess = Tesseract.from_image(
     "my-gpu-tesseract", gpus=["all"], gpu_transport="cuda_ipc"
-) as tess:
+)
+with tess:
     out = tess.apply({"a": a, "b": b, "s": 3.0})["result"]
 
 result = cp.asarray(out)      # stays on the GPU
@@ -183,7 +226,9 @@ out = tess.with_encoding(gpu_transport=transport).apply({"a": a, "b": b})
 `cuda_ipc` but it doesn't work from your process, for example because the server
 runs on another machine.
 
-### Tesseract-JAX
+:::
+:::{tab-item} Tesseract-JAX
+:sync: jax
 
 `apply_tesseract` uses the transport of the Tesseract you pass it. Under
 `jax.jit` on a CUDA backend, the call lowers to a native path that hands XLA's
@@ -197,9 +242,10 @@ import jax.numpy as jnp
 from tesseract_core import Tesseract
 from tesseract_jax import apply_tesseract
 
-with Tesseract.from_image(
+tess = Tesseract.from_image(
     "my-gpu-tesseract", gpus=["all"], gpu_transport="cuda_ipc"
-) as tess:
+)
+with tess:
 
     def loss(a, b):
         out = apply_tesseract(tess, {"a": a, "b": b})
@@ -227,7 +273,9 @@ falls back to the CPU with only a warning at startup. Check that
 `jax.default_backend()` returns `"gpu"` before relying on the GPU transport.
 ```
 
-### Tesseract-Torch
+:::
+:::{tab-item} Tesseract-Torch
+:sync: torch
 
 `apply_tesseract` from Tesseract-Torch picks the transport the same way as
 Tesseract-JAX. CUDA tensors are sent by handle, GPU outputs come back as CUDA
@@ -240,9 +288,10 @@ from tesseract_torch import apply_tesseract
 a = torch.randn(1_000_000, device="cuda", requires_grad=True)
 b = torch.randn(1_000_000, device="cuda")
 
-with Tesseract.from_image(
+tess = Tesseract.from_image(
     "my-gpu-tesseract", gpus=["all"], gpu_transport="cuda_ipc"
-) as tess:
+)
+with tess:
     out = apply_tesseract(tess, {"a": a, "b": b})
     out["result"].sum().backward()
 ```
@@ -251,9 +300,9 @@ Calls with only CPU tensors always copy through the host, and anything that come
 through the host arrives on the CPU. As with Tesseract-JAX, pass
 `tess.with_encoding(gpu_transport="none")` to always copy through the host.
 
-(raw-http)=
-
-### Raw HTTP
+:::
+:::{tab-item} HTTP
+:sync: http
 
 A client that speaks HTTP directly asks for the transport per request with a
 `gpu_transport` parameter on the `Accept` header, next to the usual CPU array
@@ -276,45 +325,8 @@ claims are released after 5 minutes. See the
 details. Resolving a `cuda_ipc` handle requires calling into the CUDA runtime, so
 in practice this is for clients that already work with CUDA.
 
-(two-jax-processes)=
-
-## Two JAX processes on one GPU
-
-By default, each JAX process preallocates 75% of the GPU's memory when it first
-uses the device. With a JAX client and a JAX Tesseract on the same GPU, the
-second process then runs out of memory. Disable preallocation, or lower the
-fraction, before JAX initializes in either process:
-
-```python
-import os
-
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# or: os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.4"
-```
-
-A Tesseract started with `from_source` inherits the client's environment
-variables, so setting the variable in the client before serving covers both
-processes. For a container, pass it with `environment=` (or `-e` on the command
-line).
-
-## Limitations
-
-- **A single worker.** A Tesseract serving the GPU transport runs one worker
-  process, which can serve concurrent requests.
-- **Full synchronization around each call.** Tesseract-JAX synchronizes the CUDA
-  stream before and after each dispatch, so GPU work doesn't overlap with a
-  Tesseract call.
-- **Some copies remain.** Each side copies received arrays into memory it owns,
-  and memory from CUDA's virtual memory management API (JAX's default
-  allocator, for example) is copied into an exportable buffer before export.
-  These copies run on the device at memory bandwidth, so they are much cheaper
-  than a round trip through the host. To avoid allocating these buffers on every
-  call, each process keeps idle ones for reuse, up to a quarter of the GPU's
-  memory by default (set `TESSERACT_CUDA_IPC_POOL_FRACTION` to change it).
-- **A fixed cost per call.** Each call still pays for an HTTP request and
-  validation, and for exchanging handles on both sides, several milliseconds in
-  total. For small arrays, below about 30,000 float32 elements in our measurements, the host round trip can be faster. See
-  {doc}`/content/concepts/performance`.
+:::
+::::
 
 ## Troubleshooting
 
@@ -342,5 +354,7 @@ used and nothing raises. Once JAX runs on the GPU, setting
 `TESSERACT_JAX_DEBUG_CHECK_DEVICE_PTRS=1` makes any host pointer at the native
 boundary raise an error, which pinpoints where an array left the device.
 
-**Two JAX processes, and one fails with an out-of-memory error at startup.** See
-[Two JAX processes on one GPU](#two-jax-processes).
+**Two JAX processes, and one fails with an out-of-memory error at startup.**
+Each JAX process preallocates 75% of the GPU's memory by default. Set
+`XLA_PYTHON_CLIENT_PREALLOCATE=false` in both, as described under
+{ref}`serve-with-gpu-transport`.
