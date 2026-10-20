@@ -1053,9 +1053,7 @@ def serve(
         output_path=output_path,
     )
 
-    if environment is None:
-        environment = {}
-    environment.update(volume_environment)
+    environment = {**(environment or {}), **volume_environment}
 
     environment.update(runtime_config_to_env(runtime_config))
 
@@ -1461,9 +1459,7 @@ def run_tesseract(
         file_inputs=file_inputs,
     )
 
-    if environment is None:
-        environment = {}
-    environment.update(volume_environment)
+    environment = {**(environment or {}), **volume_environment}
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
