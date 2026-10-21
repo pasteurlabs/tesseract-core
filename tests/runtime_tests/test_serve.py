@@ -3,6 +3,7 @@
 
 import base64
 import json
+import os
 import platform
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -355,6 +356,20 @@ def test_serve_gpu_transport_refuses_several_workers(monkeypatch):
     update_config(gpu_transport="cuda_ipc")
     with pytest.raises(ValueError, match="more than one worker"):
         serve("localhost", 8000, num_workers=2)
+
+
+def test_serve_hands_config_to_spawned_workers(monkeypatch, tmp_path):
+    """Workers are new processes, so config set in this one must reach them through the environment."""
+    from tesseract_core.runtime.config import update_config
+
+    seen = {}
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: seen.update(os.environ))
+    monkeypatch.setattr(os, "environ", {})
+    update_config(input_path=str(tmp_path), debug=False, compression=None)
+    serve("localhost", 8000, num_workers=2)
+    assert seen["TESSERACT_INPUT_PATH"] == str(tmp_path)
+    assert seen["TESSERACT_DEBUG"] == "0"
+    assert "TESSERACT_COMPRESSION" not in seen
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
