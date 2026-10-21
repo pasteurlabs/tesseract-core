@@ -5,7 +5,6 @@
 
 import datetime
 import ipaddress
-import linecache
 import logging
 import optparse
 import os
@@ -117,8 +116,11 @@ def parse_requirements(
     from pip._internal.network.session import PipSession
     from pip._internal.req.req_file import (
         RequirementsFileParser,
+        get_file_content,
         get_line_parser,
         handle_line,
+        ignore_comments,
+        join_lines,
     )
 
     if session is None:
@@ -129,10 +131,16 @@ def parse_requirements(
 
     line_parser = get_line_parser(finder)
     parser = RequirementsFileParser(session, line_parser)
+    logical_lines: dict[str, dict[int, str]] = {}
 
     for parsed_line in parser.parse(str(filename), constraint):
-        line = linecache.getline(parsed_line.filename, parsed_line.lineno)
-        line = line.strip()
+        if parsed_line.filename not in logical_lines:
+            _, content = get_file_content(parsed_line.filename, session=session)
+            lines_enum = enumerate(content.splitlines(), start=1)
+            logical_lines[parsed_line.filename] = dict(
+                ignore_comments(join_lines(lines_enum))
+            )
+        line = logical_lines[parsed_line.filename][parsed_line.lineno]
         parsed_req = handle_line(
             parsed_line, options=options, finder=finder, session=session
         )
