@@ -197,6 +197,21 @@ def plot(medians, path):
             )
             break
 
+    # A call that moves as many bytes as one Multi-Agent-DPC call (about 4.8 MB),
+    # counting both directions: each element here is 4 bytes in and 4 bytes out.
+    madpc = 4.8e6 / 8
+    ax.axvline(madpc, color=ink_muted, linewidth=0.75, linestyle=":", zorder=1)
+    ax.annotate(
+        "one Multi-Agent-DPC call\n(about 4.8 MB moved)",
+        (madpc, 1.0),
+        xytext=(6, 0),
+        textcoords="offset points",
+        ha="left",
+        va="center",
+        fontsize=9,
+        color=ink_muted,
+    )
+
     ratio = med["host"][-1] / med["cuda_ipc"][-1]
     ax.annotate(
         f"cuda_ipc\n{ratio:.0f}\N{MULTIPLICATION SIGN} faster\nat 10$^{{{round(math.log10(SIZES[-1]))}}}$ elements",

@@ -16,7 +16,7 @@
 
   <!-- Process boundary -->
   <line x1="800" y1="40" x2="800" y2="770" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="10 8"/>
-  <text x="800" y="790" text-anchor="middle" font-size="17" fill="#64748b">process boundary</text>
+  <text transform="translate(822 300) rotate(90)" text-anchor="middle" font-size="17" fill="#64748b">process boundary</text>
 
   <!-- Left column: the call going down -->
   <g>
@@ -26,7 +26,7 @@
 
     <rect x="180" y="232" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
     <text x="420" y="274" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">Tesseract-JAX primitive</text>
-    <text x="420" y="305" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">one primitive for apply, JVP, and VJP</text>
+    <text x="420" y="305" text-anchor="middle" font-size="18" font-style="italic" fill="#475569">one primitive for apply, JVP, VJP, and Jacobian</text>
 
     <rect x="180" y="364" width="480" height="96" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
     <text x="420" y="406" text-anchor="middle" font-size="25" font-weight="bold" fill="#1e293b">XLA FFI custom call</text>
