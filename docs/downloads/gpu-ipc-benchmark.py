@@ -15,6 +15,8 @@ process's median call time.
 Setups:
   in-process   the same doubling, jitted in this process (no Tesseract)
   host         Tesseract served by Tesseract.from_source, arrays through host memory
+               as base64 inside JSON (the default)
+  binref       same, arrays through host memory as json+binref files on /dev/shm
   cuda_ipc     same, arrays passed as CUDA IPC handles
 """
 
@@ -35,7 +37,7 @@ import time
 from importlib.metadata import version
 from pathlib import Path
 
-SETUPS = ("in-process", "host", "cuda_ipc")
+SETUPS = ("in-process", "host", "binref", "cuda_ipc")
 SIZES = [int(m * 10**e) for e in range(3, 8) for m in (1, 3)] + [10**8]
 
 TESSERACT_API = """
@@ -98,16 +100,28 @@ def run_one(setup, api_path):
             for n in SIZES
         }
 
+    def sweep_tesseract(**kwargs):
+        with Tesseract.from_source(
+            api_path, python_executable=sys.executable, **kwargs
+        ) as tess:
+            return sweep(jax.jit(lambda x: apply_tesseract(tess, {"x": x})["y"]))
+
     if setup == "in-process":
         ms = sweep(jax.jit(lambda x: 2 * x))
+    elif setup == "host":
+        ms = sweep_tesseract()
+    elif setup == "binref":
+        # Without a GPU transport, GPU arrays go through the host, and json+binref
+        # exchanges them as files in these directories instead of inside the JSON.
+        with (
+            tempfile.TemporaryDirectory(prefix="tess_in_", dir="/dev/shm") as inp,
+            tempfile.TemporaryDirectory(prefix="tess_out_", dir="/dev/shm") as out,
+        ):
+            ms = sweep_tesseract(
+                output_format="json+binref", input_path=inp, output_path=out
+            )
     else:
-        with Tesseract.from_source(
-            api_path, python_executable=sys.executable, gpu_transport="cuda_ipc"
-        ) as tess:
-            # Asking for gpu_transport="none" makes every call copy through the host.
-            if setup == "host":
-                tess = tess.with_encoding(gpu_transport="none")
-            ms = sweep(jax.jit(lambda x: apply_tesseract(tess, {"x": x})["y"]))
+        ms = sweep_tesseract(gpu_transport="cuda_ipc")
     print(
         json.dumps(
             {
@@ -128,6 +142,7 @@ def plot(medians, path):
     ink, ink_muted, grid = "#0b0b0b", "#52514e", "#e6e5e1"
     style = {
         "host": ("#2a78d6", "Host round trip"),
+        "binref": ("#2a78d6", "json+binref on /dev/shm"),
         "cuda_ipc": ("#eb6834", "cuda_ipc"),
         "in-process": ("#a3a29d", "In-process, no Tesseract"),
     }
@@ -151,12 +166,13 @@ def plot(medians, path):
     ax.set_yscale("log")
 
     med = {s: [medians[s][n] for n in SIZES] for s in medians}
-    for setup in ("in-process", "host", "cuda_ipc"):
+    for setup in ("in-process", "host", "binref", "cuda_ipc"):
         color, label = style[setup]
         ax.plot(
             SIZES,
             med[setup],
             color=color,
+            linestyle="--" if setup == "binref" else "-",
             linewidth=1.6,
             marker="o",
             markersize=6,
@@ -186,7 +202,7 @@ def plot(medians, path):
             )
             ax.axvline(cross, color=ink_muted, linewidth=0.6, alpha=0.6, zorder=1)
             ax.annotate(
-                f"host round trip faster\nbelow ~{cross / 1e3:.0f}k elements",
+                f"host round trip\nfaster below\n~{cross / 1e3:.0f}k elements",
                 (cross, math.sqrt(med["in-process"][0] * med["cuda_ipc"][0])),
                 xytext=(-6, 0),
                 textcoords="offset points",
@@ -304,11 +320,14 @@ def main():
     )
     print(f"{meta['processes']} processes per setup\n")
     print(
-        f"{'elements':>10s}" + "".join(f"{s:>12s}" for s in SETUPS) + "   host/cuda_ipc"
+        f"{'elements':>10s}"
+        + "".join(f"{s:>12s}" for s in SETUPS)
+        + "   host/cuda_ipc  binref/cuda_ipc"
     )
     for n in SIZES:
         row = "".join(f"{medians[s][n]:12.3f}" for s in SETUPS)
-        print(f"{n:>10d}{row}   {medians['host'][n] / medians['cuda_ipc'][n]:13.1f}")
+        ratios = [medians[s][n] / medians["cuda_ipc"][n] for s in ("host", "binref")]
+        print(f"{n:>10d}{row}   {ratios[0]:13.1f}  {ratios[1]:15.1f}")
     if args.plot:
         plot(medians, args.plot)
 
