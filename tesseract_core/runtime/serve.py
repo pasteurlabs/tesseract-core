@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import inspect
+import os
 import uuid
 from collections.abc import Callable
 from functools import wraps
@@ -13,7 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from .config import get_config
+from .config import config_overrides_as_env, get_config
 from .core import create_endpoints
 from .cuda.serving import (
     EXPORTS_DONE_HEADER,
@@ -304,6 +305,7 @@ def serve(host: str, port: int, num_workers: int) -> None:
             f"gpu_transport={gpu_transport!r} cannot be served by more than one "
             f"worker (got num_workers={num_workers})."
         )
+    os.environ.update(config_overrides_as_env())
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",
         host=host,
