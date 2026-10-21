@@ -1423,8 +1423,9 @@ def test_server_keeps_response_exports_until_their_client_is_done(
         assert len(legacy.pins) == 0
         assert len(second.pins) == 1
 
-        # Exports nobody names are released once kept too long.
-        monkeypatch.setattr(cuda_serving, "EXPORTS_TIMEOUT_S", 0.0)
+        # Exports nobody names are released once kept too long. The timeout is
+        # negative so expiry does not wait for a coarse clock (Windows) to tick.
+        monkeypatch.setattr(cuda_serving, "EXPORTS_TIMEOUT_S", -1.0)
         apply(**{done: ""})
         assert len(second.pins) == 0
 
