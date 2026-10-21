@@ -443,12 +443,13 @@ def test_metadata_must_describe_the_named_producer(fake_agent):
     assert not nixl_transport._PRODUCER_LOCKS
 
 
-def test_missing_nixl_points_at_the_extra(monkeypatch):
+def test_missing_nixl_names_the_matching_build(monkeypatch):
     def no_nixl():
         raise ModuleNotFoundError("No module named 'nixl'", name="nixl")
 
     monkeypatch.setattr(nixl_transport, "_NIXL_AGENT", None)
     monkeypatch.setattr(nixl_transport, "_import_nixl_api", no_nixl)
+    monkeypatch.setattr(nixl_transport.cuda_api, "runtime_version", lambda: 12080)
 
-    with pytest.raises(RuntimeError, match=r"tesseract-core\[nixl\]"):
+    with pytest.raises(RuntimeError, match=r"pip install nixl-cu12"):
         nixl_transport._get_nixl_agent()

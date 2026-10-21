@@ -127,9 +127,16 @@ def _create_nixl_agent(num_workers: int) -> Any:
     try:
         nixl_api = _import_nixl_api()
     except ImportError as exc:  # pragma: no cover - env-dependent
+        if not (isinstance(exc, ModuleNotFoundError) and exc.name == "nixl"):
+            raise RuntimeError(
+                f"The 'nixl' GPU transport could not import NIXL: {exc}"
+            ) from exc
+        package = f"nixl-cu{cuda_api.runtime_version() // 1000}"
         raise RuntimeError(
-            "The 'nixl' GPU transport requires NIXL. Install it with the "
-            "optional extra: pip install tesseract-core[nixl]."
+            "The 'nixl' GPU transport requires NIXL, which is not installed in "
+            f"the Python environment at {sys.prefix}. Install the build for its "
+            f"CUDA runtime with `pip install {package}` (Linux only). For a "
+            f"Tesseract, add {package} to tesseract_requirements.txt and rebuild."
         ) from exc
 
     # UCX reads its configuration from the environment when the backend is
@@ -151,7 +158,7 @@ def _create_nixl_agent(num_workers: int) -> Any:
 
 
 def _get_nixl_agent() -> Any:
-    """Lazily create this process's NIXL agent, or explain the missing extra."""
+    """Lazily create this process's NIXL agent, or explain why NIXL is missing."""
     global _NIXL_AGENT
     with _NIXL_AGENT_LOCK:
         if _NIXL_AGENT is None:

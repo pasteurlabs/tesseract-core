@@ -55,13 +55,6 @@ runtime = [
 ]
 # END RUNTIME DEPENDENCIES
 
-# NIXL for the experimental `nixl` GPU transport. NIXL ships Linux/x86-64 CUDA
-# wheels only, so the dependency is limited to that platform. Elsewhere the extra
-# installs nothing and the transport stays unavailable.
-nixl = [
-    "nixl; platform_system == 'Linux' and platform_machine == 'x86_64'",
-]
-
 docs = [
     "sphinx",
     "sphinx_autodoc_typehints",

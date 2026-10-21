@@ -35,8 +35,9 @@ except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by hos
     _CUPY = False
 
 try:
-    import nixl  # noqa: F401
+    from tesseract_core.runtime.nixl_transport import _import_nixl_api
 
+    _import_nixl_api()
     _NIXL = True
 except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
     _NIXL = False
