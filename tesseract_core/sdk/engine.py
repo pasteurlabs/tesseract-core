@@ -81,20 +81,25 @@ ENV = Environment(
 )
 
 
+def check_docker() -> None:
+    """Raise a UserError if the Docker daemon cannot be reached."""
+    try:
+        docker_client.version()
+    except (APIError, RuntimeError) as ex:
+        raise UserError(
+            "Could not reach Docker daemon, check if it is running."
+        ) from ex
+    except FileNotFoundError as ex:
+        raise UserError("Docker not found, check if it is installed.") from ex
+
+
 def needs_docker(func: Callable) -> Callable:
     """A decorator for functions that rely on docker daemon."""
     import functools
 
     @functools.wraps(func)
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
-        try:
-            docker_client.version()
-        except (APIError, RuntimeError) as ex:
-            raise UserError(
-                "Could not reach Docker daemon, check if it is running."
-            ) from ex
-        except FileNotFoundError as ex:
-            raise UserError("Docker not found, check if it is installed.") from ex
+        check_docker()
         return func(*args, **kwargs)
 
     return wrapper_needs_docker

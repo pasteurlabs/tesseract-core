@@ -7,11 +7,12 @@ import json
 import logging
 import re
 import shlex
+import subprocess
 import sys
 import time
 import webbrowser
-from collections.abc import Iterable
-from contextlib import nullcontext
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager, nullcontext
 from enum import Enum
 from logging import getLogger
 from pathlib import Path
@@ -24,7 +25,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
-from . import engine, serving
+from . import engine, local_client, serving
 from .api_parse import (
     EXPECTED_OBJECTS,
     ValidationError,
@@ -43,7 +44,7 @@ from .docker_client import (
     NotFound,
 )
 from .exceptions import UserError
-from .logs import DEFAULT_CONSOLE, set_logger
+from .logs import DEFAULT_CONSOLE, LogStreamer, set_logger
 
 # typer >= 0.26 vendors its own click (and drops the click dependency), so the
 # Context type, exceptions, and context lookups must come from the click typer
@@ -494,15 +495,146 @@ def _parse_environment(
     return env_dict
 
 
+# An image name without a registry, tag or digest: what a directory name can
+# also be, and so the only case where a source path can shadow an image.
+_BARE_IMAGE_NAME = re.compile(
+    r"[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)*"
+)
+
+
+def _image_exists(image_name: str) -> bool:
+    """Whether there is a local Tesseract image by this name, answering False without Docker."""
+    try:
+        docker_client.images.get(image_name)
+    except Exception:  # noqa: BLE001 - no Docker, no daemon, or no such image
+        return False
+    return True
+
+
+def _get_source_path(image_or_path: str) -> Path | None:
+    """The Tesseract API that `image_or_path` points to, or None if it names an image.
+
+    It is a source path if it exists and is either a Python file or a directory
+    containing a `tesseract_api.py`. If a local image has the same name, the path
+    is used and a warning says so.
+    """
+    path = Path(image_or_path)
+    if path.is_dir():
+        api_path = path / "tesseract_api.py"
+    elif path.suffix == ".py":
+        api_path = path
+    else:
+        return None
+    if not api_path.is_file():
+        return None
+
+    api_path = api_path.resolve()
+    if (
+        path.is_dir()
+        and _BARE_IMAGE_NAME.fullmatch(image_or_path)
+        and _image_exists(image_or_path)
+    ):
+        logger.warning(
+            f"'{image_or_path}' is both a Tesseract source directory and an image; "
+            f"using the source at {api_path.parent}. Pass './{image_or_path}' to "
+            f"silence this, or '{image_or_path}:latest' to use the image."
+        )
+    else:
+        logger.debug(f"Using the Tesseract source at {api_path}")
+    return api_path
+
+
+def _not_a_source_hint(image_or_path: str) -> str:
+    """Why an existing path was taken for an image name, if it was."""
+    if not Path(image_or_path).exists():
+        return ""
+    return (
+        f"\n'{image_or_path}' exists on disk but is not a Tesseract source "
+        "(a directory containing tesseract_api.py, or a Python file), so it "
+        "was taken to be an image name."
+    )
+
+
+def _check_image_options(image_or_path: str, python_executable: Path | None) -> None:
+    """Refuse options that only apply to a source path, and require Docker for an image."""
+    if python_executable is not None:
+        raise UserError(
+            "--python-executable only applies to a Tesseract run from source, "
+            f"not to an image ('{image_or_path}')."
+        )
+    try:
+        engine.check_docker()
+    except UserError as ex:
+        raise UserError(f"{ex}{_not_a_source_hint(image_or_path)}") from ex
+
+
+def _reject_container_options(api_path: Path, options: dict[str, Any]) -> None:
+    """Refuse options that only mean something to a container."""
+    given = [name for name, value in options.items() if value not in (None, [], ())]
+    if given:
+        raise UserError(
+            f"{', '.join(given)} cannot be used with a Tesseract run from source "
+            f"({api_path}), only with a Tesseract image."
+        )
+
+
+@contextmanager
+def _source_errors(api_path: Path) -> Iterator[None]:
+    """Report a failure to start a Tesseract from source as an error for the user."""
+    try:
+        yield
+    except (RuntimeError, OSError) as ex:
+        raise UserError(f"Could not start the Tesseract at {api_path}: {ex}") from ex
+
+
+def _serve_from_source(api_path: Path, **kwargs: Any) -> None:
+    """Serve a Tesseract from source in the foreground, until interrupted."""
+    with _source_errors(api_path):
+        served = local_client.serve(api_path, **kwargs)
+
+    logger.info(f"Serving Tesseract at {served.url}, press Ctrl+C to stop")
+    logger.info(f"View Tesseract: {served.url}/docs")
+    streamer = LogStreamer(served.log_path, logger.info)
+    streamer.start()
+    interrupted = False
+    try:
+        while serving.is_running(served):
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        interrupted = True
+    finally:
+        streamer.stop()
+        served.remove(force=True)
+
+    if not interrupted:
+        exit_code = served.wait()["StatusCode"]
+        raise UserError(f"Tesseract at {api_path} stopped with exit code {exit_code}.")
+
+
+PYTHON_EXECUTABLE_HELP = (
+    "Python interpreter to run a Tesseract from source with. It must have the "
+    "Tesseract runtime and the Tesseract's requirements installed. By default, an "
+    "environment is built from `tesseract_config.yaml` into `.tesseract-venv` next "
+    "to `tesseract_api.py`, and reused while its requirements are unchanged. "
+    "Only applies to source paths."
+)
+
+
 OutputFormatChoices = make_choice_enum("OutputFormat", OUTPUT_FORMATS)
 
 
 @app.command("serve")
-@engine.needs_docker
 def serve(
-    image_name: Annotated[
+    image_or_path: Annotated[
         str,
-        typer.Argument(..., help="Tesseract image name"),
+        typer.Argument(
+            ...,
+            help=(
+                "Tesseract image name, or path to a Tesseract source directory "
+                "(or its `tesseract_api.py`)."
+            ),
+            metavar="IMAGE_OR_PATH",
+        ),
     ],
     volume: Annotated[
         list[str] | None,
@@ -677,16 +809,61 @@ def serve(
             show_default=False,
         ),
     ] = None,
+    python_executable: Annotated[
+        Path | None,
+        typer.Option(
+            "--python-executable",
+            help=PYTHON_EXECUTABLE_HELP,
+            exists=True,
+            dir_okay=False,
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
-    """Serve one or more Tesseract images.
+    """Serve a Tesseract from an image or a source directory.
 
-    A successful serve command will display on standard output a JSON object
-    with the Tesseract container name, which is required to run the teardown
-    command and its respective port.
+    An image is served in a detached container. On success, prints a JSON object
+    with the container name, which `tesseract teardown` needs, and the port.
+
+    A source path is served without Docker, in a local process and in the
+    environment `Tesseract.from_source` would use. It runs in the foreground
+    until stopped with Ctrl+C.
     """
     output_format: str | None = _enum_to_val(output_format)
 
     parsed_environment = _parse_environment(environment)
+
+    api_path = _get_source_path(image_or_path)
+    if api_path is not None:
+        _reject_container_options(
+            api_path,
+            {
+                "--volume": volume,
+                "--network": network,
+                "--network-alias": network_alias,
+                "--gpus": gpus,
+                "--user": user,
+                "--memory": memory,
+                "--runtime-args": docker_args,
+            },
+        )
+        _serve_from_source(
+            api_path,
+            host_ip=host_ip,
+            port=port,
+            num_workers=num_workers,
+            environment=parsed_environment,
+            input_path=input_path,
+            output_path=output_path,
+            output_format=output_format,
+            runtime_config={"debug": debug},
+            python_executable=python_executable,
+            skip_health_check=skip_health_check,
+            startup_timeout=startup_timeout,
+        )
+        return
+
+    _check_image_options(image_or_path, python_executable)
 
     if network_alias is not None and network is None:
         raise typer.BadParameter(
@@ -696,7 +873,7 @@ def serve(
 
     try:
         container_name, container = engine.serve(
-            image_name,
+            image_or_path,
             host_ip=host_ip,
             port=port,
             network=network,
@@ -995,21 +1172,47 @@ def _extract_cli_config(
     return input_path, volume_mounts, user
 
 
+def _run_error(image_or_path: str, cmd: str, stderr: bytes) -> UserError:
+    """The error to report for a Tesseract command that failed."""
+    msg = stderr.decode("utf-8").strip()
+    if "No such command" in msg:
+        error_string = f"Error running Tesseract '{image_or_path}' \n\n Error: Unimplemented command '{cmd}'.  "
+    else:
+        loglevel = logging.getLogger("tesseract").handlers[0].level
+        error_string = "Error running Tesseract."
+        if loglevel <= logging.INFO:
+            # Errors already streamed via logger.info, don't repeat them
+            pass
+        elif loglevel <= logging.ERROR:
+            # Re-emit errors at error level so they're visible
+            logger.error(msg)
+        else:
+            # Logs are squelched, tell user how to see them
+            error_string = (
+                "Error running Tesseract. Run with `--loglevel info` for more details."
+            )
+    return UserError(error_string)
+
+
 @app.command(
     "run",
     # We implement --help manually to forward the help of the Tesseract container
     add_help_option=False,
     epilog=(
-        "For more information about a specific Tesseract, try `tesseract run <tesseract-name> <cmd> --help`.\n"
+        "For more information about a specific Tesseract, try `tesseract run <image-or-path> <cmd> --help`.\n"
         "For example, `tesseract run helloworld apply --help`.\n"
     ),
 )
-@engine.needs_docker
 def run_container(
-    tesseract_image: Annotated[
+    image_or_path: Annotated[
         str | None,
         typer.Argument(
-            help="Tesseract image name", metavar="TESSERACT_IMAGE", show_default=False
+            help=(
+                "Tesseract image name, or path to a Tesseract source directory "
+                "(or its `tesseract_api.py`)."
+            ),
+            metavar="IMAGE_OR_PATH",
+            show_default=False,
         ),
     ] = None,
     cmd: Annotated[
@@ -1182,6 +1385,16 @@ def run_container(
             ),
         ),
     ] = False,
+    python_executable: Annotated[
+        Path | None,
+        typer.Option(
+            "--python-executable",
+            help=PYTHON_EXECUTABLE_HELP,
+            exists=True,
+            dir_okay=False,
+            show_default=False,
+        ),
+    ] = None,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1191,20 +1404,22 @@ def run_container(
         ),
     ] = False,
 ) -> None:
-    """Execute a command in a Tesseract.
+    """Execute a command in a Tesseract, from an image or a source directory.
 
-    This command starts a Tesseract instance and executes the given command.
+    An image runs in a container that is removed afterwards. A source path runs
+    without Docker, in a local process and in the environment
+    `Tesseract.from_source` would use.
     """
     cmd: str | None = _enum_to_val(cmd)
     output_format: str | None = _enum_to_val(output_format)
 
-    if not tesseract_image:
+    if not image_or_path:
         if invoke_help:
             get_current_context().get_help()
             return
         raise typer.BadParameter(
-            "Tesseract image name is required.",
-            param_hint="TESSERACT_IMAGE",
+            "Tesseract image name or source path is required.",
+            param_hint="IMAGE_OR_PATH",
         )
 
     if not cmd:
@@ -1212,7 +1427,7 @@ def run_container(
             get_current_context().get_help()
             return
         else:
-            error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"
+            error_string = f"Command is required. Are you sure your Tesseract image name or path is `{image_or_path}`?"
             raise typer.BadParameter(error_string, param_hint="CMD")
 
     if cmd == "serve":
@@ -1221,6 +1436,22 @@ def run_container(
             "Use `tesseract serve <tesseract-name>` instead.",
             param_hint="CMD",
         )
+
+    api_path = _get_source_path(image_or_path)
+    if api_path is not None:
+        _reject_container_options(
+            api_path,
+            {
+                "--volume": volume,
+                "--gpus": gpus,
+                "--network": network,
+                "--user": user,
+                "--memory": memory,
+                "--docker-args": docker_args,
+            },
+        )
+    else:
+        _check_image_options(image_or_path, python_executable)
 
     parsed_environment = {}
     if environment is not None:
@@ -1275,63 +1506,69 @@ def run_container(
         )
         if input_path is None:
             input_path = config_input_path
-        if volume is None:
-            volume = config_volume_mounts
-        if user is None:
-            user = config_user
+        if api_path is None:
+            if volume is None:
+                volume = config_volume_mounts
+            if user is None:
+                user = config_user
+        elif config_volume_mounts or config_user:
+            logger.warning(
+                "Ignoring the volume_mounts and user in the test spec's "
+                "cli_config, which only apply to a Tesseract image."
+            )
+
+    # `--debug` is meaningless when only forwarding `--help`, and would
+    # otherwise block waiting for a debugger on a help invocation.
+    debug = debug and not invoke_help
 
     try:
-        result_out, result_err = engine.run_tesseract(
-            tesseract_image,
-            cmd,
-            args,
-            volumes=volume,
-            input_path=input_path,
-            output_path=output_path,
-            output_format=output_format,
-            output_file=output_file,
-            gpus=gpus,
-            environment=parsed_environment,
-            network=network,
-            user=user,
-            memory=memory,
-            docker_args=shlex.split(docker_args) if docker_args else None,
-            # `--debug` is meaningless when only forwarding `--help`, and would
-            # otherwise block waiting for a debugger on a help invocation.
-            debug=debug and not invoke_help,
-            stream_logs=logger.info,  # Stream logs via logger
-        )
+        if api_path is None:
+            result_out, result_err = engine.run_tesseract(
+                image_or_path,
+                cmd,
+                args,
+                volumes=volume,
+                input_path=input_path,
+                output_path=output_path,
+                output_format=output_format,
+                output_file=output_file,
+                gpus=gpus,
+                environment=parsed_environment,
+                network=network,
+                user=user,
+                memory=memory,
+                docker_args=shlex.split(docker_args) if docker_args else None,
+                debug=debug,
+                stream_logs=logger.info,  # Stream logs via logger
+            )
+        else:
+            with _source_errors(api_path):
+                result_out, result_err = local_client.run(
+                    api_path,
+                    cmd,
+                    args,
+                    environment=parsed_environment,
+                    input_path=input_path,
+                    output_path=output_path,
+                    output_format=output_format,
+                    output_file=output_file,
+                    runtime_config={"debug": True} if debug else None,
+                    python_executable=python_executable,
+                    stream_logs=logger.info,
+                )
 
     except ImageNotFound as e:
         raise UserError(
             "Tesseract image not found. "
-            f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
+            f"Are you sure your tesseract image name is {image_or_path}?"
+            f"{_not_a_source_hint(image_or_path)}\n\n{e}"
         ) from e
 
-    except ContainerError as e:
-        msg = e.stderr.decode("utf-8").strip()
-        if "No such command" in msg:
-            error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
-        else:
-            loglevel = logging.getLogger("tesseract").handlers[0].level
-            error_string = "Error running Tesseract."
-            if loglevel <= logging.INFO:
-                # Errors already streamed via logger.info, don't repeat them
-                pass
-            elif loglevel <= logging.ERROR:
-                # Re-emit errors at error level so they're visible
-                logger.error(msg)
-            else:
-                # Logs are squelched, tell user how to see them
-                error_string = (
-                    "Error running Tesseract. "
-                    "Run with `--loglevel info` for more details."
-                )
-
-        raise UserError(error_string) from e
+    except (ContainerError, subprocess.CalledProcessError) as e:
+        raise _run_error(image_or_path, cmd, e.stderr) from e
 
     if invoke_help:
-        result_err = _sanitize_error_output(result_err, tesseract_image)
+        result_err = _sanitize_error_output(result_err, image_or_path)
         typer.echo(result_err, err=True, nl=False)
 
     # Logs have already been streamed to stderr, just output stdout (the result)
