@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 from collections.abc import Callable, Collection
+from functools import cache
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -131,16 +132,20 @@ def parse_requirements(
 
     line_parser = get_line_parser(finder)
     parser = RequirementsFileParser(session, line_parser)
-    logical_lines: dict[str, dict[int, str]] = {}
+
+    @cache
+    def read_logical_lines(path: str) -> dict[int, str]:
+        """Return each requirement in *path* as pip parses it, by its first line number.
+
+        pip joins continued lines and drops comments before parsing, and reports
+        each result under the number of its first physical line. Lines from a
+        nested ``-r`` file report that file as their ``filename``.
+        """
+        _, content = get_file_content(path, session=session)
+        return dict(ignore_comments(join_lines(enumerate(content.splitlines(), 1))))
 
     for parsed_line in parser.parse(str(filename), constraint):
-        if parsed_line.filename not in logical_lines:
-            _, content = get_file_content(parsed_line.filename, session=session)
-            lines_enum = enumerate(content.splitlines(), start=1)
-            logical_lines[parsed_line.filename] = dict(
-                ignore_comments(join_lines(lines_enum))
-            )
-        line = logical_lines[parsed_line.filename][parsed_line.lineno]
+        line = read_logical_lines(parsed_line.filename)[parsed_line.lineno]
         parsed_req = handle_line(
             parsed_line, options=options, finder=finder, session=session
         )
