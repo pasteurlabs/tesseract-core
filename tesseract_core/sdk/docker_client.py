@@ -491,8 +491,16 @@ class Container:
         return Images.get(image_id)
 
     @property
+    def _uses_host_network(self) -> bool:
+        """Whether the container shares the host's network namespace."""
+        return self.attrs.get("HostConfig", {}).get("NetworkMode") == "host"
+
+    @property
     def host_port(self) -> str | None:
         """Gets the host port of the container."""
+        if self._uses_host_network:
+            # Nothing is published, since the API binds this port on the host.
+            return self.api_port
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
@@ -532,6 +540,8 @@ class Container:
     @property
     def host_ip(self) -> str | None:
         """Gets the host IP of the container."""
+        if self._uses_host_network:
+            return "127.0.0.1"
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
