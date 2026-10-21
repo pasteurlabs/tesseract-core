@@ -36,6 +36,7 @@ from tesseract_core.runtime.core import (
     create_endpoints,
     get_tesseract_api,
     redirect_fd,
+    use_utf8_stdio,
 )
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
@@ -730,6 +731,7 @@ def _configure_required_file_load() -> None:
 
 def main() -> None:
     """Entrypoint for the command line interface."""
+    use_utf8_stdio()
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
     with redirect_fd(sys.stdout, sys.stderr) as orig_stdout:
         # Fail as fast as possible if the Tesseract API path is not set
