@@ -47,7 +47,7 @@ def _require_docker_if_marked(request: pytest.FixtureRequest) -> None:
 @functools.cache
 def _check_docker() -> bool:
     try:
-        CLIDockerClient().info()
+        CLIDockerClient().version()
         return True
     except (APIError, OSError):
         return False

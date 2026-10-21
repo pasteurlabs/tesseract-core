@@ -262,6 +262,29 @@ def test_nested_scalar_mismatch_fails(complex_tesseract_module, monkeypatch):
     assert "Obtained:" in result.message
 
 
+def test_nan_scalar_matches_nan(complex_tesseract_module, monkeypatch):
+    """NaN scalars compare equal, as NaN array elements already do."""
+    expected_output = make_valid_nested_output()
+    expected_output["testfoo"][0]["foo"] = np.float32(np.nan)
+
+    def mock_apply(inputs):
+        return complex_tesseract_module.OutputSchema(**expected_output)
+
+    monkeypatch.setattr(complex_tesseract_module, "apply", mock_apply)
+    endpoints = {
+        func.__name__: func for func in create_endpoints(complex_tesseract_module)
+    }
+
+    test_spec = RegressionTestSpec(
+        endpoint="apply",
+        payload=make_apply_payload(),
+        expected_outputs=expected_output,
+    )
+
+    result = regress_test_case(complex_tesseract_module, endpoints, test_spec)
+    assert result.status == "passed", result.message
+
+
 def test_root_model_value_mismatch_fails(complex_tesseract_module, monkeypatch):
     """Test that RootModel value differences cause failure."""
     expected_output = make_valid_nested_output()

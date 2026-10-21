@@ -167,6 +167,8 @@ def expand_glob(pattern: str) -> list[str]:
     Path may be anything supported by fsspec.
     """
     open_files = fsspec.open_files(pattern, "rb", expand=True)
+    if is_url(pattern):
+        return sorted(f.full_name for f in open_files)
     return sorted(f.path for f in open_files)
 
 

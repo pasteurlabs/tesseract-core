@@ -768,6 +768,22 @@ def test_run_tesseract(mocked_docker):
     assert res["device_requests"] is None
 
 
+def test_caller_environment_is_not_modified(mocked_docker, skip_debugger_check):
+    """A dict reused across calls must not carry one call's settings into the next."""
+    env = {"FOO": "bar"}
+
+    engine.serve(
+        "foobar", debug=True, gpus=["all"], gpu_transport="cuda_ipc", environment=env
+    )
+    engine.run_tesseract("foobar", "apply", ["{}"], debug=True, environment=env)
+    assert env == {"FOO": "bar"}
+
+    res, _ = engine.serve("foobar", environment=env)
+    parsed = json.loads(res)
+    assert parsed["environment"]["TESSERACT_GPU_TRANSPORT"] == "none"
+    assert "TESSERACT_DEBUG" not in parsed["environment"]
+
+
 def test_run_binref_without_output_path_errors(mocked_docker, tmp_path):
     """json+binref without an output path is a hard error, not silent data loss.
 
@@ -1652,7 +1668,7 @@ def test_needs_docker(mocked_docker, monkeypatch):
     def raise_docker_error(*args, **kwargs):
         raise RuntimeError("No Docker")
 
-    monkeypatch.setattr(mocked_docker, "info", raise_docker_error)
+    monkeypatch.setattr(mocked_docker, "version", raise_docker_error)
 
     with pytest.raises(UserError):
         run_something_with_docker()
