@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-gpu" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="560" fill="#ffffff"/>
+
+  <!-- Column headers -->
+  <text x="360" y="48" text-anchor="middle" font-size="22" letter-spacing="1" fill="#0f172a">TRAINING PROCESS</text>
+  <text x="1240" y="48" text-anchor="middle" font-size="22" letter-spacing="1" fill="#0f172a">SOLVER PROCESS</text>
+
+  <!-- Process boundary -->
+  <line x1="800" y1="24" x2="800" y2="455" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="10 8"/>
+
+  <!-- Row 1: host round trip -->
+  <text x="40" y="108" font-size="17" letter-spacing="1" fill="#475569">HOST ROUND TRIP</text>
+
+  <rect x="40" y="125" width="180" height="90" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="130" y="164" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">GPU array</text>
+  <text x="130" y="191" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">training process</text>
+
+  <rect x="270" y="125" width="180" height="90" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="360" y="164" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">Host copy</text>
+  <text x="360" y="191" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">device to host</text>
+
+  <rect x="500" y="125" width="180" height="90" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="590" y="164" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">Encode</text>
+  <text x="590" y="191" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">base64 into JSON</text>
+
+  <rect x="920" y="125" width="180" height="90" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="1010" y="164" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">Decode</text>
+  <text x="1010" y="191" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">JSON, then base64</text>
+
+  <rect x="1150" y="125" width="180" height="90" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="1240" y="164" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">Device copy</text>
+  <text x="1240" y="191" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">host to device</text>
+
+  <rect x="1380" y="125" width="180" height="90" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1470" y="164" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">GPU array</text>
+  <text x="1470" y="191" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">solver process</text>
+
+  <line x1="222" y1="170" x2="267" y2="170" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="452" y1="170" x2="497" y2="170" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="682" y1="170" x2="917" y2="170" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1102" y1="170" x2="1147" y2="170" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1332" y1="170" x2="1377" y2="170" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="800" y="156" text-anchor="middle" font-size="17" fill="#334155" paint-order="stroke" stroke="#ffffff" stroke-width="8">HTTP</text>
+  <text x="800" y="200" text-anchor="middle" font-size="17" font-style="italic" fill="#64748b" paint-order="stroke" stroke="#ffffff" stroke-width="8">every byte, as text</text>
+
+  <!-- Row 2: cuda_ipc -->
+  <text x="40" y="318" font-size="17" letter-spacing="1" fill="#475569">CUDA_IPC</text>
+
+  <rect x="40" y="335" width="180" height="90" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="130" y="374" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">GPU array</text>
+  <text x="130" y="401" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">training process</text>
+
+  <rect x="500" y="335" width="180" height="90" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="590" y="374" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">Export handle</text>
+  <text x="590" y="401" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">64 bytes in JSON</text>
+
+  <rect x="920" y="335" width="180" height="90" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1010" y="374" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">Map handle</text>
+  <text x="1010" y="401" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">same allocation</text>
+
+  <rect x="1380" y="335" width="180" height="90" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1470" y="374" text-anchor="middle" font-size="21" font-weight="bold" fill="#1e293b">GPU array</text>
+  <text x="1470" y="401" text-anchor="middle" font-size="16" font-style="italic" fill="#475569">solver process</text>
+
+  <line x1="222" y1="380" x2="497" y2="380" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="682" y1="380" x2="917" y2="380" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1102" y1="380" x2="1377" y2="380" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="800" y="366" text-anchor="middle" font-size="17" fill="#334155" paint-order="stroke" stroke="#ffffff" stroke-width="8">HTTP</text>
+  <text x="800" y="410" text-anchor="middle" font-size="17" font-style="italic" fill="#64748b" paint-order="stroke" stroke="#ffffff" stroke-width="8">handle only</text>
+
+  <!-- Data path on the GPU -->
+  <path d="M130,427 V485 H1470 V430" fill="none" stroke="#7c3aed" stroke-width="3" stroke-dasharray="8 6" marker-end="url(#arrow-gpu)"/>
+  <text x="800" y="522" text-anchor="middle" font-size="17" fill="#6d28d9">array data moves device-to-device, on the one GPU both processes share</text>
+</svg>
