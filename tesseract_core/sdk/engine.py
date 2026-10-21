@@ -1012,9 +1012,9 @@ def serve(
         output_format: Output format to use for the results.
         gpu_transport: GPU transport the served Tesseract accepts besides ``none``,
             which copies GPU arrays to the host. ``cuda_ipc`` passes them by
-            reference and requires ``gpus`` and a shared IPC namespace.
-            ``nixl`` reads them across with NIXL, also from another host, and
-            additionally requires host networking. Responses
+            reference and requires ``gpus`` and a shared IPC namespace. ``nixl``
+            passes them by reference via NIXL, also across hosts, requires
+            ``gpus``, and runs the container on the host network. Responses
             only use it for requests that ask for it. Anything but ``none`` needs
             ``num_workers=1``. An explicit value (including ``none``) wins over a
             ``gpu_transport`` in ``runtime_config``, and leaving it unset
@@ -1091,9 +1091,9 @@ def serve(
                 "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
             )
 
-    # nixl's UCX agent advertises its own address to the client, which is
-    # unreachable from outside a container's network namespace, so the container
-    # shares the host's network instead.
+    # nixl's UCX agent advertises its own network address to the client, and an
+    # address inside a container's network namespace is unreachable from
+    # outside it, so the container uses the host network.
     if gpu_transport == "nixl":
         if network not in (None, "host"):
             raise ValueError(
@@ -1195,8 +1195,8 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # The GPU transports share a GPU with processes on the host through
-        # its IPC namespace (nixl on its same-host paths).
+        # The GPU transports share GPU memory with other processes on the host
+        # through the host's IPC namespace, nixl only on its same-host paths.
         if gpu_transport != "none":
             extra_args.append("--ipc=host")
 

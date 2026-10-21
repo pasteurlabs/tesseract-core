@@ -54,8 +54,9 @@ from tesseract_core.runtime.cuda.arrays import (
 )
 from tesseract_core.runtime.device_transport import DeviceTransport
 
-# These live in cuda.arrays, shared by all GPU transports, and stay importable
-# from here for code written against earlier releases.
+# Importable from here, under its old name, for code written against releases
+# that defined it in this module. The re-exported functions in __all__ are kept
+# for the same reason.
 IpcDeviceArray = DeviceArray
 
 __all__ = [

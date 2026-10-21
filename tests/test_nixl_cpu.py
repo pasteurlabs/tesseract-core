@@ -90,10 +90,16 @@ class FakeNixlAgent:
         self.released_xfers.append(handle)
 
 
+@pytest.fixture(autouse=True)
+def fresh_parallel_reads(monkeypatch):
+    """Let each test configure ``nixl_parallel_reads`` anew."""
+    monkeypatch.setattr(cuda_nixl, "_PARALLEL_READS", None)
+
+
 @pytest.fixture
 def fake_agent(monkeypatch):
     agent = FakeNixlAgent()
-    monkeypatch.setattr(cuda_nixl, "_NIXL_AGENT", agent)
+    monkeypatch.setattr(cuda_nixl, "_MAIN_AGENT", agent)
     monkeypatch.setattr(cuda_nixl, "_PARALLEL_READ_AGENT", agent)
     return agent
 
@@ -156,7 +162,7 @@ def test_nixl_array_schema_rejects_malformed(bad):
 
 
 def test_nixl_gated_behind_gpu_transport_config():
-    """Nixl is a transport, not a format: it is offered only when configured."""
+    """Nixl is offered only when ``gpu_transport`` selects it."""
     from tesseract_core.runtime import config
     from tesseract_core.runtime.file_interactions import available_gpu_transports
 
@@ -230,7 +236,7 @@ def test_empty_array_crosses_without_nixl(mocked_cuda, monkeypatch):
     def no_agent():
         raise AssertionError("an empty array must not create a NIXL agent")
 
-    monkeypatch.setattr(cuda_nixl, "_get_nixl_agent", no_agent)
+    monkeypatch.setattr(cuda_nixl, "_get_main_agent", no_agent)
 
     group = cuda_nixl.NixlExportGroup()
     out = cuda_nixl.dump_nixl_arraydict(FakeCudaArray((0, 3), data_ptr=0), group)
@@ -328,7 +334,7 @@ def test_only_split_reads_use_the_parallel_read_agent(mocked_cuda, monkeypatch):
     from tesseract_core.runtime import config
 
     main, parallel = FakeNixlAgent(), FakeNixlAgent()
-    monkeypatch.setattr(cuda_nixl, "_NIXL_AGENT", main)
+    monkeypatch.setattr(cuda_nixl, "_MAIN_AGENT", main)
     monkeypatch.setattr(cuda_nixl, "_PARALLEL_READ_AGENT", parallel)
     monkeypatch.setattr(cuda_nixl, "_PARALLEL_MIN_BYTES", 64)
     config.update_config(nixl_parallel_reads=4)
@@ -391,12 +397,12 @@ def test_agents_use_the_configured_workers_and_tcp_segments(monkeypatch):
     )
     environ = {"UCX_TCP_RX_SEG_SIZE": "64k"}
     monkeypatch.setattr(cuda_nixl.os, "environ", environ)
-    monkeypatch.setattr(cuda_nixl, "_NIXL_AGENT", None)
+    monkeypatch.setattr(cuda_nixl, "_MAIN_AGENT", None)
     monkeypatch.setattr(cuda_nixl, "_PARALLEL_READ_AGENT", None)
     monkeypatch.setattr(cuda_nixl, "_import_nixl_api", lambda: fake_api)
     config.update_config(nixl_parallel_reads=3, nixl_ucx_tcp_seg_size="2m")
 
-    cuda_nixl._get_nixl_agent()
+    cuda_nixl._get_main_agent()
     cuda_nixl._get_parallel_read_agent()
 
     assert backends == [("UCX", {"num_workers": "1"}), ("UCX", {"num_workers": "3"})]
@@ -441,7 +447,7 @@ def test_missing_nixl_names_the_matching_build(monkeypatch):
     monkeypatch.setattr(cuda_nixl.cuda_api, "runtime_library_path", lambda: "")
     monkeypatch.setattr(cuda_nixl.ctypes, "CDLL", lambda *args, **kwargs: None)
     monkeypatch.delitem(sys.modules, "nixl._api", raising=False)
-    monkeypatch.setattr(cuda_nixl, "_NIXL_AGENT", None)
+    monkeypatch.setattr(cuda_nixl, "_MAIN_AGENT", None)
 
     with pytest.raises(RuntimeError, match=r"pip install nixl-cu99"):
-        cuda_nixl._get_nixl_agent()
+        cuda_nixl._get_main_agent()

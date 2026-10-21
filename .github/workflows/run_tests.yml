@@ -406,8 +406,8 @@ jobs:
             "cupy-cuda${{ matrix.cuda.major }}x" \
             "jax[cuda${{ matrix.cuda.major }}]"
 
-      # NIXL for the nixl GPU transport tests, in the build for the matrix CUDA
-      # major so the tests run instead of skipping. Its wheels bundle UCX.
+      # The nixl GPU transport tests skip without NIXL. Install the build for
+      # the matrix's CUDA major, whose wheel bundles UCX.
       - name: Install NIXL
         run: |
           uv pip install "nixl-cu${{ matrix.cuda.major }}"

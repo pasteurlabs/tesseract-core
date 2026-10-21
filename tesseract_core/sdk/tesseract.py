@@ -383,11 +383,12 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             gpu_transport: GPU transport to enable on the served Tesseract and use for
                 this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
-                reference, which requires the container to have GPU access and
-                ``num_workers=1``. Independent of ``output_format``, which governs
-                CPU arrays. Resolved against ``runtime_config`` with the precedence
-                described in ``engine.serve``.
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
+                pass them by reference, which requires the container to have GPU
+                access and ``num_workers=1``. ``nixl`` also works across hosts and
+                runs the container on the host network. Independent of
+                ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -631,10 +632,11 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             gpu_transport: GPU transport to enable on the served Tesseract and use for
                 this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
-                reference, which needs no setup since processes on one host share an
-                IPC namespace. Independent of ``output_format``, which governs CPU
-                arrays. Resolved against ``runtime_config``, an explicit value winning.
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
+                pass them by reference, which needs no setup since processes on one
+                host share an IPC namespace and network. Independent of
+                ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config``, an explicit value winning.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.

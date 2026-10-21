@@ -135,7 +135,7 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
 def _consumer_main(to_consumer, from_consumer, result_q):
     """Receive encodings, decode them cross-process, verify, report.
 
-    Decoding is framework-agnostic: it returns an ``DeviceArray`` that
+    Decoding is framework-agnostic: it returns a ``DeviceArray`` that
     exposes ``__cuda_array_interface__`` and ``__dlpack__``. We read the values
     back via the wrapper's host-copy helper -- no CuPy needed for the assertions
     -- so this path proves the decoded result is framework-independent.

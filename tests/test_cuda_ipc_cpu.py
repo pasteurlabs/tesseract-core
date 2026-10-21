@@ -22,8 +22,7 @@ are CUDA-runtime properties with no meaning against a fake. Those guarantees are
 covered by the GPU tests in ``test_cuda_ipc.py`` (marked ``@pytest.mark.gpu``).
 
 Library-discovery tests (wheel/soname resolution) live at the bottom and target
-``tesseract_core.runtime.cuda.loader`` directly, since that is where discovery
-now lives.
+``tesseract_core.runtime.cuda.loader`` directly.
 """
 
 from __future__ import annotations
@@ -1274,7 +1273,7 @@ def test_dtype_without_numpy_equivalent_is_refused(mocked_cuda):
 
 
 def test_strided_arrays_are_copied_on_the_device_by_their_framework():
-    # cuda_ipc moves a flat byte range, so a strided array is first made
+    # The GPU transports move a flat byte range, so a strided array is first made
     # contiguous by the framework that made it, never through the host.
     contiguous = FakeCudaArray((3, 2), "<f4")
     assert cuda_arrays.contiguous_on_device(contiguous)[0] is contiguous

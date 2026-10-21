@@ -7,11 +7,10 @@ Run on a GPU machine with NIXL installed::
 
     pytest tests/test_nixl.py -m gpu
 
-NIXL moves a GPU array between two *separate* processes (a process cannot READ
-from a NIXL agent it registered itself in the same process), so these use either
-a spawned producer/consumer pair sharing a rendezvous directory, mirroring the
-cross-process cuda_ipc tests, or a Tesseract served in a subprocess. Marked
-``gpu``, and skipped where CuPy or NIXL are unavailable.
+A process cannot READ from its own NIXL agent, so these tests run the producer
+and consumer in separate processes, either as a spawned pair sharing a
+rendezvous directory or as a client and a Tesseract served in a subprocess. They
+are skipped where CuPy or NIXL is unavailable.
 """
 
 from __future__ import annotations

@@ -1461,7 +1461,7 @@ def test_container_diagnoses_its_own_exit(state, expected):
 
 
 def test_container_url_on_the_host_network():
-    """A host-network container publishes no ports; it serves on its API port."""
+    """A host-network container publishes no ports and serves on its API port."""
     container = Container(
         id="abc123",
         short_id="abc123",

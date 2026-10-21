@@ -1,24 +1,24 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NIXL device transport: point-to-point GPU array exchange via NIXL.
+"""NIXL device transport: GPU array exchange between processes, also across hosts.
 
-Like ``cuda_ipc`` (:mod:`tesseract_core.runtime.cuda.ipc`), this transport passes
-a GPU array between two processes without a host round-trip. NIXL picks its
-backend by itself: CUDA IPC or shared memory on one host, and UCX across hosts
-(RDMA where the hardware supports it, TCP otherwise). NIXL is only loaded once a
-Tesseract encodes or decodes a NIXL array.
+NIXL chooses how to move the bytes, using CUDA IPC or shared memory on one host
+and UCX across hosts (over RDMA where the hardware supports it, TCP otherwise).
+NIXL is only imported once a Tesseract encodes or decodes a ``nixl`` array.
 
-The consumer initiates the transfer, a READ. The producer registers the array's
-device memory with its NIXL agent and sends its agent's name and metadata, the
-array's address and its device in the JSON message. The consumer adds the
-producer as a remote agent and reads the bytes into a buffer of its own, which it
-returns as the same :class:`~tesseract_core.runtime.cuda.arrays.DeviceArray` that
-``cuda_ipc`` returns. The producer's registration does nothing until then, so
-this fits the request lifecycle of ``cuda_ipc``.
+The consumer pulls the array with a NIXL READ. The producer registers the
+array's device memory with its NIXL agent and describes it in the JSON message
+(see :class:`~tesseract_core.runtime.array_encoding.NixlArrayData`). The
+consumer loads the producer's agent metadata and reads the bytes into a buffer
+of its own, which it returns as the same
+:class:`~tesseract_core.runtime.cuda.arrays.DeviceArray` that ``cuda_ipc``
+returns. The producer posts no transfer of its own, so the transport fits the
+same request lifecycle as ``cuda_ipc``.
 
-The message holds plain numbers instead of NIXL's descriptor serialization,
-which is a pickle, so neither process unpickles what the other sends.
+The message carries the address and device as plain numbers rather than NIXL's
+descriptor serialization, which is a pickle, so neither process unpickles what
+the other sends.
 """
 
 from __future__ import annotations
@@ -52,21 +52,27 @@ from tesseract_core.runtime.cuda.arrays import (
 from tesseract_core.runtime.device_transport import DeviceTransport
 
 # ---------------------------------------------------------------------------
-# Lazy NIXL agent (one per process)
+# Lazy NIXL agents
 # ---------------------------------------------------------------------------
 #
-# Each process has a NIXL agent, which owns the UCX backend and the memory
-# registrations. Concurrent requests share it, so it is created with strict
-# thread synchronization (by default, NIXL synchronizes nothing).
+# Each process has a main NIXL agent with a single UCX worker, which registers
+# the arrays the process exports. Concurrent requests share it, so it is
+# created with strict thread synchronization, since by default NIXL
+# synchronizes nothing.
 #
 # Arrays read in parallel (see _read_spans) go through a second agent, with one
 # UCX worker per read. Every read connects to its producer afresh (see
 # _remote_agent), which takes longer the more workers the reading agent has, so
-# all other reads use the single-worker agent.
+# all other reads use the main agent.
 
-_NIXL_AGENT: Any = None
+_MAIN_AGENT: Any = None
 _PARALLEL_READ_AGENT: Any = None
-_NIXL_AGENT_LOCK = threading.Lock()
+# Guards the lazily created state of this module.
+_INIT_LOCK = threading.Lock()
+
+# The number of parallel reads, taken from the config once so that the spans,
+# the parallel-read agent's workers and the read threads always agree.
+_PARALLEL_READS: int | None = None
 
 # Threads that run the parallel reads of an array. NIXL runs each thread's
 # transfers on one of the agent's UCX workers, so reads only use several
@@ -81,17 +87,16 @@ _PRODUCER_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = (
 _PRODUCER_LOCKS_LOCK = threading.Lock()
 
 # Arrays of at least this many bytes are read in parallel (see _read_spans).
-# Smaller ones gain little from it and connect faster on the single-worker
-# agent.
+# Smaller ones gain little from it and connect faster on the main agent.
 _PARALLEL_MIN_BYTES = 16 * 2**20
 
-# How long a consumer waits for a posted READ to complete. It only runs out when
-# a transfer stalls, e.g. because the producer died, not on a slow large one.
+# Seconds a consumer waits for a posted READ to complete, so that a stalled
+# transfer (e.g. because the producer died) does not hang it forever.
 _XFER_TIMEOUT = 120.0
 
 
 def _nixl_agent_name() -> str:
-    """A NIXL agent name unique to this process, even across hosts.
+    """A fresh NIXL agent name, unique even across hosts.
 
     NIXL refuses a remote agent with the local agent's name, and pids repeat
     across hosts, so the name adds a random part.
@@ -100,17 +105,16 @@ def _nixl_agent_name() -> str:
 
 
 def _import_nixl_api() -> Any:
-    """Import the NIXL build that matches the CUDA runtime this process uses.
+    """Import the NIXL build for the CUDA runtime that :mod:`~tesseract_core.runtime.cuda.api` loaded.
 
-    NIXL ships one build per CUDA major, and two builds cannot share a process.
-    Its ``nixl`` package picks one from the CUDA framework it finds (torch, if
-    installed), which can differ from the runtime that
-    :mod:`tesseract_core.runtime.cuda.api` loads. Each build's UCX also loads
-    libcudart of its major by bare soname, which fails where the runtime comes
-    from a pip wheel, and UCX then treats GPU memory as host memory.
+    NIXL ships one build per CUDA major version, and two builds cannot share a
+    process. Its ``nixl`` package picks a build from the CUDA framework it finds
+    (torch, if installed), which may not match the runtime loaded here. So this
+    imports the matching build directly, unless ``nixl`` already loaded one.
 
-    So this makes the runtime's libcudart global, where UCX finds it, and
-    imports the build already imported, else the matching one.
+    Each build's UCX loads libcudart by bare soname, which fails when the
+    runtime comes from a pip wheel, and UCX then treats GPU memory as host
+    memory. Loading the runtime with ``RTLD_GLOBAL`` first lets UCX find it.
     """
     ctypes.CDLL(cuda_api.runtime_library_path(), mode=ctypes.RTLD_GLOBAL)
 
@@ -160,41 +164,49 @@ def _create_nixl_agent(num_workers: int) -> Any:
     return agent
 
 
-def _get_nixl_agent() -> Any:
-    """Lazily create this process's NIXL agent, or explain why NIXL is missing."""
-    global _NIXL_AGENT
-    with _NIXL_AGENT_LOCK:
-        if _NIXL_AGENT is None:
-            _NIXL_AGENT = _create_nixl_agent(num_workers=1)
-        return _NIXL_AGENT
+def _get_main_agent() -> Any:
+    """Return this process's main NIXL agent, creating it on first use."""
+    global _MAIN_AGENT
+    with _INIT_LOCK:
+        if _MAIN_AGENT is None:
+            _MAIN_AGENT = _create_nixl_agent(num_workers=1)
+        return _MAIN_AGENT
+
+
+def _parallel_reads() -> int:
+    """The configured ``nixl_parallel_reads``, fixed at its first use in this process."""
+    global _PARALLEL_READS
+    with _INIT_LOCK:
+        if _PARALLEL_READS is None:
+            _PARALLEL_READS = get_config().nixl_parallel_reads
+        return _PARALLEL_READS
 
 
 def _get_parallel_read_agent() -> Any:
     """Lazily create the NIXL agent for parallel reads."""
     global _PARALLEL_READ_AGENT
-    with _NIXL_AGENT_LOCK:
+    num_workers = _parallel_reads()
+    with _INIT_LOCK:
         if _PARALLEL_READ_AGENT is None:
-            _PARALLEL_READ_AGENT = _create_nixl_agent(
-                num_workers=get_config().nixl_parallel_reads
-            )
+            _PARALLEL_READ_AGENT = _create_nixl_agent(num_workers=num_workers)
         return _PARALLEL_READ_AGENT
 
 
 def _read_pool() -> ThreadPoolExecutor:
     """Lazily create the threads that run parallel reads."""
     global _READ_POOL
-    with _NIXL_AGENT_LOCK:
+    max_workers = _parallel_reads()
+    with _INIT_LOCK:
         if _READ_POOL is None:
             _READ_POOL = ThreadPoolExecutor(
-                max_workers=get_config().nixl_parallel_reads,
-                thread_name_prefix="tesseract-nixl-read",
+                max_workers=max_workers, thread_name_prefix="tesseract-nixl-read"
             )
         return _READ_POOL
 
 
 def _read_spans(nbytes: int) -> list[tuple[int, int]]:
-    """Split an array's ``nbytes`` into the (offset, size) spans read in parallel."""
-    parts = get_config().nixl_parallel_reads
+    """Split ``nbytes`` into the (offset, size) spans to read in parallel, or one span if small."""
+    parts = _parallel_reads()
     if parts == 1 or nbytes < _PARALLEL_MIN_BYTES:
         return [(0, nbytes)]
     size = -(-nbytes // parts)
@@ -224,7 +236,7 @@ class NixlExportGroup:
         exports, self.exports = self.exports, []
         if not exports:
             return
-        agent = _get_nixl_agent()
+        agent = _get_main_agent()
         for registration, _arr in exports:
             # A server releases exports while answering later, unrelated
             # requests, which must not fail over this. A failed deregistration
@@ -236,10 +248,7 @@ class NixlExportGroup:
 
 
 def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
-    """Register a CUDA array in ``group`` and describe it as a JSON array dict.
-
-    A strided array is first copied on the device, as for cuda_ipc.
-    """
+    """Register a CUDA array in ``group`` and describe it as a JSON array dict."""
     arr, info = prepare_export(arr, "nixl")
 
     if info.nbytes == 0:
@@ -247,7 +256,7 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
         # and the consumer recreates it without a transfer.
         buffer = ":::"
     else:
-        agent = _get_nixl_agent()
+        agent = _get_main_agent()
         registration = agent.register_memory(
             [(info.data_ptr, info.nbytes, info.device, "")], "VRAM"
         )
@@ -279,10 +288,11 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
 def _remote_agent(agent: Any, name: str, metadata: bytes) -> Iterator[None]:
     """Load a producer's agent metadata for the duration of one read.
 
-    NIXL cannot load metadata for a producer it already knows, and a producer's
-    metadata changes with every message, as its pooled allocator registers the
-    same buffers anew. So each read loads its message's metadata and forgets the
-    producer afterwards, and reads from one producer take turns.
+    NIXL cannot load metadata for a producer it already knows, yet a producer's
+    metadata changes with every message, because it registers that message's
+    buffers anew even at addresses its pooled allocator reuses. So each read
+    loads its own message's metadata and forgets the producer afterwards, and
+    reads from one producer take turns.
     """
     with _PRODUCER_LOCKS_LOCK:
         lock = _PRODUCER_LOCKS.setdefault(name, threading.Lock())
@@ -322,7 +332,7 @@ def load_nixl_arraydict(val: ArrayDict) -> DeviceArray:
     remote_meta = pybase64.b64decode(meta_b64, validate=True)
 
     spans = _read_spans(nbytes)
-    agent = _get_parallel_read_agent() if len(spans) > 1 else _get_nixl_agent()
+    agent = _get_parallel_read_agent() if len(spans) > 1 else _get_main_agent()
     # The producer registered exactly these bytes. Its address and device ordinal
     # identify them to its own agent and need not mean anything in this process.
     remote_address, remote_device = int(address), int(remote_device)
@@ -332,8 +342,8 @@ def load_nixl_arraydict(val: ArrayDict) -> DeviceArray:
         remote = agent.get_xfer_descs(
             [(remote_address + offset, size, remote_device)], "VRAM"
         )
-        # Entering the device makes its primary context current on this thread,
-        # a pool thread for parallel reads, which UCX's CUDA transport needs.
+        # UCX's CUDA transport needs the device's primary context current on
+        # this thread, which may be a fresh pool thread, so enter the device.
         with on_device(device):
             handle = agent.initialize_xfer(
                 "READ", local, remote, peer_name, b"tesseract"
@@ -352,8 +362,8 @@ def load_nixl_arraydict(val: ArrayDict) -> DeviceArray:
                 if len(spans) == 1:
                     read(*spans[0])
                 else:
-                    # Wait for every read before the buffer can be freed, even
-                    # when one of them fails.
+                    # Wait for every read, even after one fails, so the buffer
+                    # is not freed while another read still writes to it.
                     pool = _read_pool()
                     done, _ = wait([pool.submit(read, *span) for span in spans])
                     for future in done:
@@ -368,11 +378,7 @@ def load_nixl_arraydict(val: ArrayDict) -> DeviceArray:
 
 
 def _wait_for_xfer(agent: Any, handle: Any) -> None:
-    """Block until a NIXL transfer completes, raising on error or timeout.
-
-    A posted READ can stall indefinitely if the producer dies mid-transfer, so
-    give up after ``_XFER_TIMEOUT`` seconds rather than hang the consumer forever.
-    """
+    """Block until a NIXL transfer completes, raising on error or after ``_XFER_TIMEOUT``."""
     deadline = time.monotonic() + _XFER_TIMEOUT
     while True:
         state = agent.check_xfer_state(handle)
@@ -406,11 +412,7 @@ class NixlTransport(DeviceTransport):
         return NixlExportGroup()
 
     def register(self, arr: Any, session: Any = None) -> ArrayDict:
-        """Register ``arr`` in ``session`` (a :class:`NixlExportGroup`) and describe it.
-
-        The per-array handle *is* the array dict, so :meth:`descriptor` is a
-        passthrough.
-        """
+        """Register ``arr`` in ``session`` (a :class:`NixlExportGroup`) and return its array dict."""
         if session is None:
             raise ValueError(
                 "nixl exports need a session from new_exports(), which keeps them "

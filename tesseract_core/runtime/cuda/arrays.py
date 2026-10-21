@@ -1,15 +1,12 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""GPU arrays as the device transports see them.
+"""GPU array handling shared by the GPU transports.
 
-Everything here is shared by the GPU transports
-(:mod:`~tesseract_core.runtime.cuda.ipc` and
-:mod:`~tesseract_core.runtime.cuda.nixl`) and specific to none of them: reading
-a GPU array's metadata from ``__cuda_array_interface__``, preparing it for
-export, copying it to the host where a host encoding needs its bytes, and the
-:class:`DeviceArray` a transport decodes into, whose buffer comes from a pool
-of released buffers.
+This covers reading a GPU array's metadata from ``__cuda_array_interface__``,
+preparing it for export, copying it to the host for host encodings, and the
+pooled :class:`DeviceArray` that :mod:`~tesseract_core.runtime.cuda.ipc` and
+:mod:`~tesseract_core.runtime.cuda.nixl` decode into.
 """
 
 import collections
@@ -83,7 +80,7 @@ def check_device_host_copy(what: str) -> None:
     silent host copies of GPU data fail loudly, so tests can assert that a path
     stays on-device. Subprocess servers inherit the variable, and the SDK client
     checks it too. The guarded paths are GPU arrays serialized without a device
-    transport and ``np.asarray`` on an :class:`DeviceArray`. Explicit copies
+    transport and ``np.asarray`` on a :class:`DeviceArray`. Explicit copies
     via :meth:`DeviceArray.copy_to_host` are never blocked.
     """
     if os.environ.get(FORBID_DEVICE_HOST_COPY_ENV, "").lower() in {"1", "true"}:
@@ -159,9 +156,10 @@ def contiguous_on_device(arr: Any) -> tuple[Any, CudaArrayInfo]:
     """``arr``, or a row-major copy of it on the same device if it is strided, with its info.
 
     The GPU transports move a flat byte range, so a strided GPU array is first
-    copied on the device by the framework that made it: PyTorch's ``.contiguous()`` or
-    CuPy's ``.copy(order="C")``. An array that offers neither is rejected rather
-    than copied through the host, so GPU data never silently leaves the device.
+    copied on the device by the framework that made it, with PyTorch's
+    ``.contiguous()`` or CuPy's ``.copy(order="C")``. An array that offers
+    neither is rejected rather than copied through the host, so GPU data never
+    silently leaves the device.
     """
     info = _read_cuda_array_info(arr)
     if info.is_c_contiguous():
@@ -237,10 +235,10 @@ def validate_cuda_array(
 
 
 def prepare_export(arr: Any, transport: str) -> tuple[Any, CudaArrayInfo]:
-    """Check that ``transport`` can export ``arr``, and return it contiguous with its info.
+    """Return ``arr`` as a contiguous CUDA array with its info, or raise if it cannot be exported.
 
-    A strided array is first copied on the device (see
-    :func:`contiguous_on_device`).
+    ``transport`` names the transport in error messages. A strided array is
+    first copied on the device (see :func:`contiguous_on_device`).
     """
     if not has_cuda_array_interface(arr):
         raise ValueError(
@@ -262,8 +260,8 @@ class BufferPool:
     """Idle ``cudaMalloc`` buffers kept for reuse, keyed by device and size.
 
     Iterative callers send the same shapes on every request, so without a pool
-    both sides of a GPU transport exchange would free and reallocate the same large
-    buffers each time. When two processes share a GPU, a ``cudaMalloc`` that
+    both sides of a GPU transport exchange would free and reallocate the same
+    large buffers each time. When two processes share a GPU, a ``cudaMalloc`` that
     receives memory the other process just freed can take tens of milliseconds
     per GiB.
 
@@ -481,8 +479,8 @@ def take_owned_buffer(device: int, nbytes: int) -> int:
     # The buffer's previous array was released when its consumer dropped it,
     # but kernels the consumer queued on its own streams may still be reading
     # it, and the transport's copy into it is not ordered after them. Wait for
-    # them first. This costs little because the transports synchronize after
-    # the copy anyway, which waits for the same work.
+    # them first. This costs little for cuda_ipc, which synchronizes after its
+    # copy anyway and so waits for the same work.
     cuda_api.device_synchronize()
     return pooled[0]
 
