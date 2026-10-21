@@ -224,7 +224,9 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     # validates to a numpy scalar, which ``is_array`` accepts, so it stays
     # dynamic and keeps its gradient.
     out, vjp_func, cotangent_template = _apply_with_vjp_jit(apply_jit, inputs_dict)
-    _jax_vjp_cache.put(_cache_key(inputs_dict), (vjp_func, cotangent_template))
+    _jax_vjp_cache.put(
+        (apply_jit, _cache_key(inputs_dict)), (vjp_func, cotangent_template)
+    )
     return out
 
 
@@ -291,7 +293,8 @@ def jax_vjp(
     # vjp calls per output basis vector.
     if (
         _jax_vjp_cache is not None
-        and (cached := _jax_vjp_cache.get(_cache_key(inputs_dict))) is not None
+        and (cached := _jax_vjp_cache.get((apply_jit, _cache_key(inputs_dict))))
+        is not None
     ):
         vjp_func, cotangent_template = cached
         full_cotangent = set_at_path(cotangent_template, cotangent_vector)
