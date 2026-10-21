@@ -165,6 +165,7 @@ def test_runnable_as_a_module(module, dummy_tesseract_package):
         [sys.executable, "-m", module, "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         # The runtime builds its commands from a Tesseract, so it needs one to
         # have something to describe.
         env={
