@@ -1,7 +1,7 @@
 """Times one jitted apply_tesseract call on arrays of increasing size, through the host and with cuda_ipc.
 
-Draws the array-size figure in the blog post "jax.grad across a process boundary,
-without leaving the GPU". Needs a CUDA GPU and
+Draws the array-size figure in the blog post "Tesseract is now GPU-native".
+Needs a CUDA GPU and
 
     pip install tesseract-core[runtime] tesseract-jax "jax[cuda13]" equinox matplotlib
 
