@@ -90,6 +90,7 @@ def _run_process(
     merge_stderr: bool = False,
     stream_stdout: Callable[[str], Any] | None = None,
     stream_stderr: Callable[[str], Any] | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run a subprocess with threaded stream reading.
 
@@ -98,6 +99,7 @@ def _run_process(
         merge_stderr: If True, redirect stderr into stdout (subprocess.STDOUT).
         stream_stdout: If provided, echo stdout lines to this stream in real-time.
         stream_stderr: If provided, echo stderr lines to this stream in real-time.
+        env: Environment for the subprocess. Defaults to this process's.
 
     Returns:
         Tuple of (returncode, stdout_bytes, stderr_bytes).
@@ -107,6 +109,7 @@ def _run_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         text=False,
+        env=env,
     )
 
     stdout_lines: list[bytes] = []
