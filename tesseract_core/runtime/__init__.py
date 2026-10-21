@@ -38,8 +38,8 @@ except ModuleNotFoundError as e:
 
 # Public API and built-in device-transport registration
 from .cuda.ipc import CudaIpcTransport
+from .cuda.nixl import NixlTransport
 from .device_transport import register_transport
-from .nixl_transport import NixlTransport
 from .schema_types import (
     Array,
     Differentiable,

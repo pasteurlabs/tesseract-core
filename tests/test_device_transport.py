@@ -191,7 +191,7 @@ def test_transport_check_works_for_any_transport(monkeypatch):
 
     transport = _LoopbackTransport()
     monkeypatch.setitem(device_transport._TRANSPORTS, transport.name, transport)
-    monkeypatch.setattr(check, "_device_array_from_bytes", _HostArray)
+    monkeypatch.setattr(check, "device_array_from_bytes", _HostArray)
     monkeypatch.setattr(cuda_api, "get_device", lambda: 0)
 
     request, expected, release = check.start_transport_check(transport.name)

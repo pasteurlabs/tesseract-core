@@ -13,7 +13,7 @@ The consumer initiates the transfer, a READ. The producer registers the array's
 device memory with its NIXL agent and sends its agent's name and metadata, the
 array's address and its device in the JSON message. The consumer adds the
 producer as a remote agent and reads the bytes into a buffer of its own, which it
-returns as the same :class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray` that
+returns as the same :class:`~tesseract_core.runtime.cuda.arrays.DeviceArray` that
 ``cuda_ipc`` returns. The producer's registration does nothing until then, so
 this fits the request lifecycle of ``cuda_ipc``.
 
@@ -23,15 +23,16 @@ which is a pickle, so neither process unpickles what the other sends.
 
 from __future__ import annotations
 
-import collections
 import contextlib
 import ctypes
 import importlib
+import math
 import os
 import sys
 import threading
 import time
 import uuid
+import weakref
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any
@@ -42,12 +43,11 @@ import pybase64
 from tesseract_core.runtime.array_encoding import ArrayDict
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.cuda import api as cuda_api
-from tesseract_core.runtime.cuda.ipc import (
-    IpcDeviceArray,
-    contiguous_on_device,
-    has_cuda_array_interface,
+from tesseract_core.runtime.cuda.arrays import (
+    DeviceArray,
     on_device,
-    without_autograd,
+    prepare_export,
+    take_owned_buffer,
 )
 from tesseract_core.runtime.device_transport import DeviceTransport
 
@@ -74,10 +74,16 @@ _NIXL_AGENT_LOCK = threading.Lock()
 _READ_POOL: ThreadPoolExecutor | None = None
 
 # A lock per producer agent, so that reads from one producer take turns (see
-# _remote_agent), and the number of reads using each lock.
-_PRODUCER_LOCKS: dict[str, threading.Lock] = {}
-_PRODUCER_READS: collections.Counter[str] = collections.Counter()
+# _remote_agent). Each lock is dropped once no read holds it.
+_PRODUCER_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = (
+    weakref.WeakValueDictionary()
+)
 _PRODUCER_LOCKS_LOCK = threading.Lock()
+
+# Arrays of at least this many bytes are read in parallel (see _read_spans).
+# Smaller ones gain little from it and connect faster on the single-worker
+# agent.
+_PARALLEL_MIN_BYTES = 16 * 2**20
 
 # How long a consumer waits for a posted READ to complete. It only runs out when
 # a transfer stalls, e.g. because the producer died, not on a slow large one.
@@ -104,8 +110,7 @@ def _import_nixl_api() -> Any:
     from a pip wheel, and UCX then treats GPU memory as host memory.
 
     So this makes the runtime's libcudart global, where UCX finds it, and
-    imports the build already imported, else the matching one, else NIXL's own
-    choice.
+    imports the build already imported, else the matching one.
     """
     ctypes.CDLL(cuda_api.runtime_library_path(), mode=ctypes.RTLD_GLOBAL)
 
@@ -119,7 +124,13 @@ def _import_nixl_api() -> Any:
     except ModuleNotFoundError as exc:
         if exc.name != build:
             raise
-    return importlib.import_module("nixl._api")
+        package = build.replace("_", "-")
+        raise RuntimeError(
+            "The 'nixl' GPU transport requires NIXL, which is not installed in "
+            f"the Python environment at {sys.prefix}. Install the build for its "
+            f"CUDA runtime with `pip install {package}` (Linux only). For a "
+            f"Tesseract, add {package} to tesseract_requirements.txt and rebuild."
+        ) from exc
 
 
 def _create_nixl_agent(num_workers: int) -> Any:
@@ -127,16 +138,8 @@ def _create_nixl_agent(num_workers: int) -> Any:
     try:
         nixl_api = _import_nixl_api()
     except ImportError as exc:  # pragma: no cover - env-dependent
-        if not (isinstance(exc, ModuleNotFoundError) and exc.name == "nixl"):
-            raise RuntimeError(
-                f"The 'nixl' GPU transport could not import NIXL: {exc}"
-            ) from exc
-        package = f"nixl-cu{cuda_api.runtime_version() // 1000}"
         raise RuntimeError(
-            "The 'nixl' GPU transport requires NIXL, which is not installed in "
-            f"the Python environment at {sys.prefix}. Install the build for its "
-            f"CUDA runtime with `pip install {package}` (Linux only). For a "
-            f"Tesseract, add {package} to tesseract_requirements.txt and rebuild."
+            f"The 'nixl' GPU transport could not import NIXL: {exc}"
         ) from exc
 
     # UCX reads its configuration from the environment when the backend is
@@ -191,9 +194,8 @@ def _read_pool() -> ThreadPoolExecutor:
 
 def _read_spans(nbytes: int) -> list[tuple[int, int]]:
     """Split an array's ``nbytes`` into the (offset, size) spans read in parallel."""
-    config = get_config()
-    parts = config.nixl_parallel_reads
-    if parts == 1 or nbytes < config.nixl_parallel_min_bytes:
+    parts = get_config().nixl_parallel_reads
+    if parts == 1 or nbytes < _PARALLEL_MIN_BYTES:
         return [(0, nbytes)]
     size = -(-nbytes // parts)
     return [(offset, min(size, nbytes - offset)) for offset in range(0, nbytes, size)]
@@ -238,19 +240,7 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
 
     A strided array is first copied on the device, as for cuda_ipc.
     """
-    if not has_cuda_array_interface(arr):
-        raise ValueError(
-            "nixl encoding requires a CUDA array "
-            f"(object with __cuda_array_interface__), got {type(arr).__name__}"
-        )
-
-    arr, info = contiguous_on_device(without_autograd(arr))
-
-    if info.dtype.kind == "V":
-        raise TypeError(
-            f"nixl cannot encode arrays of dtype {info.dtype}, which have no "
-            "NumPy equivalent (e.g. bfloat16)."
-        )
+    arr, info = prepare_export(arr, "nixl")
 
     if info.nbytes == 0:
         # An empty array has no memory to register, so its descriptor is empty
@@ -296,36 +286,28 @@ def _remote_agent(agent: Any, name: str, metadata: bytes) -> Iterator[None]:
     """
     with _PRODUCER_LOCKS_LOCK:
         lock = _PRODUCER_LOCKS.setdefault(name, threading.Lock())
-        _PRODUCER_READS[name] += 1
-    try:
-        with lock:
-            loaded_name = agent.add_remote_agent(metadata)
-            # NIXL returns the name as bytes, though it annotates it as str.
-            if isinstance(loaded_name, bytes):
-                loaded_name = loaded_name.decode()
-            try:
-                if loaded_name != name:
-                    raise ValueError(
-                        f"nixl descriptor names producer {name!r}, but its "
-                        f"metadata describes {loaded_name!r}"
-                    )
-                yield
-            finally:
-                agent.remove_remote_agent(loaded_name)
-    finally:
-        with _PRODUCER_LOCKS_LOCK:
-            _PRODUCER_READS[name] -= 1
-            if not _PRODUCER_READS[name]:
-                del _PRODUCER_READS[name]
-                del _PRODUCER_LOCKS[name]
+    with lock:
+        loaded_name = agent.add_remote_agent(metadata)
+        # NIXL returns the name as bytes, though it annotates it as str.
+        if isinstance(loaded_name, bytes):
+            loaded_name = loaded_name.decode()
+        try:
+            if loaded_name != name:
+                raise ValueError(
+                    f"nixl descriptor names producer {name!r}, but its "
+                    f"metadata describes {loaded_name!r}"
+                )
+            yield
+        finally:
+            agent.remove_remote_agent(loaded_name)
 
 
-def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
+def load_nixl_arraydict(val: ArrayDict) -> DeviceArray:
     """Read the array a NIXL descriptor describes into a new buffer on the active device."""
     peer_name, meta_b64, address, remote_device = val["data"]["buffer"].split(":")
     dtype = np.dtype(val["dtype"])
     shape = tuple(val["shape"])
-    nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
+    nbytes = math.prod(shape) * dtype.itemsize
     device = cuda_api.get_device()
 
     if not meta_b64:
@@ -335,7 +317,7 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
                 f"nixl descriptor is empty, but the array of shape {shape} and "
                 f"dtype {dtype} is not"
             )
-        return IpcDeviceArray(0, device, shape, dtype)
+        return DeviceArray(0, device, shape, dtype)
 
     remote_meta = pybase64.b64decode(meta_b64, validate=True)
 
@@ -363,7 +345,7 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
                 agent.release_xfer_handle(handle)
 
     with _remote_agent(agent, peer_name, remote_meta), on_device(device):
-        owned_ptr = cuda_api.malloc(nbytes)
+        owned_ptr = take_owned_buffer(device, nbytes)
         try:
             local_reg = agent.register_memory([(owned_ptr, nbytes, device, "")], "VRAM")
             try:
@@ -382,7 +364,7 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
             cuda_api.free(owned_ptr)
             raise
 
-    return IpcDeviceArray(owned_ptr, device, shape, dtype)
+    return DeviceArray(owned_ptr, device, shape, dtype)
 
 
 def _wait_for_xfer(agent: Any, handle: Any) -> None:
@@ -443,8 +425,8 @@ class NixlTransport(DeviceTransport):
     def flush(self, session: Any = None) -> None:
         """No-op, since the consumer initiates the READ."""
 
-    def receive(self, val: ArrayDict, session: Any = None) -> IpcDeviceArray:
-        """READ the exported bytes into a fresh consumer-owned ``IpcDeviceArray``."""
+    def receive(self, val: ArrayDict, session: Any = None) -> DeviceArray:
+        """READ the exported bytes into a fresh consumer-owned ``DeviceArray``."""
         return load_nixl_arraydict(val)
 
     def release(self, session: Any = None) -> None:

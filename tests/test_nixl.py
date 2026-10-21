@@ -35,7 +35,7 @@ except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by hos
     _CUPY = False
 
 try:
-    from tesseract_core.runtime.nixl_transport import _import_nixl_api
+    from tesseract_core.runtime.cuda.nixl import _import_nixl_api
 
     _import_nixl_api()
     _NIXL = True
@@ -56,7 +56,7 @@ def _producer_main(rendezvous, ready_path, done_path, result_q):
         import cupy as cp
         import orjson
 
-        from tesseract_core.runtime import nixl_transport as N
+        from tesseract_core.runtime.cuda import nixl as N
 
         cp.cuda.Device(0).use()
         arr = (cp.arange(4096, dtype=cp.float32) % 997.0).reshape(64, 64)
@@ -81,8 +81,8 @@ def _consumer_main(rendezvous, ready_path, done_path, result_q):
     try:
         import orjson
 
-        from tesseract_core.runtime import nixl_transport as N
-        from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+        from tesseract_core.runtime.cuda import nixl as N
+        from tesseract_core.runtime.cuda.arrays import DeviceArray
 
         while not os.path.exists(ready_path):
             pass
@@ -100,7 +100,7 @@ def _consumer_main(rendezvous, ready_path, done_path, result_q):
             (
                 "CONSUMER_OK",
                 {
-                    "is_ipc_device_array": isinstance(out, IpcDeviceArray),
+                    "is_device_array": isinstance(out, DeviceArray),
                     "has_cai": hasattr(out, "__cuda_array_interface__"),
                     "values": host,
                 },
@@ -153,7 +153,7 @@ def test_cross_process_nixl_read():
     result = _run_cross_process()
 
     # The consumer-facing object is the same wrapper cuda_ipc returns.
-    assert result["is_ipc_device_array"]
+    assert result["is_device_array"]
     assert result["has_cai"]
 
     expected = (np.arange(4096, dtype=np.float32) % 997.0).reshape(64, 64)
@@ -188,7 +188,7 @@ def test_resolve_gpu_transport_uses_nixl_when_it_works(free_port, serve_in_subpr
 
     import cupy
 
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
     from tesseract_core.sdk.tesseract import Tesseract
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -205,12 +205,12 @@ def test_resolve_gpu_transport_uses_nixl_when_it_works(free_port, serve_in_subpr
 
             # Repeated calls exercise the client re-adding the server's agent,
             # whose metadata changes as it registers each response's exports.
-            # The largest array is above nixl_parallel_min_bytes, so it crosses
+            # The largest array is above _PARALLEL_MIN_BYTES, so it crosses
             # in parallel reads.
             for n in (4, 1000, 0, 5_000_000):
                 x = cupy.arange(n, dtype=cupy.float32)
                 result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
-                assert isinstance(result["y"], IpcDeviceArray)
+                assert isinstance(result["y"], DeviceArray)
                 np.testing.assert_allclose(
                     result["y"].copy_to_host(), cupy.asnumpy(x) * 2.0, rtol=1e-6
                 )

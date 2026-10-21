@@ -1072,11 +1072,29 @@ def serve(
         environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
     else:
         environment.setdefault("TESSERACT_GPU_TRANSPORT", "none")
+    gpu_transport = environment["TESSERACT_GPU_TRANSPORT"]
+
+    if gpu_transport not in ("none", "cuda_ipc", "nixl"):
+        raise ValueError(
+            f"Unknown gpu_transport {gpu_transport!r}. "
+            "Supported values: 'none', 'cuda_ipc', 'nixl'."
+        )
+    if gpu_transport != "none":
+        if num_workers > 1:
+            raise ValueError(
+                f"gpu_transport={gpu_transport!r} cannot be served by more than "
+                f"one worker (got num_workers={num_workers})."
+            )
+        if not gpus:
+            raise ValueError(
+                f"gpu_transport={gpu_transport!r} requires GPU access, but no "
+                "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
+            )
 
     # nixl's UCX agent advertises its own address to the client, which is
     # unreachable from outside a container's network namespace, so the container
     # shares the host's network instead.
-    if environment["TESSERACT_GPU_TRANSPORT"] == "nixl":
+    if gpu_transport == "nixl":
         if network not in (None, "host"):
             raise ValueError(
                 f"gpu_transport='nixl' requires host networking, but "
@@ -1177,28 +1195,10 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
-        if gpu_transport != "none" and num_workers > 1:
-            raise ValueError(
-                f"gpu_transport={gpu_transport!r} cannot be served by more than "
-                f"one worker (got num_workers={num_workers})."
-            )
-
-        # The cuda_ipc and nixl GPU transports need a GPU, and a shared IPC
-        # namespace between host and container for their same-host paths. Wire
-        # both up whenever one is selected.
-        if gpu_transport in ("cuda_ipc", "nixl"):
-            if not gpus:
-                raise ValueError(
-                    f"gpu_transport={gpu_transport!r} requires GPU access, but no "
-                    "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
-                )
-            extra_args.extend(["--ipc=host"])
-        elif gpu_transport != "none":
-            raise ValueError(
-                f"Unknown gpu_transport {gpu_transport!r}. "
-                "Supported values: 'none', 'cuda_ipc', 'nixl'."
-            )
+        # The GPU transports share a GPU with processes on the host through
+        # its IPC namespace (nixl on its same-host paths).
+        if gpu_transport != "none":
+            extra_args.append("--ipc=host")
 
         if network is not None:
             _ensure_network_exists(network)

@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     # every annotation below a string, so these names are never needed at
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
     from tesseract_core.runtime.config import ConfigSnapshot
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
 
 # Output serialization formats; single SDK-side definition lives in engine.
 OutputFormat: TypeAlias = engine.OutputFormat
@@ -1255,9 +1255,9 @@ def _import_runtime(module: str, feature: str) -> ModuleType:
         ) from exc
 
 
-def _import_cuda_ipc() -> ModuleType:
-    """Import the cuda_ipc runtime module, or explain the missing extra."""
-    return _import_runtime("cuda.ipc", "The 'cuda_ipc' GPU transport")
+def _import_cuda_arrays() -> ModuleType:
+    """Import the runtime's GPU array helpers, or explain the missing extra."""
+    return _import_runtime("cuda.arrays", "Copying a GPU array to the host")
 
 
 def _get_device_transport(name: str) -> Any:
@@ -1372,14 +1372,16 @@ def _gpu_array_to_host(arr: Any) -> np.ndarray:
         "1",
         "true",
     }:
-        _import_cuda_ipc().check_device_host_copy(f"a {type(arr).__name__} GPU array")
+        _import_cuda_arrays().check_device_host_copy(
+            f"a {type(arr).__name__} GPU array"
+        )
     try:
         host = np.asanyarray(_without_autograd(arr))
     except (TypeError, ValueError):
         # PyTorch and CuPy refuse to convert device memory implicitly
         host = None
     if host is None or host.dtype == object:
-        host = _import_cuda_ipc().cuda_array_to_host(arr)
+        host = _import_cuda_arrays().cuda_array_to_host(arr)
     return host
 
 
@@ -1512,7 +1514,7 @@ def _decode_array(
     output_path: str | Path | None = None,
     lazy: bool = False,
     mapped_paths: list[Path] | None = None,
-) -> np.ndarray | IpcDeviceArray:
+) -> np.ndarray | DeviceArray:
     """Decode an encoded array dict into a numpy array.
 
     When ``lazy`` is set and the array is decoded as a zero-copy mmap view, the
@@ -1521,7 +1523,7 @@ def _decode_array(
     alive after unlink, so the returned view stays valid.
 
     Returns np.ndarray for every encoding except those of GPU transports, which
-    yield a framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
+    yield a framework-agnostic on-GPU wrapper (DeviceArray, exposing
     __cuda_array_interface__ and __dlpack__). That type is imported only under
     TYPE_CHECKING so naming it here adds no runtime import.
     """
@@ -2010,7 +2012,7 @@ class HTTPClient:
             # where several arrays share one file at different offsets.
             mapped_paths: list[Path] = []
 
-            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
+            def decode_with_path(arr: dict) -> np.ndarray | DeviceArray:
                 return _decode_array(
                     arr,
                     output_path=self._output_path,

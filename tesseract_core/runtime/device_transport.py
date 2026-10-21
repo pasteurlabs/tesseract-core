@@ -101,7 +101,7 @@ class DeviceTransport(abc.ABC):
         """Decode side: materialise ``val`` into a fresh consumer-owned buffer.
 
         Returns the framework-agnostic on-GPU wrapper the consumer adopts
-        (``IpcDeviceArray`` for the CUDA transports), unchanged across
+        (``DeviceArray`` for the CUDA transports), unchanged across
         transports so the consumer-facing surface never forks.
         """
 
