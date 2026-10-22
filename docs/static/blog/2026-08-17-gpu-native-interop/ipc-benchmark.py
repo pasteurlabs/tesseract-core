@@ -5,7 +5,11 @@ Needs a CUDA GPU and
 
     pip install tesseract-core[runtime] tesseract-jax "jax[cuda13]" equinox matplotlib
 
-    python gpu-ipc-benchmark.py --plot gpu-ipc-benchmark.png
+    python ipc-benchmark.py --json ipc-benchmark.json --plot ipc-benchmark.png
+
+To redraw the figure from the saved medians without a GPU:
+
+    python ipc-benchmark.py --from-json ipc-benchmark.json --plot ipc-benchmark.png
 
 The Tesseract below only doubles its input, so the times are the cost of the call
 itself. Each setup runs in its own fresh processes, which time every array size in
@@ -139,46 +143,53 @@ def plot(medians, path):
     """Draw median call time against array size, one line per setup."""
     import matplotlib.pyplot as plt
 
-    ink, ink_muted, grid = "#0b0b0b", "#52514e", "#e6e5e1"
+    # The palette and type of the other figures in the post: purple for data that
+    # stays on the GPU, orange for data that goes through host memory, and code
+    # names in a monospaced font.
+    ink, ink_muted, grid = "#0f172a", "#64748b", "#e2e8f0"
+    sans = ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"]
+    mono = ["Menlo", "DejaVu Sans Mono"]
     style = {
-        "host": ("#2a78d6", "Host round trip"),
-        "binref": ("#2a78d6", "json+binref on /dev/shm"),
-        "cuda_ipc": ("#eb6834", "cuda_ipc"),
-        "in-process": ("#a3a29d", "In-process, no Tesseract"),
+        "host": ("#ea580c", "-", "host (base64)", sans),
+        "binref": ("#ea580c", "--", "host (shmem)", sans),
+        "cuda_ipc": ("#7c3aed", "-", "cuda_ipc", mono),
+        "in-process": ("#94a3b8", "-", "in-process", sans),
     }
     plt.rcParams.update(
         {
-            "font.size": 10,
+            "font.family": sans,
+            "font.size": 8,
             "text.color": ink,
             "axes.labelcolor": ink_muted,
             "xtick.color": ink_muted,
             "ytick.color": ink_muted,
         }
     )
-    fig, ax = plt.subplots(figsize=(7.2, 4.4), dpi=200)
+    # Same width in pixels as the post's other figures, so text renders at the same size.
+    fig, ax = plt.subplots(figsize=(9, 4), dpi=220)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     for side in ("left", "bottom"):
         ax.spines[side].set_color(grid)
-    ax.grid(True, which="major", color=grid, linewidth=0.75)
+    ax.grid(True, which="major", color=grid, linewidth=0.6)
     ax.set_axisbelow(True)
     ax.set_xscale("log")
     ax.set_yscale("log")
+    ax.tick_params(which="both", length=0)
 
     med = {s: [medians[s][n] for n in SIZES] for s in medians}
     for setup in ("in-process", "host", "binref", "cuda_ipc"):
-        color, label = style[setup]
+        color, linestyle, label, family = style[setup]
         ax.plot(
             SIZES,
             med[setup],
             color=color,
-            linestyle="--" if setup == "binref" else "-",
+            linestyle=linestyle,
             linewidth=1.6,
             marker="o",
-            markersize=6,
+            markersize=4,
             markeredgecolor="white",
-            markeredgewidth=1.2,
-            label=label,
+            markeredgewidth=0.8,
             zorder=3,
         )
         ax.annotate(
@@ -188,71 +199,61 @@ def plot(medians, path):
             textcoords="offset points",
             va="center",
             fontsize=9,
-            color=ink,
+            fontweight="bold",
+            family=family,
+            color=color if setup != "in-process" else ink_muted,
         )
 
-    # Where the two Tesseract paths cross, interpolated in log-log space.
-    for i in range(len(SIZES) - 1):
-        d0 = math.log(med["host"][i]) - math.log(med["cuda_ipc"][i])
-        d1 = math.log(med["host"][i + 1]) - math.log(med["cuda_ipc"][i + 1])
-        if d0 <= 0 < d1:
-            t = d0 / (d0 - d1)
-            cross = math.exp(
-                math.log(SIZES[i]) + t * (math.log(SIZES[i + 1]) - math.log(SIZES[i]))
-            )
-            ax.axvline(cross, color=ink_muted, linewidth=0.6, alpha=0.6, zorder=1)
-            ax.annotate(
-                f"host round trip\nfaster below\n~{cross / 1e3:.0f}k elements",
-                (cross, math.sqrt(med["in-process"][0] * med["cuda_ipc"][0])),
-                xytext=(-6, 0),
-                textcoords="offset points",
-                ha="right",
-                va="center",
-                fontsize=9,
-                color=ink_muted,
-            )
-            break
+    # A compute reference: one Multi-Agent-DPC training step with the solver
+    # imported directly, on the same A100 (benchmark.py in the Multi-Agent-DPC fork).
+    step_ms = 106
+    ax.axhline(step_ms, color=ink_muted, linewidth=0.8, zorder=2)
+    ax.annotate(
+        f"one Multi-Agent-DPC training step without Tesseract ({step_ms} ms)",
+        (SIZES[0], step_ms),
+        xytext=(0, 4),
+        textcoords="offset points",
+        va="bottom",
+        color=ink_muted,
+    )
 
     # A call that moves as many bytes as one Multi-Agent-DPC call (about 4.8 MB),
     # counting both directions: each element here is 4 bytes in and 4 bytes out.
     madpc = 4.8e6 / 8
-    ax.axvline(madpc, color=ink_muted, linewidth=0.75, linestyle=":", zorder=1)
+    ax.axvline(madpc, color=ink_muted, linewidth=0.8, linestyle=":", zorder=1)
     ax.annotate(
-        "one Multi-Agent-DPC call\n(about 4.8 MB moved)",
-        (madpc, 1.0),
-        xytext=(6, 0),
-        textcoords="offset points",
-        ha="left",
-        va="center",
-        fontsize=9,
-        color=ink_muted,
-    )
-
-    ratio = med["host"][-1] / med["cuda_ipc"][-1]
-    ax.annotate(
-        f"cuda_ipc\n{ratio:.0f}\N{MULTIPLICATION SIGN} faster\nat 10$^{{{round(math.log10(SIZES[-1]))}}}$ elements",
-        (SIZES[-1], med["cuda_ipc"][-1] * 3),
-        xytext=(-10, 0),
+        "as many bytes as one\nMulti-Agent-DPC call (4.8 MB)",
+        (madpc, 0.9),
+        xytext=(-6, 0),
         textcoords="offset points",
         ha="right",
         va="center",
-        fontsize=9,
         color=ink_muted,
-    )
-    ax.plot(
-        [SIZES[-1]] * 2,
-        [med["cuda_ipc"][-1] * 1.25, med["host"][-1] / 1.25],
-        color=ink_muted,
-        linewidth=0.75,
-        zorder=2,
     )
 
-    ax.set_xlabel("Array size (float32 elements)")
-    ax.set_ylabel("Median time per call (ms)")
+    # How much faster cuda_ipc is than the host round trip at the largest size.
+    ratio = med["host"][-1] / med["cuda_ipc"][-1]
+    ax.plot(
+        [SIZES[-1]] * 2,
+        [med["cuda_ipc"][-1] * 1.4, med["host"][-1] / 1.4],
+        color=ink_muted,
+        linewidth=0.8,
+        zorder=2,
+    )
+    ax.annotate(
+        f"{ratio:.0f}\N{MULTIPLICATION SIGN} faster than default\n(host round trip + base64)",
+        (SIZES[-1], math.sqrt(med["cuda_ipc"][-1] * step_ms)),
+        xytext=(8, 0),
+        textcoords="offset points",
+        va="center",
+        color=ink_muted,
+    )
+
+    ax.set_xlabel("array size (float32 elements)")
+    ax.set_ylabel("median time per call (ms)")
     ax.set_xlim(SIZES[0] / 1.5, SIZES[-1] * 1.5)
-    ax.legend(frameon=False, loc="upper left", fontsize=9, labelcolor=ink)
     fig.tight_layout()
-    fig.savefig(path, facecolor="white", bbox_inches="tight")
+    fig.savefig(path, facecolor="white", bbox_inches="tight", pad_inches=0.1)
 
 
 def measure(processes):
