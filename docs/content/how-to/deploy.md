@@ -81,15 +81,21 @@ $ az login
 $ az acr login --name <registry-name>
 ```
 
+(running-without-containers)=
+
 ## Deploying without a container engine
 
-If no container engine is available, you can deploy using `tesseract-runtime serve`. This provides the same functionality as `tesseract serve` and `docker run myimage serve`, and can be queried the same way (e.g., with `curl` or via [`Tesseract.from_url`](#Tesseract.from_url) in the Python SDK).
+If no container engine is available, deploy with the `tesseract-runtime` CLI, the same command that runs inside Tesseract containers. `tesseract-runtime serve` provides the same functionality as `tesseract serve` and `docker run myimage serve`, and can be queried the same way (e.g., with `curl` or via [`Tesseract.from_url`](#Tesseract.from_url) in the Python SDK).
 
-This approach requires a Python environment with the dependencies from `tesseract_requirements.txt` installed, as documented in [Running Tesseracts without containers](running-without-containers). For a complete HPC example, see the [HPC deployment tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104).
+It needs a Python environment with the runtime and the Tesseract's dependencies:
 
-Example:
+1. [Install tesseract-core](installation-runtime) with the runtime extra.
+2. Install the Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
+3. Set `TESSERACT_API_PATH` to point to your `tesseract_api.py`.
 
 ```bash
-$ pip install -r tesseract_requirements.txt
-$ TESSERACT_API_PATH=/path/to/tesseract_api.py tesseract-runtime serve
+$ export TESSERACT_API_PATH=/path/to/tesseract_api.py
+$ tesseract-runtime serve
 ```
+
+`tesseract-runtime` supports the same endpoints and options as containerized Tesseracts. Run `tesseract-runtime --help` for details. For a complete HPC example, see the [HPC deployment tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104).

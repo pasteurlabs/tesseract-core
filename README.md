@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-dark.png" width="128" align="right">
-  <img alt="" src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-light.png" width="128" align="right">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/static/logo-dark.png" width="128" align="right">
+  <img alt="" src="docs/static/logo-light.png" width="128" align="right">
 </picture>
 
 ### Tesseract Core
@@ -8,9 +8,10 @@
 Universal components for differentiable scientific computing 📦
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
+[API reference](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/reference/tesseract-api/) |
 [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) |
 [Blog](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/) |
-[User forum](https://si-tesseract.discourse.group/) |
+[User Forum](https://si-tesseract.discourse.group/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
@@ -19,120 +20,141 @@ Universal components for differentiable scientific computing 📦
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.08385/status.svg)](https://doi.org/10.21105/joss.08385)
 [![SciPy](https://img.shields.io/badge/SciPy-2025-blue)](https://proceedings.scipy.org/articles/kvfm5762)
 
-## The problem
+Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
 
-**Real-world scientific workflows span multiple tools, languages, and computing environments.** You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting gradients to flow through them for optimization is nearly impossible.
+## How it works
 
-Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy tools.
+- Define a component in `tesseract_api.py`: Pydantic schemas for its inputs and outputs, an `apply` function, and optional derivative endpoints, computed however you like (autodiff, adjoints, finite differences).
+- Run it in its own process and environment, build it as a container image, or serve it remotely. Each way exposes the same endpoints.
+- Differentiate through it with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), so one gradient can cross languages and frameworks. Overhead is typically a few milliseconds per call (see the [performance guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/performance/)).
+- Check every derivative endpoint against finite differences with `check-gradients`.
 
-## The solution
+## Built with Tesseract
 
-Tesseract packages scientific software into **self-contained, portable components** that:
-
-- **Run anywhere** — Local machines, cloud, HPC clusters. Same container, same results.
-- **Expose clean interfaces** — CLI, REST API, and Python SDK. No more deciphering undocumented scripts.
-- **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
-- **Self-document** — Schemas, types, and API docs are generated automatically.
-
-## Who is this for?
-
-- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems.
-- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps.
-- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation.
-
-## Example: Shape optimization across tools
-
-<a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="200" align="right" alt="Rocket grid fin geometry optimized by a differentiable Tesseract pipeline" title="Rocket grid fin optimized end-to-end across SpaceClaim, a mesher, and PyMAPDL.">
-</a>
-
-The [rocket fin optimization case study](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/) combines three Tesseracts:
-
-```
-[SpaceClaim geometry] → [Mesh + SDF] → [PyMAPDL FEA solver]
-         ↑                                      |
-         └──────── gradients flow back ─────────┘
-```
-
-Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline that [is one `jax.grad` call away](https://github.com/pasteurlabs/tesseract-jax) from end-to-end gradients.
+<table>
+<tr>
+<td width="33%" valign="top">
+<a href="https://github.com/benvial/prismo"><img src="docs/img/gallery/prismo.jpg" alt="Optimized dopant layout around a silicon waveguide core"></a>
+<b><a href="https://github.com/benvial/prismo">PRISMO</a></b><br>
+A Julia semiconductor solver and a FEniCS optics solver in one JAX gradient, reaching more than five times the optical phase shift of the starting design.
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/kasProg/dSnowSac"><img src="docs/img/gallery/dsnowsac.jpg" alt="Simulated and observed streamflow in a held-out basin"></a>
+<b><a href="https://github.com/kasProg/dSnowSac">δSnowSac</a></b><br>
+A PyTorch network learns to calibrate NOAA's operational Fortran models, Snow-17 and SAC-SMA, with gradients flowing through the untouched Fortran.
+</td>
+<td width="33%" valign="top">
+<a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/"><img src="docs/img/gallery/rocket-fin.jpg" alt="Optimized rocket grid fin geometry"></a>
+<b><a href="https://docs.pasteurlabs.ai/projects/tesseract-core/latest/blog/2025-11-28-rocket-fin-optimization/">Rocket grid fins</a></b><br>
+Ansys SpaceClaim geometry and PyMAPDL structural analysis in one optimization loop, giving a design 24% stiffer than the baseline at the same mass.
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<a href="https://github.com/hozaifa1/differentiable-silicon"><img src="docs/img/gallery/differentiable-silicon.jpg" alt="Transistor transfer curves and fabrication parameters during optimization"></a>
+<b><a href="https://github.com/hozaifa1/differentiable-silicon">Differentiable Silicon</a></b><br>
+Sentaurus TCAD, a closed-source binary driven over SSH, differentiated with finite differences and Broyden updates to tune a transistor for a spiking network.
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/BrainCapture/NeuroLocate"><img src="docs/img/gallery/neurolocate.jpg" alt="Recovered brain source location inside a head model"></a>
+<b><a href="https://github.com/BrainCapture/NeuroLocate">NeuroLocate</a></b><br>
+A PyTorch network proposes EEG sources, and JAX refines them with gradients through OpenMEEG, a C++ boundary element solver with no autodiff of its own.
+</td>
+<td width="33%" valign="top">
+<a href="https://github.com/pasteurlabs/mosaic"><img src="docs/img/gallery/mosaic.jpg" alt="Channel flow around a cylinder before and after gradient-based inflow optimization"></a>
+<b><a href="https://github.com/pasteurlabs/mosaic">Mosaic</a></b><br>
+Solvers in C++, Julia, JAX, and PyTorch, from deal.II and OpenFOAM to JAX-FEM and XLB, behind one Tesseract interface, so a single harness can compare their gradients and cost on shared tasks.
+</td>
+</tr>
+</table>
 
 > [!TIP]
-> More examples in the [demos](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/) and the [example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html).
+> Still unsure whether you need Tesseract? See [When to use Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/when-to-use/).
 
 ## Quick start
 
-<p align="center">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/demo.gif" width="720" alt="Demo: install, build, and run a Tesseract in under a minute">
-<br>
-<em>Getting started: install, build an example, and run it.</em>
-</p>
-
-> [!NOTE]
-> Requires [Docker](https://docs.docker.com/engine/install/) and Python 3.10+.
-
-**CLI:**
+You need Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), which Tesseract uses to build an isolated environment for each component.
 
 ```bash
-# Install Tesseract Core
-$ pip install tesseract-core
-
-# Create a new project in the current directory
+$ pip install tesseract-core tesseract-jax
 $ tesseract init --name my-tesseract
-
-# Edit `tesseract_api.py`, or download an example
-$ curl -so ./tesseract_api.py https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/examples/vectoradd/tesseract_api.py
-
-# Build it into a container
-$ tesseract build .
-
-# Run it
-$ tesseract run my-tesseract apply '{"inputs": {"a": [1, 2, 3], "b": [10, 20, 30]}}'
-# → {"result": [11, 22, 33]}
-
-# Compute the Jacobian
-$ tesseract run my-tesseract jacobian '{"inputs": {"a": [1, 2, 3], "b": [10, 20, 30]}, "jac_inputs": ["a"], "jac_outputs": ["result"]}'
-# → {"result": {"a": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}}
 ```
 
-**Python SDK:**
+Replace the generated `tesseract_api.py` with this stand-in for a solver:
 
 ```python
-from tesseract_core import Tesseract
+# tesseract_api.py
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Differentiable, Float32, ShapeDType
 
-with Tesseract.from_image("my-tesseract") as t:
-    result = t.apply({"a": [1, 2, 3], "b": [10, 20, 30]})
-    jac = t.jacobian({"a": [1, 2, 3], "b": [10, 20, 30]}, jac_inputs=["a"], jac_outputs=["result"])
+
+class InputSchema(BaseModel):
+    x: Differentiable[Array[(None,), Float32]]
+
+
+class OutputSchema(BaseModel):
+    y: Differentiable[Array[(None,), Float32]]
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    # Call your solver, mesh generator, or surrogate here
+    return OutputSchema(y=inputs.x**2)
+
+
+def vector_jacobian_product(inputs, vjp_inputs, vjp_outputs, cotangent_vector):
+    # Hand-written, autodiff, adjoint solve, finite differences, ...
+    return {"x": 2 * inputs.x * cotangent_vector["y"]}
+
+
+def abstract_eval(abstract_inputs):
+    # Output shapes from input shapes, so JAX can trace without running apply
+    return {"y": ShapeDType(shape=abstract_inputs.x.shape, dtype="float32")}
 ```
 
-## Core features
+Run it in its own process and differentiate through it with JAX:
 
-- **Containerized** — Docker-based packaging ensures reproducibility and dependency isolation.
-- **Multi-interface** — Use the same components via CLI, REST API, and Python SDK.
-- **Differentiable** — First-class support for Jacobians, JVPs, and VJPs across component and network boundaries.
-- **Schema-validated** — Pydantic models define explicit input/output contracts.
-- **Language-agnostic** — Wrap Python, Julia, C++, [Fortran](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/building-blocks/fortran.html), or any executable behind a thin Python API.
-- **Self-documenting** — Auto-generated API docs and schemas for every Tesseract (`tesseract apidoc <name>`).
+```python
+import jax
+import jax.numpy as jnp
+from tesseract_core import Tesseract
+from tesseract_jax import apply_tesseract
 
-<p align="center">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600" alt="Auto-generated API documentation for a Tesseract">
-<br>
-<em>Auto-generated API documentation (<code>tesseract apidoc</code>).</em>
-</p>
+with Tesseract.from_source("tesseract_api.py") as solver:
+    loss = lambda x: apply_tesseract(solver, {"x": x})["y"].sum()
+    print(jax.grad(loss)(jnp.array([1.0, 2.0, 3.0])))  # [2. 4. 6.]
+```
 
-## The Ecosystem
+[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) does the same for `torch.autograd`. Before an optimizer relies on the hand-written VJP, check it against finite differences:
 
-- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python SDK, and runtime (this repo).
-- **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable JAX programs.
-- **[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)** — Embed Tesseracts as PyTorch operators into end-to-end differentiable PyTorch programs.
-- **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts.
+```bash
+$ pip install "tesseract-core[runtime]"
+$ TESSERACT_API_PATH=tesseract_api.py tesseract-runtime check-gradients '{"inputs": {"x": [1.0, 2.0, 3.0]}}'
+✅ Gradient check for vector_jacobian_product passed ✅ (0 failures / 1000 checks)
+```
+
+To share or deploy the component, build the same folder as a container image, which requires [Docker](https://docs.docker.com/engine/install/). `Tesseract.from_image("my-tesseract")` then takes the place of `from_source`:
+
+```bash
+$ tesseract build .
+$ tesseract run my-tesseract apply '{"inputs": {"x": [1.0, 2.0, 3.0]}}'
+```
+
+## The Tesseract ecosystem
+
+- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)**: CLI, Python SDK, and runtime (this repo).
+- **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)**: embed Tesseracts as JAX primitives, compatible with `jit`, `grad`, and `vmap`.
+- **[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)**: embed Tesseracts as PyTorch operators with `torch.autograd` support.
+
+Also see [Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit) to generate web apps from Tesseracts, and [cookiecutter-tesseract](https://github.com/pasteurlabs/cookiecutter-tesseract) for a multi-Tesseract project template.
 
 ## Learn more
 
-- [Documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
-- [Creating your first Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/tutorials/create.html)
-- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/differentiable-programming.html)
-- [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/design-patterns.html)
-- [Example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html)
+- [Get started](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/tutorials/get-started/)
+- [Overview: how Tesseracts work and the ways to run them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/)
+- [Checking gradients](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/how-to/check-gradients/)
+- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/differentiable-programming/)
+- [Demos & tutorials](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/demo/demo/)
+- [Deploying Tesseracts](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/how-to/deploy/)
 
 ## Citing Tesseract
 

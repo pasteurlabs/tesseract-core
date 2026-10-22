@@ -1,4 +1,4 @@
-# CLI Reference (`tesseract`)
+# CLI reference (`tesseract`)
 
 ```{eval-rst}
 .. typer:: tesseract_core.sdk.cli:app
