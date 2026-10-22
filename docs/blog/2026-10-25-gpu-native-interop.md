@@ -2,8 +2,7 @@
 orphan: true
 og:title: "Tesseract is now GPU-native, for turbocharged differentiable physics and beyond"
 og:description: "A training loop can now call a GPU solver running in another process, forward and backward, without its arrays ever leaving the GPU. Here is what that takes, what it buys, and how it works."
-# TODO(publish): set blog_date to the day this goes out.
-blog_date: "2026-10-01"
+blog_date: "2026-10-25"
 blog_author: "@dionhaefner"
 blog_title: "Tesseract is now GPU-native, for turbocharged differentiable physics and beyond"
 blog_description: "A training loop can now call a GPU solver running in another process, forward and backward, without its arrays ever leaving the GPU. Here is what that takes, what it buys, and how it works."
