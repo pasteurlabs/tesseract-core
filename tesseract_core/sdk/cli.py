@@ -520,8 +520,13 @@ def _get_source_path(image_or_path: str) -> Path | None:
     path = Path(image_or_path)
     api_path = path / "tesseract_api.py" if os.path.isdir(path) else path
     if api_path.suffix != ".py" or not os.path.isfile(api_path):
-        # An image name starts with a letter or digit, so this can only be a path.
-        if image_or_path.startswith((".", "/")) or os.path.isabs(image_or_path):
+        # An image name starts with a letter or digit and does not end with a
+        # slash, so this can only be a path.
+        if (
+            image_or_path.startswith((".", "/"))
+            or image_or_path.endswith(("/", os.sep))
+            or os.path.isabs(image_or_path)
+        ):
             raise UserError(
                 f"No Tesseract source at '{image_or_path}': it "
                 f"{_not_a_source(image_or_path)}."

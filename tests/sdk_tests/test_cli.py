@@ -287,12 +287,14 @@ def test_source_path_or_image_name(tmp_path, monkeypatch, argument, expected):
         ("./missing", "does not exist on disk"),
         ("/no/such/tesseract", "does not exist on disk"),
         ("./no_api", "neither a directory containing tesseract_api.py"),
+        ("typo/", "does not exist on disk"),
+        ("no_api/", "neither a directory containing tesseract_api.py"),
     ],
 )
 def test_an_explicit_path_is_never_an_image_name(
     tmp_path, monkeypatch, argument, reason
 ):
-    """An image name starts with a letter or digit, so a mistyped path is reported as one."""
+    """An image name never starts with . or / or ends with /, so a mistyped path is reported as one."""
     (tmp_path / "no_api").mkdir()
     monkeypatch.chdir(tmp_path)
 

@@ -37,10 +37,10 @@ http://127.0.0.1:8000
 ```
 
 - An argument that is a directory containing `tesseract_api.py`, or a Python file, is a source
-  path. Anything else is an image name, except that an argument starting with `.` or `/` is always
-  a path, so a mistyped one is reported as such. A source path wins over an image of the same
-  name, and the log says which source runs. Pass `helloworld:latest` (or any `name:tag`) to run the
-  image instead.
+  path. Anything else is an image name, except that an argument starting with `.` or `/`, or
+  ending with `/`, is always a path, so a mistyped one is reported as such. A source path wins over
+  an image of the same name, and the log says which source runs. Pass `helloworld:latest` (or any
+  `name:tag`) to run the image instead.
 - There is no container to `tesseract teardown` for a source path, and `tesseract ps` does not
   list it.
 - `--python-executable` runs the Tesseract on an interpreter you choose instead of the managed
