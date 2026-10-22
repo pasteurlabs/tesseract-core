@@ -9,6 +9,7 @@
 import json
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -215,17 +216,36 @@ def docker_is_off_limits(monkeypatch):
     monkeypatch.setattr(engine, "check_docker", check_docker)
 
 
-def _cli_env(**extra: str) -> dict[str, str]:
-    """Environment for a `tesseract` subprocess, with output we can match on."""
-    return {**os.environ, "TERM": "dumb", "COLUMNS": "1000", **extra}
+def _cli_env() -> dict[str, str]:
+    """Environment for a `tesseract` subprocess, with output we can match on.
+
+    Docker is a command that always fails, so a source path that comes to need
+    Docker fails here too, even on a machine that has it.
+    """
+    no_docker = shlex.join([sys.executable, "-c", "raise SystemExit(1)"])
+    return {
+        **os.environ,
+        "TERM": "dumb",
+        "COLUMNS": "1000",
+        "TESSERACT_DOCKER_EXECUTABLE": no_docker,
+    }
 
 
-def _without_docker() -> dict[str, str]:
-    """Point the CLI at a Docker that always fails, so needing it is an error."""
-    false = shutil.which("false")
-    if false is None:
-        pytest.skip("needs a `false` executable to stand in for a broken Docker")
-    return {"TESSERACT_DOCKER_EXECUTABLE": false}
+def _tesseract(*args: str, timeout: float | None = None) -> subprocess.CompletedProcess:
+    """Run the `tesseract` console script, as a user would."""
+    return subprocess.run(
+        ["tesseract", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=_cli_env(),
+        check=False,
+        timeout=timeout,
+    )
+
+
+# Too long to be a file name, but a valid image reference.
+LONG_IMAGE_NAME = "a" * 200 + ":" + "t" * 100
 
 
 @pytest.mark.parametrize(
@@ -235,11 +255,13 @@ def _without_docker() -> dict[str, str]:
         ("./tess", "tess/tesseract_api.py"),
         ("tess/tesseract_api.py", "tess/tesseract_api.py"),
         ("tess/other_api.py", "tess/other_api.py"),
+        ("tess:latest", None),
         ("no_api", None),
         ("data.txt", None),
         ("missing", None),
         ("missing.py", None),
         ("ghcr.io/org/tess:1.0", None),
+        (LONG_IMAGE_NAME, None),
     ],
 )
 def test_source_path_or_image_name(tmp_path, monkeypatch, argument, expected):
@@ -250,7 +272,6 @@ def test_source_path_or_image_name(tmp_path, monkeypatch, argument, expected):
     (tmp_path / "no_api").mkdir()
     (tmp_path / "data.txt").touch()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli_module, "_image_exists", lambda name: False)
 
     result = cli_module._get_source_path(argument)
 
@@ -260,38 +281,43 @@ def test_source_path_or_image_name(tmp_path, monkeypatch, argument, expected):
         assert result == (tmp_path / expected).resolve()
 
 
-def test_source_path_wins_over_an_image_of_the_same_name(tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize(
+    "argument, reason",
+    [
+        ("./missing", "does not exist on disk"),
+        ("/no/such/tesseract", "does not exist on disk"),
+        ("./no_api", "neither a directory containing tesseract_api.py"),
+    ],
+)
+def test_an_explicit_path_is_never_an_image_name(
+    tmp_path, monkeypatch, argument, reason
+):
+    """An image name starts with a letter or digit, so a mistyped path is reported as one."""
+    (tmp_path / "no_api").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(
+        UserError, match=f"No Tesseract source at '{argument}': .*{reason}"
+    ):
+        cli_module._get_source_path(argument)
+
+
+def test_a_source_path_wins_without_asking_docker(tmp_path, monkeypatch, caplog):
+    """A source path must not need Docker, so a clash with an image is logged, not checked."""
     (tmp_path / "tess").mkdir()
     (tmp_path / "tess" / "tesseract_api.py").touch()
     monkeypatch.chdir(tmp_path)
     asked = []
     monkeypatch.setattr(
-        cli_module, "_image_exists", lambda name: asked.append(name) or True
+        cli_module.docker_client.images, "get", lambda *args: asked.append(args)
     )
 
-    with caplog.at_level(logging.WARNING, logger="tesseract"):
+    with caplog.at_level(logging.INFO, logger="tesseract"):
         result = cli_module._get_source_path("tess")
+
     assert result == (tmp_path / "tess" / "tesseract_api.py").resolve()
-    assert asked == ["tess"]
-    assert "both a Tesseract source directory and an image" in caplog.text
-    assert "'tess:latest' to use the image" in caplog.text
-
-    # An explicit path cannot be an image name, so there is nothing to ask.
-    caplog.clear()
-    asked.clear()
-    assert cli_module._get_source_path("./tess") == result
     assert asked == []
-    assert "both a Tesseract source directory and an image" not in caplog.text
-
-
-def test_image_exists_without_docker(monkeypatch):
-    """Probing for an image never fails, whatever state Docker is in."""
-
-    def missing_docker(*args, **kwargs):
-        raise FileNotFoundError("docker")
-
-    monkeypatch.setattr(cli_module.docker_client.images, "get", missing_docker)
-    assert not cli_module._image_exists("helloworld")
+    assert f"Running the Tesseract source at {result}" in caplog.text
 
 
 RUN_CONTAINER_OPTIONS = [
@@ -346,6 +372,97 @@ def test_container_options_are_refused_for_a_source_path(
     )
 
 
+def test_run_passes_its_options_to_a_source(
+    cli_runner, dummy_tesseract_package, docker_is_off_limits, monkeypatch, tmp_path
+):
+    calls = []
+    monkeypatch.setattr(
+        local_client, "run", lambda *args, **kwargs: calls.append(kwargs) or ("", "")
+    )
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "run",
+            str(dummy_tesseract_package),
+            "apply",
+            DUMMY_PAYLOAD,
+            "--env",
+            "FOO=bar",
+            "--profiling",
+            "--input-path",
+            str(tmp_path),
+            "--debug",
+            "--python-executable",
+            sys.executable,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        {
+            "environment": {"FOO": "bar", "TESSERACT_PROFILING": "1"},
+            "input_path": str(tmp_path),
+            "output_path": None,
+            "output_format": None,
+            "output_file": None,
+            "runtime_config": {"debug": True},
+            "python_executable": Path(sys.executable),
+            "stream_logs": cli_module.logger.info,
+        }
+    ]
+
+
+def test_serve_passes_its_options_to_a_source(
+    cli_runner, dummy_tesseract_package, docker_is_off_limits, monkeypatch, tmp_path
+):
+    calls = []
+    monkeypatch.setattr(
+        cli_module,
+        "_serve_from_source",
+        lambda api_path, **kwargs: calls.append(kwargs),
+    )
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "serve",
+            str(dummy_tesseract_package),
+            "--env",
+            "FOO=bar",
+            "--input-path",
+            str(tmp_path),
+            "--host-ip",
+            "0.0.0.0",
+            "--num-workers",
+            "2",
+            "--debug",
+            "--skip-health-check",
+            "--startup-timeout",
+            "5",
+            "--python-executable",
+            sys.executable,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        {
+            "host_ip": "0.0.0.0",
+            "port": None,
+            "num_workers": 2,
+            "environment": {"FOO": "bar"},
+            "input_path": str(tmp_path),
+            "output_path": None,
+            "output_format": None,
+            "runtime_config": {"debug": True},
+            "python_executable": Path(sys.executable),
+            "skip_health_check": True,
+            "startup_timeout": 5.0,
+        }
+    ]
+
+
 @pytest.mark.parametrize("command", ["run", "serve"])
 def test_python_executable_is_refused_for_an_image(
     cli_runner, docker_is_off_limits, command
@@ -372,7 +489,11 @@ def test_an_image_still_needs_docker(cli_runner, tmp_path, monkeypatch, command)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "not-a-tesseract").mkdir()
 
-    for name, hinted in (("some-image", False), ("not-a-tesseract", True)):
+    for name, hint in (
+        ("some-image", "does not exist on disk"),
+        (LONG_IMAGE_NAME, "does not exist on disk"),
+        ("not-a-tesseract", "neither a directory containing tesseract_api.py"),
+    ):
         argv = [command, name]
         if command == "run":
             argv += ["apply", "{}"]
@@ -380,7 +501,8 @@ def test_an_image_still_needs_docker(cli_runner, tmp_path, monkeypatch, command)
 
         assert result.exit_code == 1, result.output
         assert "Could not reach Docker daemon" in str(result.exception)
-        assert ("is not a Tesseract source" in str(result.exception)) is hinted
+        assert hint in str(result.exception)
+        assert "so it was taken to be an image name" in str(result.exception)
 
 
 @pytest.mark.parametrize("command", ["run", "serve"])
@@ -428,21 +550,13 @@ def test_run_resolves_the_interpreter_like_from_source(
 
 
 def test_run_from_source_without_docker(dummy_tesseract_package):
-    result = subprocess.run(
-        [
-            "tesseract",
-            "run",
-            str(dummy_tesseract_package),
-            "apply",
-            DUMMY_PAYLOAD,
-            "--python-executable",
-            sys.executable,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(**_without_docker()),
-        check=False,
+    result = _tesseract(
+        "run",
+        str(dummy_tesseract_package),
+        "apply",
+        DUMMY_PAYLOAD,
+        "--python-executable",
+        sys.executable,
     )
 
     assert result.returncode == 0, result.stderr
@@ -455,14 +569,7 @@ def test_run_from_source_builds_its_environment(dummy_tesseract_package):
         pytest.skip("uv is required to build an environment")
 
     api_path = dummy_tesseract_package / "tesseract_api.py"
-    result = subprocess.run(
-        ["tesseract", "run", str(api_path), "apply", DUMMY_PAYLOAD],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(),
-        check=False,
-    )
+    result = _tesseract("run", str(api_path), "apply", DUMMY_PAYLOAD)
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["result"]["data"]["buffer"] == [6.0, 10.0]
@@ -471,27 +578,19 @@ def test_run_from_source_builds_its_environment(dummy_tesseract_package):
 
 def test_run_from_source_writes_to_the_output_path(dummy_tesseract_package, tmp_path):
     output_dir = tmp_path / "out"
-    result = subprocess.run(
-        [
-            "tesseract",
-            "run",
-            str(dummy_tesseract_package),
-            "apply",
-            DUMMY_PAYLOAD,
-            "--output-path",
-            str(output_dir),
-            "--output-format",
-            "json+binref",
-            "--output-file",
-            "result.json",
-            "--python-executable",
-            sys.executable,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(),
-        check=False,
+    result = _tesseract(
+        "run",
+        str(dummy_tesseract_package),
+        "apply",
+        DUMMY_PAYLOAD,
+        "--output-path",
+        str(output_dir),
+        "--output-format",
+        "json+binref",
+        "--output-file",
+        "result.json",
+        "--python-executable",
+        sys.executable,
     )
 
     assert result.returncode == 0, result.stderr
@@ -504,22 +603,14 @@ def test_run_from_source_writes_to_the_output_path(dummy_tesseract_package, tmp_
 def test_check_gradients_from_source(dummy_tesseract_package, passes):
     """The dummy's Jacobian is right and its VJP and JVP are not; the exit code says which ran."""
     runtime_args = ["--runtime-args", "--endpoints jacobian"] if passes else []
-    result = subprocess.run(
-        [
-            "tesseract",
-            "run",
-            str(dummy_tesseract_package),
-            "check-gradients",
-            DUMMY_PAYLOAD,
-            *runtime_args,
-            "--python-executable",
-            sys.executable,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(),
-        check=False,
+    result = _tesseract(
+        "run",
+        str(dummy_tesseract_package),
+        "check-gradients",
+        DUMMY_PAYLOAD,
+        *runtime_args,
+        "--python-executable",
+        sys.executable,
     )
 
     if passes:
@@ -531,23 +622,40 @@ def test_check_gradients_from_source(dummy_tesseract_package, passes):
         assert "Error running Tesseract." in result.stderr
 
 
+def test_test_spec_from_source(tmp_path):
+    """A spec's cli_config input_path applies from source; its volume_mounts cannot, and the user is told."""
+    shutil.copytree(EXAMPLES / "required_files", tmp_path / "required_files")
+    spec_path = tmp_path / "required_files" / "test_cases" / "test_apply.json"
+    spec = json.loads(spec_path.read_text())
+    spec["cli_config"]["volume_mounts"] = ["../input:/data:ro"]
+    spec_path.write_text(json.dumps(spec))
+
+    result = _tesseract(
+        "run",
+        str(tmp_path / "required_files"),
+        "test",
+        f"@{spec_path}",
+        "--python-executable",
+        sys.executable,
+    )
+
+    assert result.returncode == 0, result.stderr
+    # `test` exits 0 either way, and reports its outcome in the payload. The
+    # Tesseract reads a required file on import, so it passes only if the
+    # spec's input_path reached it.
+    assert json.loads(result.stdout)["status"] == "passed", result.stdout
+    assert "Ignoring the volume_mounts and user" in result.stderr
+
+
 def test_unimplemented_command_from_source(tmp_path):
     shutil.copytree(EXAMPLES / "helloworld", tmp_path / "helloworld")
-    result = subprocess.run(
-        [
-            "tesseract",
-            "run",
-            str(tmp_path / "helloworld"),
-            "jacobian",
-            "{}",
-            "--python-executable",
-            sys.executable,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(),
-        check=False,
+    result = _tesseract(
+        "run",
+        str(tmp_path / "helloworld"),
+        "jacobian",
+        "{}",
+        "--python-executable",
+        sys.executable,
     )
 
     assert result.returncode == 1
@@ -556,21 +664,8 @@ def test_unimplemented_command_from_source(tmp_path):
 
 def test_run_help_from_source(dummy_tesseract_package):
     target = str(dummy_tesseract_package)
-    result = subprocess.run(
-        [
-            "tesseract",
-            "run",
-            target,
-            "apply",
-            "--help",
-            "--python-executable",
-            sys.executable,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(),
-        check=False,
+    result = _tesseract(
+        "run", target, "apply", "--help", "--python-executable", sys.executable
     )
 
     assert result.returncode == 0, result.stderr
@@ -595,7 +690,7 @@ def test_serve_from_source_until_interrupted(dummy_tesseract_package, free_port)
             stderr=stderr,
             text=True,
             encoding="utf-8",
-            env=_cli_env(**_without_docker()),
+            env=_cli_env(),
         )
         try:
             deadline = time.monotonic() + 60
@@ -625,33 +720,49 @@ def test_serve_from_source_until_interrupted(dummy_tesseract_package, free_port)
         logs = stderr.read()
 
     assert process.returncode == 0, logs
-    assert stdout == ""
+    assert stdout == f"{url}\n"
     assert "Application startup complete" in logs
+    # What the server logs on its way down is shown too.
+    assert "Application shutdown complete" in logs
     with pytest.raises(requests.ConnectionError):
         requests.get(f"{url}/health", timeout=2)
 
 
-def test_serve_from_source_reports_a_tesseract_that_fails_to_start(tmp_path):
+def _broken_tesseract(tmp_path):
     shutil.copytree(EXAMPLES / "helloworld", tmp_path / "broken")
     with open(tmp_path / "broken" / "tesseract_api.py", "a") as api:
         api.write("\nraise RuntimeError('broken on import')\n")
+    return tmp_path / "broken"
 
-    result = subprocess.run(
-        [
-            "tesseract",
-            "serve",
-            str(tmp_path / "broken"),
-            "--python-executable",
-            sys.executable,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=_cli_env(),
-        check=False,
+
+def test_serve_from_source_reports_a_tesseract_that_fails_to_start(tmp_path):
+    result = _tesseract(
+        "serve",
+        str(_broken_tesseract(tmp_path)),
+        "--python-executable",
+        sys.executable,
         timeout=60,
     )
 
     assert result.returncode == 1
     assert "Could not start the Tesseract at" in result.stderr
     assert "broken on import" in result.stderr
+
+
+def test_serve_from_source_reports_a_tesseract_that_stops(cli_runner, tmp_path):
+    # Without a health check, serve returns before the Tesseract dies, so the
+    # foreground loop is what notices, as it would for one that crashes later.
+    result = cli_runner.invoke(
+        cli,
+        [
+            "serve",
+            str(_broken_tesseract(tmp_path)),
+            "--skip-health-check",
+            "--python-executable",
+            sys.executable,
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, UserError)
+    assert "stopped with exit code 1" in str(result.exception)
