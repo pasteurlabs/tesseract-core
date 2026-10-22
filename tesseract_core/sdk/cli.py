@@ -855,8 +855,8 @@ def serve(
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
-            # Passed even when off, as for `tesseract run`.
-            runtime_config={"debug": debug},
+            # Only when on, so that `--env TESSERACT_DEBUG=1` works as for an image.
+            runtime_config={"debug": True} if debug else None,
             python_executable=python_executable,
             skip_health_check=skip_health_check,
             startup_timeout=startup_timeout,
@@ -1554,10 +1554,9 @@ def run_container(
                     output_path=output_path,
                     output_format=output_format,
                     output_file=output_file,
-                    # Passed even when off: the child inherits our environment,
-                    # so an exported TESSERACT_DEBUG would otherwise turn it on
-                    # and make the command wait for a debugger.
-                    runtime_config={"debug": debug},
+                    # Only when on, so that `--env TESSERACT_DEBUG=1` works as
+                    # for an image.
+                    runtime_config={"debug": True} if debug else None,
                     python_executable=python_executable,
                     stream_logs=logger.info,
                 )
