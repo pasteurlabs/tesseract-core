@@ -711,6 +711,22 @@ def test_run_help_from_source(dummy_tesseract_package):
 
     assert result.returncode == 0, result.stderr
     assert f"Usage: tesseract run {target} apply" in result.stderr
+    # Shown once, not also as tesseract-runtime's own help.
+    assert result.stderr.count("Usage:") == 1, result.stderr
+
+
+def test_run_help_shows_why_a_tesseract_fails(tmp_path):
+    result = _tesseract(
+        "run",
+        str(_broken_tesseract(tmp_path)),
+        "apply",
+        "--help",
+        "--python-executable",
+        sys.executable,
+    )
+
+    assert result.returncode == 1
+    assert "broken on import" in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="sends SIGINT, as Ctrl+C would")

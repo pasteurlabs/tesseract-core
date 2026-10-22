@@ -1178,7 +1178,9 @@ def _extract_cli_config(
     return input_path, volume_mounts, user
 
 
-def _run_error(image_or_path: str, cmd: str, stderr: bytes) -> UserError:
+def _run_error(
+    image_or_path: str, cmd: str, stderr: bytes, streamed: bool
+) -> UserError:
     """The error to report for a Tesseract command that failed."""
     msg = stderr.decode("utf-8").strip()
     if "No such command" in msg:
@@ -1186,7 +1188,7 @@ def _run_error(image_or_path: str, cmd: str, stderr: bytes) -> UserError:
     else:
         loglevel = logging.getLogger("tesseract").handlers[0].level
         error_string = "Error running Tesseract."
-        if loglevel <= logging.INFO:
+        if loglevel <= logging.INFO and streamed:
             # Errors already streamed via logger.info, don't repeat them
             pass
         elif loglevel <= logging.ERROR:
@@ -1528,6 +1530,8 @@ def run_container(
     # `--debug` is meaningless when only forwarding `--help`, and would
     # otherwise block waiting for a debugger on a help invocation.
     debug = debug and not invoke_help
+    # The help is echoed below once cleaned up, so it is not streamed as well.
+    stream_logs = False if invoke_help else logger.info
 
     try:
         if api_path is None:
@@ -1547,7 +1551,7 @@ def run_container(
                 memory=memory,
                 docker_args=shlex.split(docker_args) if docker_args else None,
                 debug=debug,
-                stream_logs=logger.info,  # Stream logs via logger
+                stream_logs=stream_logs,
             )
         else:
             with _source_errors(api_path):
@@ -1564,7 +1568,7 @@ def run_container(
                     # for an image.
                     runtime_config={"debug": True} if debug else None,
                     python_executable=python_executable,
-                    stream_logs=logger.info,
+                    stream_logs=stream_logs,
                 )
 
     except ImageNotFound as e:
@@ -1575,7 +1579,7 @@ def run_container(
         ) from e
 
     except (ContainerError, subprocess.CalledProcessError) as e:
-        raise _run_error(image_or_path, cmd, e.stderr) from e
+        raise _run_error(image_or_path, cmd, e.stderr, streamed=not invoke_help) from e
 
     if invoke_help:
         result_err = _sanitize_error_output(result_err, image_or_path)
