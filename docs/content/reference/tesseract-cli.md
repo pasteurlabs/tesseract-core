@@ -16,7 +16,8 @@
 source: a directory containing `tesseract_api.py`, or the Python file itself. A source path needs
 no image and no Docker. The Tesseract runs in a local process, in the environment that
 `Tesseract.from_source()` uses: `.tesseract-venv` next to `tesseract_api.py`, built from
-`tesseract_config.yaml` on first use and reused while its requirements are unchanged.
+`tesseract_config.yaml` on first use and reused while its requirements are unchanged. Building it
+needs `uv`, or `conda` for a Tesseract with `requirements.provider: conda`.
 
 ```bash
 $ tesseract run examples/helloworld apply '{"inputs": {"name": "Osborne"}}'

@@ -16,8 +16,8 @@ for more details on this Tesseract.
 ## Running it without an image
 
 `tesseract run` and `tesseract serve` accept the source directory directly. The first call builds
-an environment for the Tesseract in `examples/helloworld/.tesseract-venv`, and later calls reuse it.
-No Docker is needed:
+an environment for the Tesseract in `examples/helloworld/.tesseract-venv` with `uv`, and later calls
+reuse it. No Docker is needed:
 
 ```bash
 $ tesseract run examples/helloworld apply '{"inputs": {"name": "Osborne"}}'
