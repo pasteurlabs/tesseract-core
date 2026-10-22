@@ -46,6 +46,7 @@ from .serving import (
     PortInUseError,
     get_free_port,
     is_port_conflict,
+    port_range,
     retry_or_raise_port_conflict,
     runtime_config_to_env,
     validate_output_format,
@@ -1099,28 +1100,18 @@ def serve(
     # port must be released before the container can bind it). When we choose
     # the port, retry a few times with a fresh one; a user-supplied fixed port
     # is honored as-is and never retried.
-    if not port:
-        auto_port = True
-
-        def pick_port() -> str:
-            return str(get_free_port())
-    elif "-" in port:
-        auto_port = True
-        port_start, port_end = (int(p) for p in port.split("-"))
-
-        def pick_port() -> str:
-            return str(get_free_port(within_range=(port_start, port_end)))
-    else:
-        auto_port = False
-        fixed_port = port
-
-        def pick_port() -> str:
-            return fixed_port
+    pick_from = port_range(port)
+    auto_port = pick_from is not None
+    fixed_port = port
 
     max_attempts = 5 if auto_port else 1
     for attempt in range(max_attempts):
         # `port` is always the host-side port (what we publish and health-check).
-        port = pick_port()
+        port = (
+            fixed_port
+            if pick_from is None
+            else str(get_free_port(within_range=pick_from))
+        )
 
         # When using host network there is no port mapping: the container binds
         # the host's namespace directly, so the container port must equal the

@@ -1307,6 +1307,20 @@ def test_serve_container_port_decoupled_from_host_port(mocked_docker):
     }
 
 
+@pytest.mark.parametrize(
+    "port, expected",
+    [
+        (None, serving.DEFAULT_PORT_RANGE),
+        ("8000", None),
+        (8000, None),
+        ("8000-8080", (8000, 8080)),
+    ],
+)
+def test_port_range(port, expected):
+    """How `--port` is read, by both the container and the local serve."""
+    assert serving.port_range(port) == expected
+
+
 def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     """A port that is taken before the container binds triggers a retry.
 

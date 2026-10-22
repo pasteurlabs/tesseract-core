@@ -37,6 +37,7 @@ from .serving import (
     diagnose_exit,
     get_free_port,
     is_running,
+    port_range,
     retry_or_raise_port_conflict,
     runtime_config_to_env,
     validate_output_format,
@@ -547,20 +548,15 @@ def serve(
 
     validate_output_format(output_format, output_path)
 
-    # As for a container, only a single port is fixed; a range is picked from.
-    auto_port = port is None or "-" in str(port)
-    port_range = None
-    if port is not None and auto_port:
-        start, end = str(port).split("-")
-        port_range = (int(start), int(end))
+    # As for a container, a single port is used as given, and otherwise one is
+    # picked (and re-picked if it is taken before the server binds it).
+    pick_from = port_range(port)
+    auto_port = pick_from is not None
 
     for attempt in range(_MAX_PORT_ATTEMPTS):
-        if not auto_port:
-            chosen_port = int(port)
-        elif port_range is None:
-            chosen_port = get_free_port()
-        else:
-            chosen_port = get_free_port(within_range=port_range)
+        chosen_port = (
+            int(port) if pick_from is None else get_free_port(within_range=pick_from)
+        )
 
         # Debug mode always starts a debugger, so give each Tesseract its own
         # port: host processes share a network namespace, unlike containers, so
