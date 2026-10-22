@@ -582,9 +582,13 @@ def _serve_from_source(api_path: Path, **kwargs: Any) -> None:
     itself is an error.
     """
     try:
+        # Disposes of the Tesseract itself if interrupted while starting it.
         with _source_errors(api_path):
             served = local_client.serve(api_path, **kwargs)
+    except KeyboardInterrupt:
+        return
 
+    try:
         typer.echo(served.url)
         logger.info(f"Serving Tesseract at {served.url}, press Ctrl+C to stop")
         logger.info(f"View Tesseract: {served.url}/docs")
@@ -595,12 +599,14 @@ def _serve_from_source(api_path: Path, **kwargs: Any) -> None:
                 time.sleep(0.2)
         finally:
             # Stop the server before the streamer, so that what it logs on the
-            # way down is shown, and remove it last, which deletes the log file.
+            # way down is shown.
             served.stop()
             streamer.stop()
-            served.remove(force=True)
     except KeyboardInterrupt:
         return
+    finally:
+        # Last, as it deletes the log file.
+        served.remove(force=True)
 
     exit_code = served.wait()["StatusCode"]
     raise UserError(f"Tesseract at {api_path} stopped with exit code {exit_code}.")

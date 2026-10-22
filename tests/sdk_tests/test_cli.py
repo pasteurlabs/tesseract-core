@@ -807,3 +807,18 @@ def test_serve_from_source_reports_a_tesseract_that_stops(cli_runner, tmp_path):
     assert result.exit_code == 1, result.output
     assert isinstance(result.exception, UserError)
     assert "stopped with exit code 1" in str(result.exception)
+
+
+def test_serve_from_source_stops_a_tesseract_interrupted_as_it_comes_up(
+    mocker, monkeypatch, tmp_path
+):
+    """Ctrl+C after the Tesseract is up but before it is waited on, e.g. while its URL is printed."""
+    served = mocker.Mock()
+    monkeypatch.setattr(local_client, "serve", lambda *args, **kwargs: served)
+    monkeypatch.setattr(
+        cli_module.typer, "echo", mocker.Mock(side_effect=KeyboardInterrupt)
+    )
+
+    cli_module._serve_from_source(tmp_path / "tesseract_api.py")
+
+    served.remove.assert_called_once_with(force=True)
