@@ -1737,6 +1737,24 @@ def test_parse_requirements(tmpdir):
     ]
 
 
+def test_parse_requirements_continuations_and_comments(tmpdir):
+    reqs = (
+        "numpy==2.0.0 \\\n"
+        "    --hash=sha256:04494f6ec467ccb5369d1808570ae55f6ed9b5809d7f035059000a37b8d7e86f\n"
+        "scipy==1.14.0  # pinned\n"
+        "./internal_packages/foobar  # vendored\n"
+    )
+    reqs_file = Path(tmpdir) / "requirements.txt"
+    reqs_file.write_text(reqs)
+    locals, remotes = engine.parse_requirements(reqs_file)
+
+    assert locals == ["./internal_packages/foobar"]
+    assert remotes == [
+        "numpy==2.0.0     --hash=sha256:04494f6ec467ccb5369d1808570ae55f6ed9b5809d7f035059000a37b8d7e86f",
+        "scipy==1.14.0",
+    ]
+
+
 def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
     """Conda provider without an environment file is reported at staging.
 
