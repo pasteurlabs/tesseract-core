@@ -1,19 +1,22 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Serving a Tesseract as a local subprocess, without containerization.
+"""Running a Tesseract as a local subprocess, without containerization.
 
 The process counterpart to :mod:`tesseract_core.sdk.docker_client`: what a
-started Tesseract is, how to talk to it, read it and dispose of it -- and, since
-there is only the one way to start one, how to do that too. Instead of running
-``tesseract-runtime serve`` inside a container, :func:`serve` runs it as a child
-of the current interpreter. The Tesseract is still reached over HTTP, so the
-client side is identical to the containerized case.
+started Tesseract is, how to talk to it, read it and dispose of it -- and how to
+start one too. Instead of running ``tesseract-runtime`` inside a container,
+:func:`serve` runs ``tesseract-runtime serve`` as a child of the current
+interpreter, and :func:`run` runs a single command that way, as
+:func:`~tesseract_core.sdk.engine.run_tesseract` does in a container. A served
+Tesseract is still reached over HTTP, so the client side is identical to the
+containerized case.
 
 Compared to importing ``tesseract_api.py`` in-process, this buys process
 isolation (the Tesseract gets its own interpreter, its own global state, and its
-own signal handlers) at the cost of HTTP round-trips. It does *not* provide any
-of the other isolation a container gives you: the child inherits the parent's
-environment, working directory, filesystem access, and user.
+own signal handlers) at the cost of HTTP round-trips, or for :func:`run` of an
+interpreter start per command. It does *not* provide any of the other isolation
+a container gives you: the child inherits the parent's environment, working
+directory, filesystem access, and user.
 """
 
 from __future__ import annotations
@@ -184,8 +187,14 @@ class TesseractProcess:
 
     @property
     def url(self) -> str:
-        """Base URL the Tesseract is serving on."""
-        return f"http://{self.host_ip}:{self.host_port}"
+        """Base URL the Tesseract can be reached on.
+
+        Not always the address it binds: 0.0.0.0 means every interface and is not
+        something to connect to (Windows refuses outright), so loopback is named
+        instead, as `engine.serve` does for a container.
+        """
+        host = "127.0.0.1" if self.host_ip == "0.0.0.0" else self.host_ip
+        return f"http://{host}:{self.host_port}"
 
     def __str__(self) -> str:
         """Name this Tesseract in a message meant for a person."""
@@ -226,7 +235,7 @@ class TesseractProcess:
             raise RuntimeError(
                 f"{self} is still running. Pass force=True to stop and remove it."
             )
-        self._stop()
+        self.stop()
         if self.parent_pipe_write_fd is not None:
             try:
                 os.close(self.parent_pipe_write_fd)
@@ -244,8 +253,12 @@ class TesseractProcess:
         """
         return self.log_path.read_bytes()
 
-    def _stop(self) -> None:
-        """Terminate the child, escalating to a kill if it outlasts the grace period."""
+    def stop(self) -> None:
+        """Terminate the child, escalating to a kill if it outlasts the grace period.
+
+        Leaves the log file in place, so what it wrote on the way down can still
+        be read; :meth:`remove` deletes it.
+        """
         if self.process.poll() is not None:
             return
 
@@ -365,16 +378,16 @@ def _prepare_child(
     python_executable: str | Path | None,
     environment: dict[str, str] | None,
     runtime_config: dict[str, Any] | None,
-) -> tuple[Path, str, bool, dict[str, str], dict[str, Any]]:
+) -> tuple[Path, str, dict[str, str], dict[str, Any]]:
     """Resolve what a child runs: the API, the interpreter, and its environment and config.
 
     Shared by :func:`serve` and :func:`run`, so that a Tesseract gets the same
     interpreter and configuration whichever of the two starts it.
 
     Returns:
-        The resolved API path, the interpreter, whether that interpreter belongs
-        to another environment than ours, and the environment and runtime config
-        with what the Tesseract's config declares applied underneath.
+        The arguments, resolved and in the same order: the absolute API path, the
+        interpreter, and the environment and runtime config with what the
+        Tesseract's config declares applied underneath.
     """
     api_path = Path(api_path).resolve()
     if not api_path.is_file():
@@ -384,27 +397,26 @@ def _prepare_child(
         python_executable = resolve_python_executable(api_path)
     python_executable = str(python_executable)
 
-    foreign_interpreter = _is_foreign_interpreter(python_executable)
     # Apply what a container would bake in from the config, with explicit
     # arguments taking precedence.
     declared_environment, declared_config = declared_env_and_metadata(api_path)
     environment = {**declared_environment, **(environment or {})}
     runtime_config = {**declared_config, **(runtime_config or {})}
-    if foreign_interpreter and not os.path.isfile(python_executable):
+    if _is_foreign_interpreter(python_executable) and not os.path.isfile(
+        python_executable
+    ):
         raise FileNotFoundError(
             f"Python interpreter {python_executable} does not exist."
         )
-    return api_path, python_executable, foreign_interpreter, environment, runtime_config
+    return api_path, python_executable, environment, runtime_config
 
 
 def _debugpy_host(env: dict[str, str]) -> str:
-    """The host the runtime will bind its debugger to in a child with `env`.
+    """The host a child started with `env` binds its debugger to.
 
-    Read back out of the environment, since it may be the runtime's default
-    rather than something we set. Under both names, in typer's order of
-    precedence: we never write this one, so an inherited TESSERACT_RUNTIME_
-    value is what the runtime will bind, and reporting the TESSERACT_ one (or the
-    default) would send the user's debugger to the wrong address.
+    Unlike the port, nothing picks it for the caller, so it may be inherited from
+    this process under either name -- TESSERACT_RUNTIME_DEBUGPY_HOST wins, as it
+    does in typer -- or be the runtime's default.
     """
     return (
         env.get("TESSERACT_RUNTIME_DEBUGPY_HOST")
@@ -457,8 +469,8 @@ def run(
         subprocess.CalledProcessError: if the command exits with a non-zero
             code. Its ``stderr`` holds what the command wrote there, as bytes.
     """
-    api_path, python_executable, foreign_interpreter, environment, runtime_config = (
-        _prepare_child(api_path, python_executable, environment, runtime_config)
+    api_path, python_executable, environment, runtime_config = _prepare_child(
+        api_path, python_executable, environment, runtime_config
     )
     validate_output_format(output_format, output_path)
 
@@ -474,7 +486,7 @@ def run(
         output_format=output_format,
         runtime_config=runtime_config,
         environment=environment,
-        foreign_interpreter=foreign_interpreter,
+        foreign_interpreter=_is_foreign_interpreter(python_executable),
     )
 
     if runtime_config.get("debug"):
@@ -542,8 +554,8 @@ def serve(
     Returns:
         The served Tesseract, to be passed to :func:`teardown` when done.
     """
-    api_path, python_executable, foreign_interpreter, environment, runtime_config = (
-        _prepare_child(api_path, python_executable, environment, runtime_config)
+    api_path, python_executable, environment, runtime_config = _prepare_child(
+        api_path, python_executable, environment, runtime_config
     )
 
     validate_output_format(output_format, output_path)
@@ -576,7 +588,7 @@ def serve(
             output_format=output_format,
             runtime_config=attempt_config,
             environment=environment,
-            foreign_interpreter=foreign_interpreter,
+            foreign_interpreter=_is_foreign_interpreter(python_executable),
         )
 
         if attempt_config.get("debug"):
@@ -678,6 +690,12 @@ def serve(
                 conflicting, retriable, attempt, _MAX_PORT_ATTEMPTS
             )
             continue
+        except BaseException:
+            # Interrupted (e.g. by Ctrl+C) before it was healthy. The terminal's
+            # SIGINT never reaches the child in its own process group, and on
+            # Windows there is no parent pipe for it to notice we are gone.
+            served.remove(force=True)
+            raise
 
         return served
 

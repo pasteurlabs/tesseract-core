@@ -362,6 +362,18 @@ def test_serve_on_explicit_port(dummy_api_path):
         served.remove(force=True)
 
 
+def test_a_tesseract_on_every_interface_is_reached_on_loopback(tmp_path):
+    served = local_client.TesseractProcess(
+        process=None,
+        host_ip="0.0.0.0",
+        port=8000,
+        log_path=tmp_path / "log",
+        python_executable=sys.executable,
+        api_path=tmp_path / "tesseract_api.py",
+    )
+    assert served.url == "http://127.0.0.1:8000"
+
+
 def test_serve_on_a_port_range(dummy_api_path):
     """A range is picked from, as `tesseract serve --port 8000-8080` does for a container."""
     served = local_client.serve(
@@ -822,6 +834,24 @@ def test_startup_timeout_is_reported(dummy_api_path, monkeypatch):
         local_client.serve(
             dummy_api_path, python_executable=sys.executable, startup_timeout=1.0
         )
+
+
+def test_interrupted_startup_leaves_nothing_behind(dummy_api_path, monkeypatch):
+    """Ctrl+C before it is healthy must not leave a Tesseract starting unattended."""
+    started = []
+
+    def interrupted(served, *args, **kwargs):
+        started.append(served)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(local_client, "wait_for_health_or_dispose", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        local_client.serve(dummy_api_path, python_executable=sys.executable)
+
+    (served,) = started
+    assert not local_client.is_running(served)
+    assert not served.log_path.exists()
 
 
 def test_a_venv_on_our_base_python_is_a_different_interpreter(tmp_path):
