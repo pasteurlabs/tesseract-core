@@ -3,6 +3,7 @@
 
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
+import argparse
 import inspect
 import io
 import os
@@ -18,6 +19,7 @@ from typing import (
     Annotated,
     Any,
     Literal,
+    NoReturn,
     Union,
     get_args,
     get_origin,
@@ -34,6 +36,7 @@ from tesseract_core.runtime.core import (
     create_endpoints,
     get_tesseract_api,
     redirect_fd,
+    use_utf8_stdio,
 )
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
@@ -706,13 +709,17 @@ def _configure_required_file_load() -> None:
         "-v",
         "openapi-schema",
     ]
-    if "--input-path" in sys.argv:
-        # Make sure input_path is available when loading tesseract_api.py for the first time
-        # (needed to resolve required files)
-        input_path_index = sys.argv.index("--input-path")
-        if len(sys.argv) <= input_path_index + 1:
-            raise ValueError("No input path provided after --input-path argument.")
-        input_path = Path(sys.argv[input_path_index + 1])
+    # Make sure input_path is available when loading tesseract_api.py for the first time
+    # (needed to resolve required files)
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--input-path", type=Path)
+
+    def fail(message: str) -> NoReturn:
+        raise ValueError("No input path provided after --input-path argument.")
+
+    parser.error = fail
+    input_path = parser.parse_known_args(sys.argv[1:])[0].input_path
+    if input_path is not None:
         update_config(input_path=input_path.as_posix())
     if (
         any(arg in sys.argv for arg in skip_required_file_load_args)
@@ -724,6 +731,7 @@ def _configure_required_file_load() -> None:
 
 def main() -> None:
     """Entrypoint for the command line interface."""
+    use_utf8_stdio()
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
     with redirect_fd(sys.stdout, sys.stderr) as orig_stdout:
         # Fail as fast as possible if the Tesseract API path is not set

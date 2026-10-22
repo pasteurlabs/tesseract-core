@@ -111,6 +111,20 @@ def get_config() -> RuntimeConfig:
     return _current_config
 
 
+def config_overrides_as_env() -> dict[str, str]:
+    """Return the config set in this process as the variables another process reads it from."""
+    config = get_config()
+    env = {}
+    for field in _config_overrides:
+        value = getattr(config, field)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            value = int(value)
+        env[f"TESSERACT_{field.upper()}"] = str(value)
+    return env
+
+
 ConfigSnapshot = tuple[RuntimeConfig | None, frozenset[str]]
 
 

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import inspect
+import os
 import uuid
 from collections.abc import Callable
 from functools import wraps
@@ -9,10 +10,11 @@ from types import ModuleType
 from typing import Annotated, Any, NamedTuple
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from .config import get_config
+from .config import config_overrides_as_env, get_config
 from .core import create_endpoints
 from .cuda.serving import (
     EXPORTS_DONE_HEADER,
@@ -31,6 +33,13 @@ from .profiler import Profiler
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
+
+_SERVER_ERROR_HINT = (
+    "The traceback is in the server log. To include it in responses, enable "
+    "debug mode on the server (TESSERACT_DEBUG=1). See "
+    "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+    "content/how-to/debugging.html#debug-mode"
+)
 
 
 class NegotiatedEncoding(NamedTuple):
@@ -154,6 +163,15 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         redoc_url="/docs",
         debug=config.debug,
     )
+
+    @app.exception_handler(Exception)
+    async def server_error_handler(request: Request, exc: Exception) -> Response:
+        # Starlette uses its traceback response in debug mode and re-raises
+        # the exception after responding so the server can still log it.
+        return PlainTextResponse(
+            f"Internal Server Error. {_SERVER_ERROR_HINT}", status_code=500
+        )
+
     tesseract_endpoints = create_endpoints(api_module)
 
     def wrap_endpoint(endpoint_func: Callable):
@@ -287,6 +305,7 @@ def serve(host: str, port: int, num_workers: int) -> None:
             f"gpu_transport={gpu_transport!r} cannot be served by more than one "
             f"worker (got num_workers={num_workers})."
         )
+    os.environ.update(config_overrides_as_env())
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",
         host=host,

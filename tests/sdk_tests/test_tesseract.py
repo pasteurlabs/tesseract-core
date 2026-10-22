@@ -108,6 +108,20 @@ def test_Tesseract_from_url():
         pass
 
 
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("localhost", "http://localhost"),
+        ("localhost:8000", "http://localhost:8000"),
+        ("helloworld:8000/", "http://helloworld:8000"),
+        ("127.0.0.1:8000", "http://127.0.0.1:8000"),
+        ("https://example.com:8443/prefix/", "https://example.com:8443/prefix"),
+    ],
+)
+def test_Tesseract_from_url_adds_missing_scheme(url, expected):
+    assert Tesseract.from_url(url)._client.url == expected
+
+
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
     all_endpoints = {
         "apply",

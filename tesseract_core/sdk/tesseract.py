@@ -1712,7 +1712,7 @@ class HTTPClient:
     def _sanitize_url(url: str) -> str:
         parsed = urlparse(url)
 
-        if not parsed.scheme:
+        if not parsed.netloc:
             url = f"http://{url}"
             parsed = urlparse(url)
 
