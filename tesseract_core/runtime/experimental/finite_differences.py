@@ -436,8 +436,17 @@ def finite_difference_jvp(
     for in_path in jvp_inputs:
         groups.setdefault(eps[in_path], []).append(in_path)
 
+    # A group whose tangents are all zero perturbs nothing, so its evaluations
+    # would only add f(x) - f(x). Seeding one input per pass, as forward-mode
+    # Jacobians do, would otherwise pay for every group on every pass.
+    nonzero_groups = {
+        group_eps: group_paths
+        for group_eps, group_paths in groups.items()
+        if any(np.any(np.asarray(tangent_vector[p])) for p in group_paths)
+    }
+
     base_outputs = None
-    if algorithm == "forward" or not groups:
+    if algorithm == "forward" or not nonzero_groups:
         base_outputs = _dump_outputs(apply_fn(inputs))
 
     if not groups:
@@ -448,8 +457,18 @@ def finite_difference_jvp(
             for out_path in jvp_outputs
         }
 
+    if not nonzero_groups:
+        # Every tangent is zero. Return what the skipped groups would have
+        # added, (f(x) - f(x)) / eps, so the result keeps the type and dtype
+        # it has when the groups are evaluated.
+        base = {
+            out_path: np.asarray(get_at_path(base_outputs, out_path))
+            for out_path in jvp_outputs
+        }
+        return {out_path: (out - out) / 1.0 for out_path, out in base.items()}
+
     result: dict[str, ArrayLike] = {}
-    for group_eps, group_paths in groups.items():
+    for group_eps, group_paths in nonzero_groups.items():
         # Construct directional perturbation
         inputs_plus_dict = inputs_dict.copy()
         inputs_minus_dict = inputs_dict.copy()
