@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from .docker_client import _get_io_callable, _run_process
+from .docker_client import get_io_callable, run_process
 from .serving import (
     DEFAULT_STARTUP_TIMEOUT,
     PortInUseError,
@@ -484,9 +484,9 @@ def run(
 
     command_line = [*_runtime_command(python_executable), command, *args]
     logger.debug("Running %s", command_line)
-    returncode, stdout, stderr = _run_process(
+    returncode, stdout, stderr = run_process(
         command_line,
-        stream_stderr=_get_io_callable(stream_logs, sys.stderr.write),
+        stream_stderr=get_io_callable(stream_logs, sys.stderr.write),
         env=env,
     )
     if returncode != 0:

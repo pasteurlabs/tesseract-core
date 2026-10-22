@@ -38,7 +38,7 @@ def _get_docker_executable() -> list_[str]:  # noqa: UP006
     return list(docker_executable)
 
 
-def _get_io_callable(
+def get_io_callable(
     stream: BoolOrCallable,
     default_stream: Callable[[str], Any],
 ) -> Callable[[str], Any] | None:
@@ -84,7 +84,7 @@ def _read_stream(
                 echo_to.flush()
 
 
-def _run_process(
+def run_process(
     cmd: list[str],
     *,
     merge_stderr: bool = False,
@@ -93,6 +93,9 @@ def _run_process(
     env: dict[str, str] | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run a subprocess with threaded stream reading.
+
+    Not specific to Docker: :func:`~tesseract_core.sdk.local_client.run` uses it
+    to run a Tesseract from source, which is what ``env`` is for.
 
     Args:
         cmd: Command to execute.
@@ -404,10 +407,10 @@ class Images:
             secrets=secrets,
         )
 
-        returncode, stdout_data, _ = _run_process(
+        returncode, stdout_data, _ = run_process(
             build_cmd,
             merge_stderr=True,
-            stream_stdout=_get_io_callable(stream_logs, sys.stdout.write),
+            stream_stdout=get_io_callable(stream_logs, sys.stdout.write),
         )
 
         if returncode != 0:
@@ -937,10 +940,10 @@ class Containers:
 
         logger.debug(f"Running command: {full_cmd}")
 
-        returncode, stdout_data, stderr_data = _run_process(
+        returncode, stdout_data, stderr_data = run_process(
             full_cmd,
-            stream_stdout=_get_io_callable(stream_stdout, sys.stdout.write),
-            stream_stderr=_get_io_callable(stream_stderr, sys.stderr.write),
+            stream_stdout=get_io_callable(stream_stdout, sys.stdout.write),
+            stream_stderr=get_io_callable(stream_stderr, sys.stderr.write),
         )
 
         if returncode != 0:

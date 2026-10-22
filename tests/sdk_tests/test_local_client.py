@@ -412,7 +412,7 @@ def test_run_in_debug_mode_reports_where_to_attach(dummy_api_path, monkeypatch, 
     ran = []
     monkeypatch.setattr(
         local_client,
-        "_run_process",
+        "run_process",
         lambda command, **kwargs: ran.append(kwargs["env"]) or (0, b"", b""),
     )
     caplog.set_level(logging.INFO, logger="tesseract")
