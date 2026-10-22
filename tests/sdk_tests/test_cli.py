@@ -372,8 +372,14 @@ def test_container_options_are_refused_for_a_source_path(
     )
 
 
+@pytest.mark.parametrize("debug", [True, False])
 def test_run_passes_its_options_to_a_source(
-    cli_runner, dummy_tesseract_package, docker_is_off_limits, monkeypatch, tmp_path
+    cli_runner,
+    dummy_tesseract_package,
+    docker_is_off_limits,
+    monkeypatch,
+    tmp_path,
+    debug,
 ):
     calls = []
     monkeypatch.setattr(
@@ -392,9 +398,9 @@ def test_run_passes_its_options_to_a_source(
             "--profiling",
             "--input-path",
             str(tmp_path),
-            "--debug",
             "--python-executable",
             sys.executable,
+            *(["--debug"] if debug else []),
         ],
     )
 
@@ -406,15 +412,21 @@ def test_run_passes_its_options_to_a_source(
             "output_path": None,
             "output_format": None,
             "output_file": None,
-            "runtime_config": {"debug": True},
+            "runtime_config": {"debug": debug},
             "python_executable": Path(sys.executable),
             "stream_logs": cli_module.logger.info,
         }
     ]
 
 
+@pytest.mark.parametrize("debug", [True, False])
 def test_serve_passes_its_options_to_a_source(
-    cli_runner, dummy_tesseract_package, docker_is_off_limits, monkeypatch, tmp_path
+    cli_runner,
+    dummy_tesseract_package,
+    docker_is_off_limits,
+    monkeypatch,
+    tmp_path,
+    debug,
 ):
     calls = []
     monkeypatch.setattr(
@@ -436,12 +448,12 @@ def test_serve_passes_its_options_to_a_source(
             "0.0.0.0",
             "--num-workers",
             "2",
-            "--debug",
             "--skip-health-check",
             "--startup-timeout",
             "5",
             "--python-executable",
             sys.executable,
+            *(["--debug"] if debug else []),
         ],
     )
 
@@ -455,7 +467,7 @@ def test_serve_passes_its_options_to_a_source(
             "input_path": str(tmp_path),
             "output_path": None,
             "output_format": None,
-            "runtime_config": {"debug": True},
+            "runtime_config": {"debug": debug},
             "python_executable": Path(sys.executable),
             "skip_health_check": True,
             "startup_timeout": 5.0,
