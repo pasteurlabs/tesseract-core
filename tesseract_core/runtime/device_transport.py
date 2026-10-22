@@ -33,6 +33,8 @@ The interface follows the lifecycle the ``cuda_ipc`` code already uses:
 from __future__ import annotations
 
 import abc
+import importlib
+import threading
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -116,10 +118,33 @@ class DeviceTransport(abc.ABC):
 #
 # Transports register here by name, keyed by their ``gpu_transport`` value, so
 # the encode/decode dispatch and the eventual negotiation endpoint go through
-# one table rather than a chain of ``if encoding == ...`` branches. Built-in
-# transports are registered by the runtime package ``__init__``.
+# one table rather than a chain of ``if encoding == ...`` branches.
+#
+# Built-in transports register on the first lookup rather than in the runtime
+# package's ``__init__``. A thread that imports a runtime submodule while another
+# thread still runs that ``__init__`` can get the partly initialized package, and
+# would find no transports.
 
 _TRANSPORTS: dict[str, DeviceTransport] = {}
+
+# (module, class name) of each built-in transport.
+_BUILTIN_TRANSPORTS = (("tesseract_core.runtime.cuda.ipc", "CudaIpcTransport"),)
+_BUILTINS_LOCK = threading.Lock()
+_builtins_registered = False
+
+
+def _register_builtin_transports() -> None:
+    """Register the built-in transports, once per process."""
+    global _builtins_registered
+    if _builtins_registered:
+        return
+    with _BUILTINS_LOCK:
+        if _builtins_registered:
+            return
+        for module, class_name in _BUILTIN_TRANSPORTS:
+            transport = getattr(importlib.import_module(module), class_name)()
+            _TRANSPORTS.setdefault(transport.name, transport)
+        _builtins_registered = True
 
 
 def register_transport(transport: DeviceTransport) -> DeviceTransport:
@@ -130,6 +155,7 @@ def register_transport(transport: DeviceTransport) -> DeviceTransport:
 
 def get_transport(name: str) -> DeviceTransport:
     """Look up a registered transport by name."""
+    _register_builtin_transports()
     if name not in _TRANSPORTS:
         raise KeyError(
             f"No device transport registered under {name!r} "
@@ -148,4 +174,5 @@ def available_transports() -> tuple[str, ...]:
     A caller deciding what to offer a client must apply that gating itself and
     not treat this list as the enabled set.
     """
+    _register_builtin_transports()
     return tuple(sorted(_TRANSPORTS))
