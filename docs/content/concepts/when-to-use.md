@@ -11,16 +11,16 @@ This page helps you decide when that trade pays off, and points to simpler answe
 
 ## When it fits
 
-Tesseract pays off most when all four of these hold:
+Tesseract pays off most for a component that meets all four of these conditions:
 
-| Condition                         | Typical reason                                                                                       | If it doesn't hold                                                                                                                                                                                                          |
+| Condition                         | Typical reason                                                                                       | If not                                                                                                                                                                                                                      |
 | --------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A rewrite is off the table**    | The code is validated, proprietary, decades in the making, or a model trained on data you don't have | Rewrite it in JAX or PyTorch. Textbook functions and small ODE systems are better as native code.                                                                                                                           |
 | **You need gradients through it** | It sits inside an optimizer, a sampler, or a training loop                                           | A Tesseract without derivative endpoints still works, but a plain service or script may be all you need.                                                                                                                    |
 | **It needs its own process**      | Its dependencies, language runtime, global state, or autodiff framework clash with yours             | Wrap it in a `jax.custom_vjp` or `torch.autograd.Function` and call it in-process, or use a bridge the solver ships, such as Firedrake's `firedrake.ml.pytorch` and `firedrake.ml.jax`.                                     |
 | **Each call does real work**      | A call costs a few milliseconds plus the time to move its arrays                                     | Batch calls, or load the Tesseract in-process with `Tesseract.from_tesseract_api`. {doc}`/content/concepts/performance` has measurements and other options. Long chains of cheap calls, like MCMC steps, are the hard case. |
 
-```{admonition} Beyond the obvious
+```{admonition} There are many reasons to use Tesseract
 :class: tip
 
 Tesseract also helps with:

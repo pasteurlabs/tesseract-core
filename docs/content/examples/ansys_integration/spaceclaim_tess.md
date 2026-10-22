@@ -155,7 +155,7 @@ The `.scscript` preperation is unique to this grid fin example, with the user in
 :pyobject: _safereplace
 ```
 
-Once the `.scscript` is ready the final step is to run SpaceClaim. Here it is easy to see how this process could be extended to any software that is running on the host machine. For example Ansys Fluent could also be wrapped as a Tesseract served on its host, potentially using an adjoint solver to produce gradient information, allowing the Tesseract to be differentiable.
+Once the `.scscript` is ready the final step is to run SpaceClaim. The same approach extends to any software that runs on the host machine. For example Ansys Fluent could also be wrapped as a Tesseract served on its host, potentially using an adjoint solver to produce gradient information, allowing the Tesseract to be differentiable.
 
 ```{literalinclude} ../../../../demo/_showcase/ansys-shapeopt/spaceclaim/tesseract_api.py
 :language: python

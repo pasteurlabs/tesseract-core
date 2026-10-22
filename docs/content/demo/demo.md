@@ -104,7 +104,7 @@ SpaceClaim served without a container, and MAPDL with an analytic adjoint.
 
 ## Learn the mechanics
 
-These components are easy to rewrite in JAX or PyTorch, so read them as walkthroughs of the mechanics, not as examples of when to use Tesseract (see {doc}`/content/concepts/when-to-use`).
+These components are small enough to rewrite in JAX or PyTorch, so read them as walkthroughs of the mechanics, not as examples of when to use Tesseract (see {doc}`/content/concepts/when-to-use`).
 
 ::::{grid} 1 2 3 3
 :gutter: 3
