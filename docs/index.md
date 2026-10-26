@@ -4,7 +4,7 @@ html_theme.sidebar_secondary.remove: true
 sd_hide_title: true
 html_class: landing-page
 og:title: "Tesseract — Universal components for differentiable scientific computing"
-og:description: "Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation. Open source."
+og:description: "Optimize, calibrate, and train through solvers in any language or framework. Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation. Open source."
 ---
 
 # Tesseract
@@ -29,14 +29,20 @@ og:description: "Tesseract wraps any solver behind a typed interface with deriva
 
 :::::{div} landing-hero-text
 
-:::{div} landing-hero-tagline
+:::{div} landing-hero-eyebrow
 Universal components for differentiable scientific computing
 :::
 
+:::{div} landing-hero-headline
+Optimize, calibrate, and train through solvers in any language or framework
+:::
+
 :::{div} landing-hero-subtitle
-Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
+Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
 Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 :::
+
+:::::
 
 :::{div} landing-cta
 {bdg-ref-primary-line}`Get started <content/tutorials/get-started>`
@@ -44,8 +50,6 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
-
-:::::
 
 ::::::
 
@@ -64,40 +68,38 @@ Tesseract is for differentiable programs that need to reach outside their own fr
 :::{grid-item-card} Wrap tools you can't replace
 :class-card: feature-card
 
-Validated legacy codes, commercial CAD and FEA, closed-source binaries.
-Mix adjoints, autodiff, and finite differences in one gradient.
-:::
-
-:::{grid-item-card} Train through any solver
-:class-card: feature-card
-
-Put a Fortran, Julia, or C++ solver inside a PyTorch or JAX training loop.
-:::
-
-:::{grid-item-card} Verify gradients
-:class-card: feature-card
-
-Test every derivative against finite differences before an optimizer relies on it.
-:::
-
-:::{grid-item-card} Keep environments apart
-:class-card: feature-card
-
-Each component runs with its own dependencies.
-Shared memory and GPU transfer keep calls {doc}`cheap <content/concepts/performance>`.
+Get validated legacy codes, {doc}`commercial CAD and FEA <content/examples/ansys_gallery>`, and closed-source binaries to play well alongside modern differentiable components.
 :::
 
 :::{grid-item-card} Call it from JAX and PyTorch
 :class-card: feature-card
 
-Gradients flow through `jax.grad` and `torch.autograd` as if the component were native.
+{doc}`Fortran <content/demo/enzyme-lfortran>`, Julia, or C++ code becomes an operation that `jax.grad` and `torch.autograd` differentiate like native code.
+:::
+
+:::{grid-item-card} Verify gradients
+:class-card: feature-card
+
+{doc}`Test every derivative <content/how-to/check-gradients>` against finite differences before an optimizer relies on it.
+:::
+
+:::{grid-item-card} Fast process interfaces
+:class-card: feature-card
+
+Each component runs in its own process, with its own dependencies.
+Shared memory and GPU-native transport keep calls {doc}`cheap <content/concepts/performance>`.
+:::
+
+:::{grid-item-card} Mix gradient strategies
+:class-card: feature-card
+
+Combine adjoints, forward- and reverse-mode autodiff, and finite differences in {doc}`one end-to-end gradient <content/demo/fem-shape-optimization>`.
 :::
 
 :::{grid-item-card} Hand it to someone else
 :class-card: feature-card
 
-Schemas and API docs come from your code.
-A container image takes it to other machines.
+OpenAPI schemas and API docs are auto-generated from your code, and `tesseract build` takes it to other machines as a {doc}`container image <content/how-to/deploy>`.
 :::
 
 ::::

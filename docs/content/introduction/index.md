@@ -1,11 +1,11 @@
 ---
 og:title: "Tesseract Core Documentation"
-og:description: "Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation."
+og:description: "Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation."
 ---
 
 # Tesseract Core documentation
 
-Tesseract wraps any solver behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
+Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
 New here? Start with the [Get started](../tutorials/get-started.md) tutorial, or read [](../concepts/when-to-use.md) first.
 
 ## What is a Tesseract?
