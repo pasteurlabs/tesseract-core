@@ -48,15 +48,19 @@ in memory beyond the current step:
 :language: python
 ```
 
-Serve it with `json+binref` output and the `.bin` files are written to the
-mounted `--output-path`; the client reads them back from there:
+Request `json+binref` output and the `.bin` files are written to the output
+path, where the client reads them back:
 
 ```bash
-tesseract run binref_passthrough apply \
+TESSERACT_API_PATH=examples/binref_passthrough/tesseract_api.py tesseract-runtime \
     --output-path ./output \
     --output-format json+binref \
-    '{"inputs": {"size": 16, "steps": 20}}'
+    apply '{"inputs": {"size": 16, "steps": 20}}'
 ```
+
+For a container image, `tesseract run binref_passthrough apply` takes the same
+`--output-path` and `--output-format` options and mounts the output path into
+the container.
 
 Nothing changes for the caller. The SDK decodes the references into NumPy arrays
 transparently:
@@ -64,8 +68,10 @@ transparently:
 ```python
 from tesseract_core import Tesseract
 
-with Tesseract.from_image(
-    "binref_passthrough", output_format="json+binref", output_path="./output"
+with Tesseract.from_source(
+    "examples/binref_passthrough/tesseract_api.py",
+    output_format="json+binref",
+    output_path="./output",
 ) as sim:
     out = sim.apply({"size": 16, "steps": 20})
 

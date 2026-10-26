@@ -92,7 +92,6 @@ redirects = {
     "content/how-to/design-patterns": f"{_R}/concepts/design-patterns/",
     "content/creating-tesseracts/pipelines": f"{_R}/how-to/pipelines/",
     "content/creating-tesseracts/deploy": f"{_R}/how-to/deploy/",
-    "content/creating-tesseracts/llm-assistance": f"{_R}/how-to/llm-assistance/",
     "content/creating-tesseracts/advanced": f"{_R}/how-to/defining-apis/",
     "content/using-tesseracts/use": f"{_R}/tutorials/interact/",
     "content/how-to/use": f"{_R}/tutorials/interact/",
