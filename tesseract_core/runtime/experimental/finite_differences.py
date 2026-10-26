@@ -11,6 +11,7 @@ implementing analytical gradients.
     These are experimental and the API may change in future releases.
 """
 
+import warnings
 from collections.abc import Callable, Mapping
 from typing import Literal
 
@@ -758,3 +759,67 @@ def _compute_vjp_stochastic(
             weighted_output_diff = weighted_output_delta / (2 * eps[in_path])
             vjp_contrib = weighted_output_diff / delta
             result[in_path] += vjp_contrib / num_samples
+
+
+def estimate_eps(
+    apply_fn: Callable,
+    inputs: BaseModel,
+    input_paths: set[str],
+    output_paths: set[str],
+    *,
+    rtol: float = 1e-3,
+) -> dict[str, float]:
+    """Estimate a finite difference step for each input path.
+
+    The step starts at 1e-2 times the scale of the path (the root mean square
+    of its values, or 1 if they are all zero) and shrinks tenfold until two
+    successive central differences agree to ``rtol``. If none agree within six
+    steps, it warns and keeps the first step.
+
+    Args:
+        apply_fn: The Tesseract's apply function with signature ``apply(inputs) -> outputs``.
+        inputs: The input data at which to estimate the steps.
+        input_paths: Set of input paths to estimate a step for.
+        output_paths: Set of output paths whose differences must agree.
+        rtol: How closely two successive differences must agree.
+
+    Returns:
+        Dictionary mapping input paths to steps, to pass as ``eps``.
+
+    Example:
+        Estimate the steps once and reuse them::
+
+            eps = estimate_eps(apply, inputs, {"x"}, {"y"})
+            jac = finite_difference_jacobian(apply, inputs, {"x"}, {"y"}, eps=eps)
+
+    .. note::
+
+        This function is experimental and its API may change in future releases.
+    """
+    inputs_dict = inputs.model_dump()
+
+    steps = {}
+    for in_path in input_paths:
+        x = np.asarray(get_at_path(inputs_dict, in_path), dtype=np.float64)
+        first = 1e-2 * (float(np.sqrt(np.mean(x**2))) or 1.0)
+        tangent = {in_path: np.ones_like(x)}
+
+        eps, previous = first, None
+        for _ in range(6):
+            current = finite_difference_jvp(
+                apply_fn, inputs, {in_path}, output_paths, tangent, eps=eps
+            )
+            if previous is not None and all(
+                np.allclose(current[p], previous[p], rtol=rtol, atol=0)
+                for p in output_paths
+            ):
+                steps[in_path] = 10 * eps
+                break
+            eps, previous = eps / 10, current
+        else:
+            warnings.warn(
+                f"No step for '{in_path}' gave agreeing differences; using {first}.",
+                stacklevel=2,
+            )
+            steps[in_path] = first
+    return steps
