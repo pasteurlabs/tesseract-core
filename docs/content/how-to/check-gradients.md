@@ -9,7 +9,7 @@ og:description: "Compare a Tesseract's Jacobian, JVP, and VJP endpoints against 
 To implement gradients in the first place, see {doc}`/content/concepts/differentiable-programming` and the {doc}`finite-difference helpers </content/examples/building-blocks/finitediff>`.
 ```
 
-A wrong gradient usually doesn't raise an error. The optimizer converges slowly or to the wrong point, while the forward results look fine. `check-gradients` compares each derivative endpoint of a Tesseract against finite differences of its `apply` endpoint, so you can test a gradient as soon as you write it.
+A wrong gradient usually doesn't raise an error. Instead, the optimizer converges slowly or to the wrong point, while the forward results look fine. `check-gradients` compares each derivative endpoint of a Tesseract against finite differences of its `apply` endpoint, so you can test a gradient as soon as you write it.
 
 ## Check a `tesseract_api.py`
 

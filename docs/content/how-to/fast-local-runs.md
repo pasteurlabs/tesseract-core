@@ -141,7 +141,8 @@ with (
 For a containerized Tesseract, shared memory needs a Linux host. On macOS and
 Windows, the container runs inside a Linux VM, so the bind mounts cross the VM
 boundary and the container does not see the host's `tmpfs` as the same memory.
-`json+binref` on an ordinary directory still works there. The size cap of
+`json+binref` on an ordinary directory still works there. `from_source` has no
+such limitation (see [Shared memory on macOS](#shared-memory-macos)). The size cap of
 `/dev/shm` is separate from any container memory limit set with `memory=...`.
 ```
 
@@ -169,6 +170,8 @@ Allocating too much memory relative to your RAM can crash your machine
 With very large payloads it may be safer to stick with `json+binref` on an
 ordinary disk-backed directory.
 ```
+
+(shared-memory-macos)=
 
 ### Shared memory on macOS
 
