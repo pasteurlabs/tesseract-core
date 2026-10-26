@@ -6,6 +6,7 @@ These spawn real ``tesseract-runtime serve`` processes (but no containers), so
 they exercise the actual startup / health-check / removal path.
 """
 
+import json
 import logging
 import os
 import re
@@ -359,6 +360,88 @@ def test_serve_on_explicit_port(dummy_api_path):
         assert served.url.endswith(f":{port}")
     finally:
         served.remove(force=True)
+
+
+def test_a_tesseract_on_every_interface_is_reached_on_loopback(tmp_path):
+    served = local_client.TesseractProcess(
+        process=None,
+        host_ip="0.0.0.0",
+        port=8000,
+        log_path=tmp_path / "log",
+        python_executable=sys.executable,
+        api_path=tmp_path / "tesseract_api.py",
+    )
+    assert served.url == "http://127.0.0.1:8000"
+
+
+def test_serve_on_a_port_range(dummy_api_path):
+    """A range is picked from, as `tesseract serve --port 8000-8080` does for a container."""
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, port="49200-49300"
+    )
+    try:
+        assert 49200 <= served.port < 49300
+    finally:
+        served.remove(force=True)
+
+
+def test_run_a_command(dummy_api_path, tmp_path):
+    payload = json.dumps({"inputs": {"a": [1.0, 2.0], "b": [3.0, 4.0]}})
+    logs = []
+
+    stdout, stderr = local_client.run(
+        dummy_api_path,
+        "apply",
+        [payload],
+        output_path=tmp_path,
+        output_file="result.json",
+        python_executable=sys.executable,
+        stream_logs=logs.append,
+    )
+
+    assert stdout == ""
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["result"]["data"]["buffer"] == [6.0, 10.0]
+    # Streamed lines are what was captured, one by one.
+    assert "".join(f"{line}\n" for line in logs) == stderr
+
+
+def test_run_reports_a_failing_command(dummy_api_path):
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        local_client.run(
+            dummy_api_path,
+            "apply",
+            ['{"inputs": {}}'],
+            python_executable=sys.executable,
+        )
+
+    assert raised.value.returncode != 0
+    assert b"Field required" in raised.value.stderr
+
+
+def test_run_in_debug_mode_reports_where_to_attach(dummy_api_path, monkeypatch, caplog):
+    """The child waits for a debugger, so the address must reach the user before it does."""
+    ran = []
+    monkeypatch.setattr(
+        local_client,
+        "run_process",
+        lambda command, **kwargs: ran.append(kwargs["env"]) or (0, b"", b""),
+    )
+    caplog.set_level(logging.INFO, logger="tesseract")
+
+    local_client.run(
+        dummy_api_path,
+        "apply",
+        ["{}"],
+        runtime_config={"debug": True},
+        python_executable=sys.executable,
+    )
+
+    reported = re.search(r"Attach a debugger to ([\d.]+):(\d+)", caplog.text)
+    assert reported is not None, caplog.text
+    (env,) = ran
+    assert env["TESSERACT_DEBUG"] == "1"
+    assert env["TESSERACT_DEBUGPY_PORT"] == reported.group(2)
 
 
 def test_endpoints_over_subprocess(dummy_api_path, sample_inputs):
@@ -751,6 +834,24 @@ def test_startup_timeout_is_reported(dummy_api_path, monkeypatch):
         local_client.serve(
             dummy_api_path, python_executable=sys.executable, startup_timeout=1.0
         )
+
+
+def test_interrupted_startup_leaves_nothing_behind(dummy_api_path, monkeypatch):
+    """Ctrl+C before it is healthy must not leave a Tesseract starting unattended."""
+    started = []
+
+    def interrupted(served, *args, **kwargs):
+        started.append(served)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(local_client, "wait_for_health_or_dispose", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        local_client.serve(dummy_api_path, python_executable=sys.executable)
+
+    (served,) = started
+    assert not local_client.is_running(served)
+    assert not served.log_path.exists()
 
 
 def test_a_venv_on_our_base_python_is_a_different_interpreter(tmp_path):

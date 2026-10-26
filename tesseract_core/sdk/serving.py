@@ -136,8 +136,25 @@ PORT_CONFLICT_MARKERS = (
 )
 
 
+DEFAULT_PORT_RANGE = (49152, 65535)
+
+
+def port_range(port: int | str | None) -> tuple[int, int] | None:
+    """The range to pick a port from for a ``--port`` value, or None if it names one port.
+
+    A range such as ``"8000-8080"`` is picked from, and so is no port at all, from
+    the range :func:`get_free_port` uses by default. A single port is used as given.
+    """
+    if not port:
+        return DEFAULT_PORT_RANGE
+    if "-" not in str(port):
+        return None
+    start, end = str(port).split("-")
+    return int(start), int(end)
+
+
 def get_free_port(
-    within_range: tuple[int, int] = (49152, 65535),
+    within_range: tuple[int, int] = DEFAULT_PORT_RANGE,
     exclude: Sequence[int] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""

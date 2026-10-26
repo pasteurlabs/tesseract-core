@@ -73,8 +73,8 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
         raise UserError(
             f"No tesseract_config.yaml next to {api_path.name}, so there is no "
             "way to tell what this Tesseract needs installed. Add one, or pass "
-            "`python_executable` to name an interpreter that already has what "
-            "it needs."
+            "`python_executable` (`--python-executable` on the CLI) to name an "
+            "interpreter that already has what it needs."
         )
 
     try:
@@ -96,9 +96,9 @@ def _uv() -> tuple[str, ...]:
             "uv is needed to build an environment for this Tesseract and was "
             "not found on PATH. Install it "
             "(https://docs.astral.sh/uv/getting-started/installation/), point "
-            "TESSERACT_UV_EXECUTABLE at it, or pass `python_executable` to name "
-            "an interpreter that already has the Tesseract's dependencies and "
-            "`tesseract-core[runtime]`."
+            "TESSERACT_UV_EXECUTABLE at it, or pass `python_executable` "
+            "(`--python-executable` on the CLI) to name an interpreter that "
+            "already has the Tesseract's dependencies and `tesseract-core[runtime]`."
         )
     return uv
 
@@ -112,9 +112,9 @@ def _conda() -> tuple[str, ...]:
             f"(`{conda[0]}`) was not found. Install it "
             "(https://docs.conda.io/projects/conda/en/latest/user-guide/install/), "
             "point TESSERACT_CONDA_EXECUTABLE at it or at a conda-compatible tool "
-            "such as mamba, or pass `python_executable` to name an interpreter "
-            "that already has the Tesseract's dependencies and "
-            "`tesseract-core[runtime]`."
+            "such as mamba, or pass `python_executable` (`--python-executable` on "
+            "the CLI) to name an interpreter that already has the Tesseract's "
+            "dependencies and `tesseract-core[runtime]`."
         )
     return conda
 
@@ -470,14 +470,15 @@ def resolve_python_executable(api_path: Path) -> Path:
     stamp = _expected_stamp(build_config, requirements_file)
 
     if _stamp_matches(dest, stamp):
-        logger.debug("Serving %s from %s", api_path.name, dest)
+        logger.debug("Using the environment for %s at %s", api_path.name, dest)
         return _python_in(dest)
 
     if not os.access(src_dir, os.W_OK):
         raise UserError(
             f"Cannot build an environment for {api_path.name}: {src_dir} is not "
-            "writable. Make it writable, or pass `python_executable` to name an "
-            "interpreter that already has what the Tesseract needs."
+            "writable. Make it writable, or pass `python_executable` "
+            "(`--python-executable` on the CLI) to name an interpreter that "
+            "already has what the Tesseract needs."
         )
 
     with _build_lock(dest):
