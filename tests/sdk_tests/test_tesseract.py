@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from textwrap import dedent
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -253,6 +254,55 @@ def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
 
     # The edit stayed contained to this instance's snapshot, not the global.
     assert get_config().profiling is False
+
+
+def test_Tesseract_from_tesseract_api_resolves_paths_against_own_config(
+    tmp_path, monkeypatch
+):
+    """InputPath / OutputPath resolve against the instance's paths, not the cwd (#880)."""
+    api_file = tmp_path / "tesseract_api.py"
+    api_file.write_text(
+        dedent(
+            """
+            from pathlib import Path
+
+            from pydantic import BaseModel
+            from tesseract_core.runtime.config import get_config
+            from tesseract_core.runtime.experimental import InputPath, OutputPath
+
+            class InputSchema(BaseModel):
+                data: InputPath
+
+            class OutputSchema(BaseModel):
+                read: str
+                written: OutputPath
+
+            def apply(inputs: InputSchema) -> OutputSchema:
+                outfile = Path(get_config().output_path) / "result.txt"
+                outfile.write_text("result")
+                return OutputSchema(read=inputs.data.read_text(), written=outfile)
+            """
+        )
+    )
+
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "data.txt").write_text("right")
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+
+    # A same-named decoy in the cwd must not be picked up.
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "data.txt").write_text("wrong")
+    monkeypatch.chdir(cwd)
+
+    tess = Tesseract.from_tesseract_api(
+        api_file, input_path=input_dir, output_path=output_dir
+    )
+    result = tess.apply({"data": "data.txt"})
+    assert result["read"] == "right"
+    assert Path(result["written"]) == Path("result.txt")
 
 
 def test_rejects_imported_module(dummy_tesseract_module):

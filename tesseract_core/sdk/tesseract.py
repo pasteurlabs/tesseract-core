@@ -2182,11 +2182,6 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        if InputSchema is not None:
-            parsed_payload = InputSchema.model_validate(payload)
-        else:
-            parsed_payload = None
-
         # Set up run directory for logging
         if run_id is None:
             run_id = str(uuid.uuid4())
@@ -2205,10 +2200,17 @@ class LocalClient:
             )
 
         # Run under this instance's own config rather than whatever the global
-        # happens to be. Any update_config() the endpoint makes is captured back
-        # into the snapshot afterwards, so it persists to later calls (matching
-        # the containerized case).
+        # happens to be. This includes schema validation, which resolves
+        # InputPath / OutputPath against the configured input / output paths.
+        # Any update_config() the endpoint makes is captured back into the
+        # snapshot afterwards, so it persists to later calls (matching the
+        # containerized case).
         with override_config(self._config_snapshot):
+            if InputSchema is not None:
+                parsed_payload = InputSchema.model_validate(payload)
+            else:
+                parsed_payload = None
+
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
 
@@ -2233,11 +2235,13 @@ class LocalClient:
             finally:
                 self._config_snapshot = snapshot_config()
 
-        if OutputSchema is not None:
-            # Validate via schema, then dump to stay consistent with other clients
-            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
-                result = OutputSchema.model_validate(result).model_dump()
-            else:
-                result = TypeAdapter(OutputSchema).validate_python(result)
+            if OutputSchema is not None:
+                # Validate via schema, then dump to stay consistent with other clients
+                if isinstance(OutputSchema, type) and issubclass(
+                    OutputSchema, BaseModel
+                ):
+                    result = OutputSchema.model_validate(result).model_dump()
+                else:
+                    result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result
