@@ -38,22 +38,13 @@ A deeper problem was the data communication overhead. Each array left the GPU, w
 
 With the GPU transport, arrays now stay where they are. Only a 64-byte handle is sent across the process boundary, and the data moves only within the memory of the GPU, which both processes share. Together with batching and a cache for the solver's forward pass, this brings Multi-Agent-DPC's training step within 20% of importing the solver directly. For the much larger arrays common in 3D simulation, transport is now two orders of magnitude faster than the trip through host memory.
 
-## Why put a Tesseract in a training loop?
-
+```{admonition} Why not just import the solver?
 If you can import a component, import it. The Multi-Agent-DPC team came to the same conclusion, and the code for CINOC imports its solvers directly.
 
 But often you can't. Many entries to this year's [Tesseract Hackathon](2026-09-30-tesseract-hackathon-winners.md) were built around components that did not want to be imported into Python directly. [δSnowSac](https://github.com/kasProg/dSnowSac) trains a PyTorch network through NOAA's Fortran streamflow models, [PRISMO](https://github.com/benvial/prismo) takes one JAX gradient through a Julia semiconductor solver and a FEniCS optics solver, and [Differentiable Silicon](https://github.com/hozaifa1/differentiable-silicon) dispatches to a proprietary TCAD binary over SSH. [Mosaic](https://github.com/pasteurlabs/mosaic) puts solvers from deal.II and OpenFOAM to JAX-FEM and XLB behind the same Tesseract interface, each with its own dependencies. Tesseract puts such a component in its own process or container and still allows it to participate in differentiable pipelines (see also [when to use Tesseract](../content/concepts/when-to-use.md)).
+```
 
 % TODO(publish): the when-to-use link resolves only after #821 merges.
-
-So far, using Tesseract hasn't really been possible for GPU-based training through a differentiable solver, such as:
-
-- **Solver in the loop.** A network learns to correct a coarse simulation, and its loss is computed after unrolling the solver + network system for many steps ([Um et al., 2020](https://arxiv.org/abs/2007.00016); [Kochkov et al., 2021](https://arxiv.org/abs/2102.01010)).
-- **Learned closures.** A network supplies a term the simulator can't compute efficiently, such as subgrid-scale stresses in turbulence, and is trained through the simulation ([List et al., 2022](https://arxiv.org/abs/2202.06988); [NeuralGCM](https://arxiv.org/abs/2311.07222) for weather and climate). Idealized example: Our [learned closure demo](../content/demo/learned-closure.ipynb) does this for a viscosity model in Burgers' equation.
-- **Control and reinforcement learning.** A network is learning to interact with a physical system by training against a differentiable simulator ([Holl et al., 2020](https://arxiv.org/abs/2001.07457)), as in Multi-Agent-DPC, which builds on [differentiable predictive control](https://arxiv.org/abs/2011.03699).
-- **Served surrogates.** A trained surrogate runs as a service on the GPU, and an optimizer or pipeline calls it over and over.
-
-In all of these, the network and the solver both run on the GPU, and training alternates between them thousands of times. Sending a single 256³ float32 field through the host to a Tesseract and getting one back takes over half a second. With the new GPU transport, it takes about 6 ms.
 
 ## A faster, GPU-native Multi-Agent-DPC
 
@@ -61,7 +52,6 @@ Let's turn on GPU transport for the Multi-Agent-DPC training loss, with the solv
 
 ```python
 import os
-import sys
 
 # NEW: two JAX processes now share one GPU, so neither should claim 75% of it at startup.
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -73,7 +63,6 @@ from tesseract_jax import apply_tesseract
 
 solver = Tesseract.from_source(
     "tesseracts/solverHeat_decentralized/tesseract_api.py",
-    python_executable=sys.executable,
     gpu_transport="cuda_ipc",  # NEW: pass GPU arrays by handle (2)
 )
 
@@ -114,21 +103,33 @@ Here is one training step of Multi-Agent-DPC, that is, a batch of 32 rollouts fo
 | ------------------------------------------------------ | ---------------------: |
 | The original setup, on current Tesseract releases      |                  1.5 s |
 | Batched, solver on the GPU, arrays through host memory |                 261 ms |
-| Same, with `cuda_ipc` and the solver's VJP cache       |                 127 ms |
+| Same, with `cuda_ipc`                                  |                 209 ms |
+| Same, with the solver's VJP cache                      |                 127 ms |
 | Solver imported directly, one process (baseline)       |                 106 ms |
 
-The last factor of two comes from two changes of similar size: The GPU transport removes the trip through host memory, and the {py:func}`VJP cache <tesseract_core.runtime.experimental.set_jax_vjp_cache_size>`, an experimental option in Tesseract's JAX recipe, keeps the residuals of the forward pass so the gradient call doesn't rerun all 300 steps. What remains, about 20 ms per step, is mostly the fixed cost of two HTTP requests and the handle exchange.
+The GPU transport removes the trip through host memory, which saves about 50 ms per step. The {py:func}`VJP cache <tesseract_core.runtime.experimental.set_jax_vjp_cache_size>`, an experimental option in Tesseract's JAX recipe, saves another 80 ms by keeping the residuals of the forward pass, so the gradient call doesn't rerun all 300 steps. What remains, about 20 ms per step, is mostly the fixed cost of two HTTP requests and the handle exchange.
 
-A Multi-Agent-DPC call moves about 4.8 MB, which is modest. How much the transport matters depends mostly on how many bytes are sent across the boundary. The figure below isolates this with a Tesseract that only doubles its input.
+A Multi-Agent-DPC call moves about 4.8 MB in and out combined, which is modest. How much the transport matters depends mostly on how many bytes are sent across the boundary. The figure below isolates this with a Tesseract that only doubles its input.
 
 ```{figure} ../static/blog/2026-08-17-gpu-native-interop/ipc-benchmark.png
-:alt: "Log-log plot of median time per call against array size, from 1,000 to 100 million float32 elements. The host round trip rises from about 3 ms to about 3.2 s. A dashed line for json+binref, the host path with arrays exchanged as files on /dev/shm, starts at about 4 ms and rises to about 1 s. cuda_ipc stays near 4 ms up to a few million elements and rises to about 17 ms at 100 million, where a label notes it is 190 times faster than the host round trip. The host round trip is faster below about 28,000 elements. A horizontal line at 106 ms marks one Multi-Agent-DPC training step without Tesseract: cuda_ipc stays below it at every size, while the host round trip crosses it at a few million elements. A dotted vertical line at 600,000 elements marks a call that moves as many bytes as one Multi-Agent-DPC call. The same computation in-process takes between 0.13 and 0.6 ms."
+:alt: "Log-log plot of median time per call against array size, from 1,000 to 100 million float32 elements. The host round trip rises from about 3 ms to about 3.2 s. A dashed line for host (shmem), the host path with arrays exchanged as binary files on /dev/shm, starts at about 4 ms and rises to about 1 s. cuda_ipc stays near 4 ms up to a few million elements and rises to about 17 ms at 100 million, where a label notes it is 190 times faster than the host round trip. The host round trip is faster below about 28,000 elements. A horizontal line at 106 ms marks one Multi-Agent-DPC training step without Tesseract: cuda_ipc stays below it at every size, while the host round trip crosses it at a few million elements. A dotted vertical line at 600,000 elements marks a call that moves as many bytes as one Multi-Agent-DPC call. The same computation in-process takes between 0.13 and 0.6 ms."
 :class: blog-img-full
 
-Median time of one jitted `apply_tesseract` call to a Tesseract that doubles a float32 vector, on an NVIDIA A100 GPU. `json+binref` is the host path with arrays exchanged as binary files on `/dev/shm` instead of base64 text. For scale, the horizontal line marks one Multi-Agent-DPC training step with the solver imported directly, and the dotted line a call that moves as many bytes as one Multi-Agent-DPC call. The {download}`benchmark script </static/blog/2026-08-17-gpu-native-interop/ipc-benchmark.py>` reproduces the figure.
+Median time of one jitted `apply_tesseract` call to a Tesseract that doubles a float32 vector, on an NVIDIA A100 GPU. `host (base64)` is Tesseract's default host path. `host (shmem)` also copies through host memory, but exchanges arrays as binary files on `/dev/shm` (the `json+binref` format) instead of base64 text. For scale, the horizontal line marks one Multi-Agent-DPC training step with the solver imported directly, and the dotted line a call that moves as many bytes as one Multi-Agent-DPC call (2.4 MB each way). The {download}`benchmark script </static/blog/2026-08-17-gpu-native-interop/ipc-benchmark.py>` reproduces the figure.
 ```
 
 Below about 100 kB per call, the trip through host memory is the fastest option, because the GPU transport has a slightly higher fixed cost. Above that, the host path grows linearly by about 8 ms per megabyte, spent on copies and text encoding on the CPU, while `cuda_ipc` stays nearly flat. At 100 million values, or 400 MB, the GPU transport is 190 times faster than Tesseract's default host path, and still almost 60 times faster than [exchanging raw binary data via shared memory](../content/how-to/fast-local-runs.md).
+
+## Beyond Multi-Agent-DPC
+
+So far, using Tesseract hasn't really been possible for GPU-based training through a differentiable solver, such as:
+
+- **Solver in the loop.** A network learns to correct a coarse simulation, and its loss is computed after unrolling the solver + network system for many steps ([Um et al., 2020](https://arxiv.org/abs/2007.00016); [Kochkov et al., 2021](https://arxiv.org/abs/2102.01010)).
+- **Learned closures.** A network supplies a term the simulator can't compute efficiently, such as subgrid-scale stresses in turbulence, and is trained through the simulation ([List et al., 2022](https://arxiv.org/abs/2202.06988); [NeuralGCM](https://arxiv.org/abs/2311.07222) for weather and climate). Idealized example: Our [learned closure demo](../content/demo/learned-closure.ipynb) does this for a viscosity model in Burgers' equation.
+- **Control and reinforcement learning.** A network is learning to interact with a physical system by training against a differentiable simulator ([Holl et al., 2020](https://arxiv.org/abs/2001.07457)), as in Multi-Agent-DPC, which builds on [differentiable predictive control](https://arxiv.org/abs/2011.03699).
+- **Served surrogates.** A trained surrogate runs as a service on the GPU, and an optimizer or pipeline calls it over and over.
+
+In all of these, the network and the solver both run on the GPU, and training alternates between them thousands of times. Most move far bigger arrays than Multi-Agent-DPC. Sending a single 256³ float32 field (16.8 million values) through the host to a Tesseract and getting one back takes over half a second. With the new GPU transport, it takes about 6 ms.
 
 ## How the gradient flows up and down the stack
 
@@ -197,7 +198,7 @@ The next step is the craziest one: While XLA is in the middle of running a compi
 
 Another complication is that XLA allocates GPU memory through CUDA's [virtual memory management API](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/virtual-memory-management.html), which [does not support legacy CUDA IPC handles](https://developer.nvidia.com/blog/introducing-low-level-gpu-virtual-memory-management/). So the client first copies each array into a buffer it can export (and reuses those buffers from call to call). For PyTorch, Tesseract-Torch needs none of this. Its tensors already expose their device pointers to Python, so Tesseract-Torch calls the same client without native code, and with PyTorch's default allocator also without the extra copy.
 
-(Most mistakes in code like this return wrong numbers or quietly fall back to the host instead of crashing, so there was a lot of stress-testing involved. GPU tests reject any pointer that isn't in GPU memory, so an accidental trip through the host fails loudly.)
+Most mistakes in code like this return wrong numbers or quietly fall back to the host instead of crashing, so there was a lot of stress-testing involved. GPU tests reject any pointer that isn't in GPU memory, so an accidental trip through the host fails loudly. Some of that protection carries over to your code. A Tesseract created with `gpu_transport="cuda_ipc"` checks before its first call that the transport works between the two processes, and raises with the reason instead of falling back to the host. The {ref}`troubleshooting section of the how-to <gpu-transport-troubleshooting>` covers the cases this check can't catch, such as JAX itself running on the CPU.
 
 ## What's next
 
