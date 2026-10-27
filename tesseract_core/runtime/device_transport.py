@@ -5,13 +5,13 @@
 
 A *device transport* moves a GPU array's bytes from a producer process to a
 consumer process without a host round-trip. It is selected via the runtime's
-``gpu_transport`` config, independently of the host-array output format;
-``cuda_ipc`` is the first such transport. This module defines the common
-interface they share so further transports (VMM-fd map-and-read, and later
-cross-host NCCL/NIXL) slot in behind one dispatch path instead of each bolting a
-new encoder, wire format, and release hook onto the runtime.
+``gpu_transport`` config, independently of the host-array output format.
+``cuda_ipc`` and ``nixl`` are such transports. This module defines the
+interface they share, so the runtime encodes, decodes and releases arrays of
+any transport, including future ones such as VMM-fd map-and-read or NCCL,
+through one dispatch path.
 
-The interface follows the lifecycle the ``cuda_ipc`` code already uses:
+Each transport implements this lifecycle:
 
 * :meth:`DeviceTransport.register` -- encode side: pin the source array and
   return an opaque per-array handle.
@@ -101,7 +101,7 @@ class DeviceTransport(abc.ABC):
         """Decode side: materialise ``val`` into a fresh consumer-owned buffer.
 
         Returns the framework-agnostic on-GPU wrapper the consumer adopts
-        (``IpcDeviceArray`` for the CUDA transports), unchanged across
+        (``DeviceArray`` for the CUDA transports), unchanged across
         transports so the consumer-facing surface never forks.
         """
 

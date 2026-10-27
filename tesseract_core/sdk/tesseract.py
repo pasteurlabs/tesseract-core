@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     # every annotation below a string, so these names are never needed at
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
     from tesseract_core.runtime.config import ConfigSnapshot
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
 
 # Output serialization formats; single SDK-side definition lives in engine.
 OutputFormat: TypeAlias = engine.OutputFormat
@@ -257,7 +257,7 @@ def _fit_encoding_to_server(
 
 # GPU transports a client picks by itself when a server offers them, in order of
 # preference.
-_AUTO_GPU_TRANSPORTS = ("cuda_ipc",)
+_AUTO_GPU_TRANSPORTS = ("cuda_ipc", "nixl")
 
 
 class Tesseract:
@@ -383,11 +383,12 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             gpu_transport: GPU transport to enable on the served Tesseract and use for
                 this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
-                reference, which requires the container to have GPU access and
-                ``num_workers=1``. Independent of ``output_format``, which governs
-                CPU arrays. Resolved against ``runtime_config`` with the precedence
-                described in ``engine.serve``.
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
+                pass them by reference, which requires the container to have GPU
+                access and ``num_workers=1``. ``nixl`` also works across hosts and
+                runs the container on the host network. Independent of
+                ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -632,10 +633,11 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             gpu_transport: GPU transport to enable on the served Tesseract and use for
                 this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
-                reference, which needs no setup since processes on one host share an
-                IPC namespace. Independent of ``output_format``, which governs CPU
-                arrays. Resolved against ``runtime_config``, an explicit value winning.
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
+                pass them by reference, which needs no setup since processes on one
+                host share an IPC namespace and network. Independent of
+                ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config``, an explicit value winning.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -908,7 +910,7 @@ class Tesseract:
         or the ``gpu_transport`` it was created with, is returned once it is
         known to work. Otherwise this returns the first transport the server
         offers that works from this process, in the SDK's order of preference
-        (which currently holds only ``cuda_ipc``), and ``none`` otherwise, with
+        (``cuda_ipc``, then ``nixl``), and ``none`` otherwise, with
         a warning for each offered transport that does not work.
 
         Whether a transport works depends on how both processes are set up
@@ -1211,10 +1213,10 @@ def _subprocess_spawn_config(
     else:
         config_kwargs.setdefault("gpu_transport", "none")
 
-    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc"):
+    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc", "nixl"):
         raise ValueError(
             f"Unknown gpu_transport {config_kwargs['gpu_transport']!r}. "
-            "Supported values: 'none', 'cuda_ipc'."
+            "Supported values: 'none', 'cuda_ipc', 'nixl'."
         )
 
     return auto_dirs, dict(
@@ -1255,9 +1257,9 @@ def _import_runtime(module: str, feature: str) -> ModuleType:
         ) from exc
 
 
-def _import_cuda_ipc() -> ModuleType:
-    """Import the cuda_ipc runtime module, or explain the missing extra."""
-    return _import_runtime("cuda.ipc", "The 'cuda_ipc' GPU transport")
+def _import_cuda_arrays() -> ModuleType:
+    """Import the runtime's GPU array helpers, or explain the missing extra."""
+    return _import_runtime("cuda.arrays", "Copying a GPU array to the host")
 
 
 def _get_device_transport(name: str) -> Any:
@@ -1372,14 +1374,16 @@ def _gpu_array_to_host(arr: Any) -> np.ndarray:
         "1",
         "true",
     }:
-        _import_cuda_ipc().check_device_host_copy(f"a {type(arr).__name__} GPU array")
+        _import_cuda_arrays().check_device_host_copy(
+            f"a {type(arr).__name__} GPU array"
+        )
     try:
         host = np.asanyarray(_without_autograd(arr))
     except (TypeError, ValueError):
         # PyTorch and CuPy refuse to convert device memory implicitly
         host = None
     if host is None or host.dtype == object:
-        host = _import_cuda_ipc().cuda_array_to_host(arr)
+        host = _import_cuda_arrays().cuda_array_to_host(arr)
     return host
 
 
@@ -1512,7 +1516,7 @@ def _decode_array(
     output_path: str | Path | None = None,
     lazy: bool = False,
     mapped_paths: list[Path] | None = None,
-) -> np.ndarray | IpcDeviceArray:
+) -> np.ndarray | DeviceArray:
     """Decode an encoded array dict into a numpy array.
 
     When ``lazy`` is set and the array is decoded as a zero-copy mmap view, the
@@ -1521,7 +1525,7 @@ def _decode_array(
     alive after unlink, so the returned view stays valid.
 
     Returns np.ndarray for every encoding except those of GPU transports, which
-    yield a framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
+    yield a framework-agnostic on-GPU wrapper (DeviceArray, exposing
     __cuda_array_interface__ and __dlpack__). That type is imported only under
     TYPE_CHECKING so naming it here adds no runtime import.
     """
@@ -2010,7 +2014,7 @@ class HTTPClient:
             # where several arrays share one file at different offsets.
             mapped_paths: list[Path] = []
 
-            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
+            def decode_with_path(arr: dict) -> np.ndarray | DeviceArray:
                 return _decode_array(
                     arr,
                     output_path=self._output_path,

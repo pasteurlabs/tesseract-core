@@ -14,7 +14,7 @@ contents also catches a handle that opens onto the wrong memory.
 The check uses only the
 :class:`~tesseract_core.runtime.device_transport.DeviceTransport` interface, so
 it works for any registered transport whose ``receive`` returns an
-:class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray`, as the CUDA
+:class:`~tesseract_core.runtime.cuda.arrays.DeviceArray`, as the CUDA
 transports do.
 
 The check can run while other calls are in flight (Tesseract-JAX may lower one
@@ -33,7 +33,7 @@ import pybase64
 
 from tesseract_core.runtime.array_encoding import ArrayDict
 from tesseract_core.runtime.cuda import api as cuda_api
-from tesseract_core.runtime.cuda.ipc import _device_array_from_bytes
+from tesseract_core.runtime.cuda.arrays import device_array_from_bytes
 from tesseract_core.runtime.device_transport import DeviceTransport, get_transport
 
 __all__ = [
@@ -50,7 +50,7 @@ def _export(
     transport: DeviceTransport, data: bytes, device: int, session: Any
 ) -> ArrayDict:
     """Export ``data`` from ``device`` into ``session``, returning its descriptor."""
-    arr = _device_array_from_bytes(data, device)
+    arr = device_array_from_bytes(data, device)
     return transport.descriptor(transport.register(arr, session))
 
 
