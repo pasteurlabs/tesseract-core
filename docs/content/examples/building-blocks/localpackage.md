@@ -4,14 +4,14 @@
 
 ## Context
 
-Sometimes it might be necessary to bundle local Python modules into a Tesseract.
+Sometimes a Tesseract needs Python modules that are not published on a package index, such as code that lives next to it in the same repository.
 
 There are 2 ways to do this:
 
 1. Make them a proper Python package with `pyproject.toml` and add the local path to the `tesseract_requirements.txt` file.
    Both absolute and relative paths work, but in case they are relative paths, they should be
    relative to the Tesseract's root folder (i.e., the one which contains the `tesseract_api.py` file).
-2. Just put them as `.py` files next to `tesseract_api.py` and add them to `build_config.package_data` (see also [](packagedata.md)) in `tesseract_config.yaml` to make sure they're being included in container builds.
+2. Just put them as `.py` files next to `tesseract_api.py`. To include them in container images, also add them to `build_config.package_data` (see also [](packagedata.md)) in `tesseract_config.yaml`.
 
 ## Example Tesseract
 
@@ -43,27 +43,28 @@ The local module `goodbyeworld.py` is just a single Python file:
 :language: python
 ```
 
-To ensure it gets added to built Tesseracts, we have to register it as `package_data`:
+`Tesseract.from_source` imports it from where it is. To include it in container images, we register it as `package_data`:
 
 ```{literalinclude} ../../../../examples/localpackage/tesseract_config.yaml
 :language: yaml
 ```
 
-Now we are ready to build the Tesseract. This Tesseract will accept a name like "Tessie" as an input and return a message:
+This Tesseract accepts a name like "Tessie" as an input and returns a message:
+
+```python
+>>> from tesseract_core import Tesseract
+>>> with Tesseract.from_source("examples/localpackage/tesseract_api.py") as t:
+...     print(t.apply({"name": "Tessie"}))
+{'message': 'Hello Tessie!\nGoodbye Tessie!'}
+```
+
+This confirms that both custom dependencies are available to the Tesseract. `from_source` installs `helloworld` into the environment it builds for the Tesseract as an editable install, so changes to its source take effect the next time the Tesseract starts.
+
+To package the Tesseract as a container image, build it with `tesseract build`. The image gets a copy of `helloworld` and of `goodbyeworld.py`:
 
 ```bash
 $ tesseract build examples/localpackage
 $ tesseract run localpackage apply '{"inputs": {"name": "Tessie"}}'
-{"message":"Hello Tessie!\nGoodbye Tessie!"}
-```
-
-This confirms that both custom dependencies are available to the Tesseract container.
-
-To run the Tesseract without containerization, we have to make sure that `helloworld` is installed into our dev environment:
-
-```bash
-$ pip install examples/localpackage/helloworld
-$ TESSERACT_API_PATH=examples/localpackage/tesseract_api.py tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 {"message":"Hello Tessie!\nGoodbye Tessie!"}
 ```
 
@@ -89,7 +90,24 @@ We can then specify it as a local dependency in `tesseract_requirements.txt` by 
 ./cowsay-6.1-py3-none-any.whl
 ```
 
-Finally, let's build the Tesseract, and verify it works
+Finally, let's verify it works:
+
+```python
+>>> with Tesseract.from_source("mytess/tesseract_api.py") as t:
+...     print(t.apply({"message": "Hello, World!"})["out"])
+  _____________
+| Hello, World! |
+  =============
+             \
+              \
+                ^__^
+                (oo)\_______
+                (__)\       )\/\
+                    ||----w |
+                    ||     ||
+```
+
+The wheel is installed the same way when you build a container image:
 
 ```bash
 $ tesseract build mytess

@@ -54,6 +54,13 @@ def _trace(msg: str, obj: BaseModel) -> None:
     get_logger().debug("%s\n%s", msg, formatted)
 
 
+def use_utf8_stdio() -> None:
+    """Write stdout and stderr as UTF-8, which is how callers read them back."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 @contextmanager
 def redirect_fd(from_: TextIO, to_: TextIO | int) -> Generator[TextIO, None, None]:
     """Redirect a file descriptor at OS level.
@@ -228,7 +235,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         # twice (once in the user code, once in the endpoint wrapper). This is not ideal but
         # should be the lesser evil to ensure validation of the final output.
         if isinstance(out, api_module.OutputSchema):
-            out = out.model_dump()
+            # round_trip leaves out computed fields, which are not inputs to validate
+            out = out.model_dump(round_trip=True)
         result = ApplyOutputSchema.model_validate(out)
         _trace("apply() returned:", result)
         return result

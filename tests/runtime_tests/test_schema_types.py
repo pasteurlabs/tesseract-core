@@ -474,6 +474,27 @@ def test_lazy_sequence_pyobj(tmpdir):
         model.py_seq[2]
 
 
+def test_lazy_sequence_remote_glob():
+    import fsspec
+
+    class MyLazyModel(BaseModel):
+        py_seq: LazySequence[tuple[str, int]]
+
+    test_seq = [("a", 1), ("b", 2)]
+    fs = fsspec.filesystem("memory")
+    fs.pipe(
+        {
+            f"/lazy/inputs_{i}.json": json.dumps(v).encode()
+            for i, v in enumerate(test_seq)
+        }
+    )
+    try:
+        model = MyLazyModel(py_seq="@memory://lazy/inputs_*.json")
+        assert list(model.py_seq) == test_seq
+    finally:
+        fs.rm("/lazy", recursive=True)
+
+
 def test_lazy_sequence_json_schema():
     class MyLazyModel(BaseModel):
         array_int_seq: LazySequence[Array[(2, 3), Int64]]

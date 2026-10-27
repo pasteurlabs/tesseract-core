@@ -167,7 +167,7 @@ def is_podman() -> bool:
             check=True,
         )
         return "podman" in result.stdout.lower()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
 
@@ -331,6 +331,13 @@ class Images:
         docker = _get_docker_executable()
         extra_args = config.docker_build_args
 
+        # BuildKit (docker) runs independent stages in parallel by default;
+        # buildah (podman) runs them serially unless "--jobs" is passed. Our
+        # Dockerfile template has two stages (build_stage + run_stage), so
+        # --jobs=2 lets podman match docker's parallelism.
+        if is_podman():
+            extra_args = ("--jobs=2", *extra_args)
+
         for secret in secrets or []:
             extra_args = ("--secret", secret, *extra_args)
 
@@ -484,8 +491,16 @@ class Container:
         return Images.get(image_id)
 
     @property
+    def _uses_host_network(self) -> bool:
+        """Whether the container shares the host's network namespace."""
+        return self.attrs.get("HostConfig", {}).get("NetworkMode") == "host"
+
+    @property
     def host_port(self) -> str | None:
         """Gets the host port of the container."""
+        if self._uses_host_network:
+            # Nothing is published, since the API binds this port on the host.
+            return self.api_port
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
@@ -525,6 +540,8 @@ class Container:
     @property
     def host_ip(self) -> str | None:
         """Gets the host IP of the container."""
+        if self._uses_host_network:
+            return "127.0.0.1"
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
@@ -1251,6 +1268,27 @@ class CLIDockerClient:
         try:
             result = subprocess.run(
                 [*docker, "info"],
+                check=True,
+                capture_output=True,
+            )
+            return result.stdout, result.stderr
+        except subprocess.CalledProcessError as ex:
+            raise APIError() from ex
+
+    @staticmethod
+    def version() -> tuple:
+        """Wrapper around docker version call.
+
+        Cheaper than ``info`` for liveness checks: ``docker version`` returns
+        client+server versions via one socket round-trip, and ``podman version``
+        skips the full system probe that ``podman info`` performs (which on cold
+        process startup can take 1-7 s). Both still fail when the daemon /
+        socket is unreachable.
+        """
+        docker = _get_docker_executable()
+        try:
+            result = subprocess.run(
+                [*docker, "version"],
                 check=True,
                 capture_output=True,
             )
