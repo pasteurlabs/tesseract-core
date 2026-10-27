@@ -16,6 +16,7 @@ import jax.numpy as jnp
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float32, ShapeDType
+from tesseract_core.runtime.jax_recipes import as_jax_array
 
 
 class InputSchema(BaseModel):
@@ -41,8 +42,8 @@ def _partial_scales(inputs: InputSchema) -> dict[str, float]:
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Compute ``s * a + b`` on the GPU and return device memory."""
-    a = jnp.asarray(inputs.a)
-    b = jnp.asarray(inputs.b)
+    a = as_jax_array(inputs.a)
+    b = as_jax_array(inputs.b)
     result = inputs.s * a + b
     return OutputSchema(result=result)
 
@@ -69,7 +70,7 @@ def jacobian_vector_product(
     """Return the JVP as device memory."""
     scales = _partial_scales(inputs)
     result = sum(
-        scales[name] * jnp.asarray(tangent_vector[name]) for name in jvp_inputs
+        scales[name] * as_jax_array(tangent_vector[name]) for name in jvp_inputs
     )
     return {"result": result}
 
@@ -81,6 +82,6 @@ def vector_jacobian_product(
     cotangent_vector: dict[str, Any],
 ):
     """Return the VJP as device memory."""
-    cotangent = jnp.asarray(cotangent_vector["result"])
+    cotangent = as_jax_array(cotangent_vector["result"])
     scales = _partial_scales(inputs)
     return {name: scales[name] * cotangent for name in vjp_inputs}
