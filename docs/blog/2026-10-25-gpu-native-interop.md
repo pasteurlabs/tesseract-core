@@ -1,14 +1,14 @@
 ---
 orphan: true
-og:title: "Fast, GPU-native differentiable physics (and beyond) with Tesseract"
+og:title: "Fast, GPU-native differentiable physics and beyond with Tesseract"
 og:description: "A training loop can now call a GPU solver running in another process, forward and backward, without its arrays ever leaving the GPU. Here is what that takes, what it buys, and how it works."
 blog_date: "2026-10-25"
 blog_author: "@dionhaefner"
-blog_title: "Fast, GPU-native differentiable physics (and beyond) with Tesseract"
+blog_title: "Fast, GPU-native differentiable physics and beyond with Tesseract"
 blog_description: "A training loop can now call a GPU solver running in another process, forward and backward, without its arrays ever leaving the GPU. Here is what that takes, what it buys, and how it works."
 ---
 
-# Fast, GPU-native differentiable physics (and beyond) with Tesseract
+# Fast, GPU-native differentiable physics and beyond with Tesseract
 
 Tesseract lets you put a differentiable physics simulation inside a JAX or PyTorch training loop. Paired with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), the simulator runs in its own process or container, while the training loop treats it like any other differentiable function. Until now, every GPU array passed into or out of a Tesseract was copied through host memory, which for large arrays can take longer than the computation itself. The new [GPU transport](../content/how-to/gpu-transport.md) removes this detour, so arrays stay on the GPU the whole way. This post shows what that unlocks on a real application, how to turn it on, and what happens under the hood when passing GPU memory up and down the call stack (and over HTTP between processes).
 
@@ -34,7 +34,7 @@ It worked but was too slow to train with, so the team's training script ended up
 
 A deeper problem was the data communication overhead. Each array left the GPU, was encoded as text into a JSON body, sent over HTTP, and was decoded and copied back onto the GPU on the other side, once for the forward pass and once for the gradient. Through that path, running the solver on the GPU gained so little that it was faster to run it on CPU instead.
 
-With the GPU transport, arrays now stay where they are. Only a 64-byte handle is sent across the process boundary, and the data moves only within the memory of the GPU, which both processes share. Together with batching and a cache for the solver's forward pass, this brings Multi-Agent-DPC's training step within 20% of importing the solver directly. For the much larger arrays common in 3D simulation, transport is now two orders of magnitude faster than the trip through host memory.
+With the new GPU transport capabilities in Tesseract Core (`v1.15.0`), Tesseract-JAX (`v0.5.0`), and Tesseract-Torch (`v0.2.0`), arrays now stay where they are. Only a 64-byte handle is sent across the process boundary, and the data moves only within the memory of the GPU, which is shared by both processes. Together with better batching support and a cache for the solver's forward pass, this brings Multi-Agent-DPC's training step within 20% of importing the solver directly. For the much larger arrays common in 3D simulation, transport is now two orders of magnitude faster than the trip through host memory.
 
 ```{admonition} Why not just import the solver?
 If you can import a component, import it. The Multi-Agent-DPC team came to the same conclusion, and the code for CINOC imports its solvers directly.
