@@ -693,7 +693,7 @@ def build_tesseract(
     generate_only: bool = False,
     stream_logs: Callable[[str], Any] | bool = False,
 ) -> Image | Path:
-    """Build a new Tesseract from a context directory.
+    """Build a container image from a Tesseract source directory.
 
     Args:
         src_dir: path to the Tesseract project directory, where the
@@ -1000,9 +1000,9 @@ def serve(
     skip_health_check: bool = False,
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> tuple:
-    """Serve one or more Tesseract images.
+    """Serve a Tesseract image in a container.
 
-    Start the Tesseracts listening on an available ports on the host.
+    Start the Tesseract listening on an available port on the host.
 
     Args:
         image_name: Tesseract image name to serve.
