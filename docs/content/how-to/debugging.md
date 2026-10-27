@@ -1,52 +1,23 @@
-# Debugging Guide
+# Debugging guide
 
 This page covers strategies for interactive development and debugging of Tesseracts.
 
-(running-tesseracts-without-containerization)=
+## Running a Tesseract in your current environment
 
-## Running Tesseracts without containerization
+`Tesseract.from_source` and containers run a Tesseract in a separate process.
+To step through it with a debugger, it is usually simpler to run it in your current environment, either by importing it into your Python process or with the `tesseract-runtime` CLI.
+Both need the Tesseract's dependencies installed in the current environment.
+To attach a debugger to the separate process instead, see [Debug mode](#debug-mode).
 
-While developing a Tesseract, the process of building and rebuilding the
-tesseract image for quick local tests can be very time-consuming. The fastest and most
-convenient way to speed this up is to run the code directly in your local Python environment using `tesseract-runtime`.
+### Importing into the current process
 
-```{seealso}
-Running without containers is also useful as a deployment option in environments where Docker is unavailable. See <project:#running-without-containers>.
-```
-
-To set up local development:
-
-1. Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
-2. Install your Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
-3. Set the `TESSERACT_API_PATH` environment variable:
-   ```bash
-   $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py
-   ```
-
-Now you can use `tesseract-runtime` directly:
-
-```bash
-# Instead of building and running:
-$ tesseract run helloworld apply '{"inputs": {"name": "Tessie"}}'
-
-# Just run directly:
-$ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
-```
-
-This enables fast iteration cycles—edit your code, run, and see results immediately without rebuilding containers.
-
-## Using the Python SDK for local development
-
-Another approach for rapid iteration is using the Python SDK's `Tesseract.from_tesseract_api()` method, which loads your Tesseract API directly without containerization:
+`Tesseract.from_tesseract_api()` loads your `tesseract_api.py` as a Python module and calls its endpoints directly:
 
 ```python
 from tesseract_core import Tesseract
 import numpy as np
 
-# Load directly from the tesseract_api.py file
 tess = Tesseract.from_tesseract_api("/path/to/your/tesseract_api.py")
-
-# Call endpoints directly
 result = tess.apply(inputs={"a": np.array([1.0, 2.0]), "b": np.array([3.0, 4.0])})
 ```
 
@@ -56,16 +27,59 @@ This approach is particularly useful for:
 - Running unit tests against your Tesseract
 - Debugging with Python debuggers like `pdb` or IDE debuggers
 
+### Using `tesseract-runtime`
+
+`tesseract-runtime` calls the same endpoints from the command line:
+
+1. Install the Tesseract runtime: `pip install tesseract-core[runtime]` (see <project:#installation-runtime>).
+2. Install your Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
+3. Set the `TESSERACT_API_PATH` environment variable, and call an endpoint:
+   ```bash
+   $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py
+   $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
+   ```
+
+If you have served the Tesseract with `Tesseract.from_source` before, you can skip the first two steps. The environment it built in `.tesseract-venv`, next to `tesseract_api.py`, already contains the runtime and the Tesseract's dependencies, so `.tesseract-venv/bin/tesseract-runtime` works as is.
+
+(debug-mode)=
+
 ## Debug mode
 
-`tesseract serve` supports a `--debug` flag; this has two effects:
+A Tesseract served in debug mode differs from a regular one in three ways:
 
 - Tracebacks from execution are returned in the response body, instead of a generic 500 error.
   This is useful for debugging and testing, but unsafe for production environments.
-- Aside from listening to the usual Tesseract requests, a debugpy server is also started in
-  the container, and the port it's listening to is forwarded to some free port on the host which
-  is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
+- The `test` endpoint is exposed over HTTP.
+- A debugpy server is started next to the Tesseract, so you can attach a debugger to it for
   remote debugging sessions.
+
+Without debug mode, a failing request returns a generic HTTP 500 error, so that tracebacks
+and other server internals stay hidden from clients. The traceback still goes to the server log.
+Read it with `docker logs <container ID>` for containers, or with `Tesseract.server_logs()`
+for Tesseracts started through the Python SDK. `tesseract-runtime serve` prints it to the terminal.
+
+To get tracebacks in the response instead, enable debug mode. How depends on how the
+Tesseract is served:
+
+- **Containers**: `tesseract serve --debug`.
+- **Without containers**: `TESSERACT_DEBUG=1 tesseract-runtime serve`.
+- **Python SDK**: `Tesseract.from_image()` and `Tesseract.from_source()` serve in debug mode by default.
+- **Remote servers** (`Tesseract.from_url()`): whoever runs the server has to enable debug mode there.
+
+`Tesseract.from_source` starts the debugpy server on a free port on `127.0.0.1`, which you can
+look up in `tess.server_logs()`, or choose yourself:
+
+```python
+with Tesseract.from_source(
+    "/path/to/tesseract_api.py", runtime_config={"debugpy_port": 5678}
+) as tess:
+    ...
+```
+
+Pass `runtime_config={"debug": False}` to turn debug mode off.
+
+With `tesseract serve --debug`, the debugpy port in the container is forwarded to a free port on
+the host, which `tesseract serve` displays when it starts.
 
 In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
 debug mode:
@@ -88,7 +102,10 @@ debug mode:
         },
 ```
 
-(make sure to fill in with the actual port number). After inserting this into the `configurations`
+(make sure to fill in with the actual port number). The `pathMappings` entry maps your source
+folder to `/tesseract`, where it lives in the container. A Tesseract served with
+`Tesseract.from_source` runs your source files in place, so leave `pathMappings` out for it.
+After inserting this into the `configurations`
 field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
 green "play" button at the top left corner of the "Run and Debug" tab.
 
@@ -115,6 +132,14 @@ The host port to connect to is printed in the CLI when the command starts. Use t
 launch config as above (filling in the printed port number) to attach; execution resumes
 automatically once the debugger is connected.
 
+To do the same with a one-shot `tesseract-runtime` command in your current environment, set
+`TESSERACT_DEBUG=1`. The debugger listens on `127.0.0.1:5678` by default (change the port with
+`TESSERACT_DEBUGPY_PORT`):
+
+```bash
+$ TESSERACT_DEBUG=1 tesseract-runtime apply '{"inputs": {"a": 1.0, "b": 2.0}}'
+```
+
 (profiling)=
 
 ## Profiling
@@ -125,25 +150,31 @@ Tesseract includes built-in profiling support to help identify performance bottl
 
 There are several ways to enable profiling:
 
-**Via `tesseract run` CLI flag:**
+**Via Python SDK:**
+
+Pass `runtime_config={"profiling": True}` to `Tesseract.from_source` or `Tesseract.from_tesseract_api`. The statistics are part of the Tesseract's logs, so pass `stream_logs=True` to print them as calls run:
+
+```python
+with Tesseract.from_source(
+    "/path/to/tesseract_api.py",
+    runtime_config={"profiling": True},
+    stream_logs=True,
+) as tess:
+    tess.apply(inputs)
+```
+
+**Via `tesseract-runtime`:**
+
+```bash
+$ tesseract-runtime --profiling apply '{"inputs": {...}}'
+```
+
+Setting `TESSERACT_PROFILING=1` in the environment has the same effect.
+
+**Via `tesseract run`:**
 
 ```bash
 $ tesseract run myimage apply '{"inputs": {...}}' --profiling
-```
-
-**Via environment variable (for `tesseract-runtime`):**
-
-```bash
-$ TESSERACT_PROFILING=1 tesseract-runtime apply '{"inputs": {...}}'
-```
-
-**Via Python SDK:**
-
-```python
-tess = Tesseract.from_tesseract_api(
-    "/path/to/tesseract_api.py",
-    runtime_config={"profiling": True}
-)
 ```
 
 (understanding-profiling-output)=
@@ -183,25 +214,29 @@ Tracing provides detailed debug-level logging of Tesseract operations. This is u
 
 ### Enabling tracing
 
-**Via `tesseract run` CLI flag:**
-
-```bash
-$ tesseract run myimage apply '{"inputs": {...}}' --tracing
-```
-
-**Via environment variable (for `tesseract-runtime`):**
-
-```bash
-$ TESSERACT_TRACING=1 tesseract-runtime apply '{"inputs": {...}}'
-```
-
 **Via Python SDK:**
 
 ```python
-tess = Tesseract.from_tesseract_api(
+with Tesseract.from_source(
     "/path/to/tesseract_api.py",
-    runtime_config={"tracing": True}
-)
+    runtime_config={"tracing": True},
+    stream_logs=True,
+) as tess:
+    tess.apply(inputs)
+```
+
+**Via `tesseract-runtime`:**
+
+```bash
+$ tesseract-runtime --tracing apply '{"inputs": {...}}'
+```
+
+Setting `TESSERACT_TRACING=1` in the environment has the same effect.
+
+**Via `tesseract run`:**
+
+```bash
+$ tesseract run myimage apply '{"inputs": {...}}' --tracing
 ```
 
 ### Tracing output
@@ -218,17 +253,20 @@ When tracing is enabled, you'll see DEBUG-level log messages with timestamps:
 
 You can enable both profiling and tracing simultaneously for comprehensive debugging:
 
-```bash
-$ tesseract run myimage apply '{"inputs": {...}}' --profiling --tracing
+```python
+with Tesseract.from_source(
+    "/path/to/tesseract_api.py",
+    runtime_config={"profiling": True, "tracing": True},
+    stream_logs=True,
+) as tess:
+    tess.apply(inputs)
 ```
 
-Or via the Python SDK:
+The command-line flags combine the same way:
 
-```python
-tess = Tesseract.from_tesseract_api(
-    "/path/to/tesseract_api.py",
-    runtime_config={"profiling": True, "tracing": True}
-)
+```bash
+$ tesseract-runtime --profiling --tracing apply '{"inputs": {...}}'
+$ tesseract run myimage apply '{"inputs": {...}}' --profiling --tracing
 ```
 
 ## Debugging build failures
@@ -276,21 +314,18 @@ $ tesseract build --config-override build_config.target_platform=linux/arm64
 
 Dependency issues are a common source of build and runtime failures. Here's how to diagnose and fix them:
 
-**Testing dependencies locally before building:**
+**Testing dependencies in a clean environment:**
 
-Before running `tesseract build`, verify your dependencies work in a clean environment:
+`Tesseract.from_source` builds the Tesseract's environment only from what `tesseract_config.yaml` and `tesseract_requirements.txt` declare, so starting the Tesseract with it checks that the declared dependencies are complete:
 
-```bash
-# Create a fresh virtual environment
-$ python -m venv test_env
-$ source test_env/bin/activate
+```python
+from tesseract_core import Tesseract
 
-# Install only what's in your requirements file
-$ pip install -r tesseract_requirements.txt
-
-# Test that your Tesseract loads
-$ TESSERACT_API_PATH=/path/to/tesseract_api.py tesseract-runtime check
+with Tesseract.from_source("/path/to/tesseract_api.py") as tess:
+    print(tess.health())
 ```
+
+If a dependency is missing, startup fails and shows the `ImportError` raised by `tesseract_api.py`. This does not cover problems specific to a Tesseract image, such as missing system libraries or packages without Linux wheels.
 
 **Common dependency problems:**
 
@@ -356,7 +391,7 @@ This is useful for diagnosing out-of-memory errors or CPU throttling issues.
 
 ### Using Python debuggers
 
-When running without containerization via `tesseract-runtime` or `Tesseract.from_tesseract_api()`, you can use standard Python debugging tools:
+When the Tesseract runs in your current environment via `tesseract-runtime` or `Tesseract.from_tesseract_api()`, you can use standard Python debugging tools:
 
 ```python
 import pdb
@@ -368,3 +403,5 @@ def apply(inputs):
 ```
 
 Or use your IDE's debugger by setting breakpoints in your `tesseract_api.py` file.
+
+`pdb.set_trace()` does not work in a Tesseract served with `Tesseract.from_source`, since its process has no terminal to read from. Attach a debugger to it instead (see [Debug mode](#debug-mode)).

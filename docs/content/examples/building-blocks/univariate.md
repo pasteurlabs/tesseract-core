@@ -7,7 +7,7 @@
 Example that wraps the univariate [Rosenbrock function](https://en.wikipedia.org/wiki/Rosenbrock_function), which is a common test problem for optimization algorithms. Defines a Tesseract that has all optional endpoints implemented, including `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
 
 ```{seealso}
-This example (and using it to perform optimization) is also part of an [Expert Showcase](https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48) in the Tesseract Community Forum.
+This example (and using it to perform optimization) is also part of an [Expert Showcase](https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48) in the Tesseract User Forum.
 ```
 
 ## Example Tesseract (examples/univariate)

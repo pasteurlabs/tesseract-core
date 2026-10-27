@@ -5,13 +5,13 @@
 
 import datetime
 import ipaddress
-import linecache
 import logging
 import optparse
 import os
 import re
 import tempfile
 from collections.abc import Callable, Collection
+from functools import cache
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -88,7 +88,7 @@ def needs_docker(func: Callable) -> Callable:
     @functools.wraps(func)
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
         try:
-            docker_client.info()
+            docker_client.version()
         except (APIError, RuntimeError) as ex:
             raise UserError(
                 "Could not reach Docker daemon, check if it is running."
@@ -117,8 +117,11 @@ def parse_requirements(
     from pip._internal.network.session import PipSession
     from pip._internal.req.req_file import (
         RequirementsFileParser,
+        get_file_content,
         get_line_parser,
         handle_line,
+        ignore_comments,
+        join_lines,
     )
 
     if session is None:
@@ -130,9 +133,19 @@ def parse_requirements(
     line_parser = get_line_parser(finder)
     parser = RequirementsFileParser(session, line_parser)
 
+    @cache
+    def read_logical_lines(path: str) -> dict[int, str]:
+        """Return each requirement in *path* as pip parses it, by its first line number.
+
+        pip joins continued lines and drops comments before parsing, and reports
+        each result under the number of its first physical line. Lines from a
+        nested ``-r`` file report that file as their ``filename``.
+        """
+        _, content = get_file_content(path, session=session)
+        return dict(ignore_comments(join_lines(enumerate(content.splitlines(), 1))))
+
     for parsed_line in parser.parse(str(filename), constraint):
-        line = linecache.getline(parsed_line.filename, parsed_line.lineno)
-        line = line.strip()
+        line = read_logical_lines(parsed_line.filename)[parsed_line.lineno]
         parsed_req = handle_line(
             parsed_line, options=options, finder=finder, session=session
         )
@@ -680,7 +693,7 @@ def build_tesseract(
     generate_only: bool = False,
     stream_logs: Callable[[str], Any] | bool = False,
 ) -> Image | Path:
-    """Build a new Tesseract from a context directory.
+    """Build a container image from a Tesseract source directory.
 
     Args:
         src_dir: path to the Tesseract project directory, where the
@@ -987,9 +1000,9 @@ def serve(
     skip_health_check: bool = False,
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> tuple:
-    """Serve one or more Tesseract images.
+    """Serve a Tesseract image in a container.
 
-    Start the Tesseracts listening on an available ports on the host.
+    Start the Tesseract listening on an available port on the host.
 
     Args:
         image_name: Tesseract image name to serve.
@@ -1053,9 +1066,7 @@ def serve(
         output_path=output_path,
     )
 
-    if environment is None:
-        environment = {}
-    environment.update(volume_environment)
+    environment = {**(environment or {}), **volume_environment}
 
     environment.update(runtime_config_to_env(runtime_config))
 
@@ -1461,9 +1472,7 @@ def run_tesseract(
         file_inputs=file_inputs,
     )
 
-    if environment is None:
-        environment = {}
-    environment.update(volume_environment)
+    environment = {**(environment or {}), **volume_environment}
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
