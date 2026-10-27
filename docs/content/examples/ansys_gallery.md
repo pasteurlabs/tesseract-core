@@ -1,8 +1,8 @@
-# Example Gallery: Integrating with Ansys Products
+# Example gallery: Integrating with Ansys products
 
 ```{toctree}
 :name: ansys-gallery
-:caption: Ansys Gallery
+:caption: Ansys gallery
 :maxdepth: 2
 :hidden:
 :glob:
