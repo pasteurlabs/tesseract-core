@@ -1,14 +1,14 @@
 ---
 orphan: true
-og:title: "Tesseract is now GPU-native, for turbocharged differentiable physics and beyond"
+og:title: "Tesseract is now GPU-native, for faster differentiable physics (and beyond)"
 og:description: "A training loop can now call a GPU solver running in another process, forward and backward, without its arrays ever leaving the GPU. Here is what that takes, what it buys, and how it works."
 blog_date: "2026-10-25"
 blog_author: "@dionhaefner"
-blog_title: "Tesseract is now GPU-native, for turbocharged differentiable physics and beyond"
+blog_title: "Tesseract is now GPU-native, for faster differentiable physics (and beyond)"
 blog_description: "A training loop can now call a GPU solver running in another process, forward and backward, without its arrays ever leaving the GPU. Here is what that takes, what it buys, and how it works."
 ---
 
-# Tesseract is now GPU-native, for turbocharged differentiable physics and beyond
+# Tesseract is now GPU-native, for faster differentiable physics (and beyond)
 
 Tesseract lets you put a differentiable physics simulation inside a JAX or PyTorch training loop. Through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), the simulator runs as a [Tesseract](https://github.com/pasteurlabs/tesseract-core) in its own process or container, while the training loop treats it like any other differentiable function. Until now, every GPU array passed into or out of a Tesseract was copied through host memory, and for large arrays that copy often took longer than the computation itself. The new GPU transport removes this detour, so arrays stay on the GPU the whole way. This post shows what that buys on a real application, how to turn it on, and what happens under the hood.
 
@@ -41,10 +41,8 @@ With the GPU transport, arrays now stay where they are. Only a 64-byte handle is
 ```{admonition} Why not just import the solver?
 If you can import a component, import it. The Multi-Agent-DPC team came to the same conclusion, and the code for CINOC imports its solvers directly.
 
-But often you can't. Many entries to this year's [Tesseract Hackathon](2026-09-30-tesseract-hackathon-winners.md) were built around components that did not want to be imported into Python directly. [δSnowSac](https://github.com/kasProg/dSnowSac) trains a PyTorch network through NOAA's Fortran streamflow models, [PRISMO](https://github.com/benvial/prismo) takes one JAX gradient through a Julia semiconductor solver and a FEniCS optics solver, and [Differentiable Silicon](https://github.com/hozaifa1/differentiable-silicon) dispatches to a proprietary TCAD binary over SSH. [Mosaic](https://github.com/pasteurlabs/mosaic) puts solvers from deal.II and OpenFOAM to JAX-FEM and XLB behind the same Tesseract interface, each with its own dependencies. Tesseract puts such a component in its own process or container and still allows it to participate in differentiable pipelines (see also [when to use Tesseract](../content/concepts/when-to-use.md)).
+But often you can't. Many entries to this year's [Tesseract Hackathon](2026-09-30-tesseract-hackathon-winners.md) were built around components that did not want to be imported into Python directly. [δSnowSac](https://github.com/kasProg/dSnowSac) trains a PyTorch network through NOAA's Fortran streamflow models, [PRISMO](https://github.com/benvial/prismo) takes one JAX gradient through a Julia semiconductor solver and a FEniCS optics solver, and [Differentiable Silicon](https://github.com/hozaifa1/differentiable-silicon) dispatches to a proprietary TCAD binary over SSH. [Mosaic](https://github.com/pasteurlabs/mosaic) puts solvers from deal.II and OpenFOAM to JAX-FEM and XLB behind the same Tesseract interface, each with its own dependencies. Tesseract puts such a component in its own process or container and still allows it to participate in differentiable pipelines. See also [](../content/concepts/when-to-use.md).
 ```
-
-% TODO(publish): the when-to-use link resolves only after #821 merges.
 
 ## A faster, GPU-native Multi-Agent-DPC
 
@@ -122,7 +120,7 @@ Below about 100 kB per call, the trip through host memory is the fastest option,
 
 ## Beyond Multi-Agent-DPC
 
-So far, using Tesseract hasn't really been possible for GPU-based training through a differentiable solver, such as:
+So far, using Tesseract hasn't really been feasible for GPU-based training through a differentiable solver. The new GPU transport changes that, making it practical for scenarios such as:
 
 - **Solver in the loop.** A network learns to correct a coarse simulation, and its loss is computed after unrolling the solver + network system for many steps ([Um et al., 2020](https://arxiv.org/abs/2007.00016); [Kochkov et al., 2021](https://arxiv.org/abs/2102.01010)).
 - **Learned closures.** A network supplies a term the simulator can't compute efficiently, such as subgrid-scale stresses in turbulence, and is trained through the simulation ([List et al., 2022](https://arxiv.org/abs/2202.06988); [NeuralGCM](https://arxiv.org/abs/2311.07222) for weather and climate). Idealized example: Our [learned closure demo](../content/demo/learned-closure.ipynb) does this for a viscosity model in Burgers' equation.
@@ -133,7 +131,7 @@ In all of these, the network and the solver both run on the GPU, and training al
 
 ## How the gradient flows up and down the stack
 
-You don't need to know any of this to use the GPU transport, but to us, how it works is the most remarkable part of the story. A single gradient call drops out of compiled XLA code into C++, goes back into the Python interpreter, crosses HTTP into another process, descends into that process's own XLA, and returns the same way, while the arrays never leave the GPU. (Most of that path is specific to Tesseract-JAX. Tesseract-Torch reaches the same place without a C++ bridge, for reasons we come back to at the end.)
+You don't need to know any of this to use the GPU transport, but to us, how it works is the most remarkable part of the story. Specifically, a single gradient call drops out of compiled XLA code into C++, goes back into the Python interpreter, crosses HTTP into another process, descends into that process's own XLA, and returns the same way, while the arrays never leave the GPU! (Most of that path is specific to Tesseract-JAX. Tesseract-Torch reaches the same place without a C++ bridge, for reasons we come back to at the end.)
 
 Take these five lines, a stripped-down version of the training loss above:
 
@@ -194,11 +192,11 @@ One VJP call, left to right. It switches between Python and C++ six times and cr
 
 The C++ bridge of Tesseract-JAX is needed because under `jit`, XLA needs to know how to run the primitive without copying data. On the CPU everything runs as a host callback into Python which receive NumPy arrays, so XLA copies every input off the device before Python sees it, and no code downstream could undo that. JAX has no Python-level API for handing GPU buffers out of a compiled program, so the fix had to be native. On CUDA, Tesseract-JAX now lowers the primitive to an [XLA FFI](https://docs.jax.dev/en/latest/ffi.html) custom call into a small C++ shim, which receives raw device pointers from XLA and waits for XLA's stream so the inputs are ready. The shim loads the CUDA runtime only when first used, so the same wheel installs and runs on machines without a GPU.
 
-The next step is the craziest one: While XLA is in the middle of running a compiled program, the shim (called from one of XLA's threads) takes Python's global interpreter lock and _calls back into the Python interpreter_. Each call site carries an integer token, baked into the compiled program as an FFI attribute, which the shim uses to look up the Python closure for that particular call. The closure receives the device pointers as minimal objects that expose `__cuda_array_interface__`, passes them to the Tesseract's Python client, and waits for the solver to answer. Only then does control return to C++, and from there to XLA.
+The next step is the craziest one: While XLA is in the middle of running a compiled program, the shim (called from one of XLA's threads) takes Python's global interpreter lock and _calls back into the Python interpreter_. Each call site keeps track of an integer token, baked into the compiled program as an FFI attribute, which the shim uses to look up the Python closure for that particular call. The closure receives the device pointers as minimal objects that expose `__cuda_array_interface__`, passes them to the Tesseract's Python client, and waits for the solver to answer. Only then does control return to C++, and from there to XLA.
 
 Another complication is that XLA allocates GPU memory through CUDA's [virtual memory management API](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/virtual-memory-management.html), which [does not support legacy CUDA IPC handles](https://developer.nvidia.com/blog/introducing-low-level-gpu-virtual-memory-management/). So the client first copies each array into a buffer it can export (and reuses those buffers from call to call). For PyTorch, Tesseract-Torch needs none of this. Its tensors already expose their device pointers to Python, so Tesseract-Torch calls the same client without native code, and with PyTorch's default allocator also without the extra copy.
 
-Most mistakes in code like this return wrong numbers or quietly fall back to the host instead of crashing, so there was a lot of stress-testing involved. GPU tests reject any pointer that isn't in GPU memory, so an accidental trip through the host fails loudly. Some of that protection carries over to your code. A Tesseract created with `gpu_transport="cuda_ipc"` checks before its first call that the transport works between the two processes, and raises with the reason instead of falling back to the host. The {ref}`troubleshooting section of the how-to <gpu-transport-troubleshooting>` covers the cases this check can't catch, such as JAX itself running on the CPU.
+Most mistakes in code like this return wrong numbers or quietly fall back to the host instead of crashing, so there was a lot of stress-testing involved. We had to set up GPU tests to reject any pointer that isn't in GPU memory, so an accidental trip through the host fails loudly. And a Tesseract created with `gpu_transport="cuda_ipc"` checks before its first call that the transport works between the two processes, and raises with the reason instead of falling back to the host. The {ref}`troubleshooting section of the how-to <gpu-transport-troubleshooting>` covers the cases this check can't catch, such as JAX itself running on the CPU.
 
 ## What's next
 
