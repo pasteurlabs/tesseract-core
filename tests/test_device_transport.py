@@ -11,6 +11,9 @@ do not depend on CUDA. The cuda_ipc backend's own conformance lives in
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 import uuid
 from typing import Any
 
@@ -58,6 +61,53 @@ def test_get_transport_rejects_unknown():
 
     with pytest.raises(KeyError, match="No device transport registered"):
         get_transport("does_not_exist")
+
+
+# Threads import different runtime submodules at once, then look up a built-in
+# transport, as concurrent first calls from a fresh client process do.
+_CONCURRENT_IMPORTS_CODE = textwrap.dedent(
+    """
+    import importlib
+    import threading
+
+    modules = ["cuda.ipc", "array_encoding", "device_transport", "cuda.check",
+               "file_interactions", "config"]
+    barrier = threading.Barrier(2 * len(modules))
+    errors = []
+
+    def first_call(i):
+        barrier.wait()
+        importlib.import_module("tesseract_core.runtime." + modules[i % len(modules)])
+        registry = importlib.import_module("tesseract_core.runtime.device_transport")
+        try:
+            registry.get_transport("cuda_ipc")
+        except KeyError as exc:
+            errors.append(str(exc))
+
+    threads = [threading.Thread(target=first_call, args=(i,)) for i in range(2 * len(modules))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
+    """
+)
+
+
+def test_builtin_transports_are_found_during_concurrent_first_imports():
+    """A built-in transport is found even while another thread imports the runtime.
+
+    Each run needs a fresh interpreter, so that the runtime is not imported yet.
+    """
+    for _ in range(3):
+        result = subprocess.run(
+            [sys.executable, "-c", _CONCURRENT_IMPORTS_CODE],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
 
 
 def test_register_transport_returns_and_registers():

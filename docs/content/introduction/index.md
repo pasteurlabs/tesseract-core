@@ -1,52 +1,76 @@
 ---
 og:title: "Tesseract Core Documentation"
-og:description: "Tesseract packages scientific software into portable, self-documenting, differentiable components. Build, share, and compose solvers across languages."
+og:description: "Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation."
 ---
 
-# Tesseract Core Documentation
+# Tesseract Core documentation
 
-Tesseract packages scientific software into portable, self-documenting, differentiable components.
-New here? Start with the [Get Started](../tutorials/get-started.md) tutorial or the [Installation](installation.md) guide.
+Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to `jax.grad` or `torch.autograd` as a single differentiable operation.
+New here? Start with the [Get started](../tutorials/get-started.md) tutorial, or read [](../concepts/when-to-use.md) first.
 
-## How it works
+## What is a Tesseract?
 
-```{figure} ../../img/tesseract-interfaces.png
+```{figure} ../../img/tesseract-interfaces.svg
 :alt: Tesseract interfaces
-:width: 250px
+:width: 300px
 :align: right
+:figclass: only-light
 
 <small>Internal and external interfaces of a Tesseract.</small>
 ```
 
-Every Tesseract has a primary entrypoint, `apply`, which wraps a software functionality of your choice. All other [endpoints](../reference/endpoints.md) relate to this entrypoint: `abstract_eval` returns output structure, `jacobian` computes derivatives, and so on.
+```{figure} ../../img/tesseract-interfaces-dark.svg
+:alt: Tesseract interfaces
+:width: 300px
+:align: right
+:figclass: only-dark
 
-There are several ways to interact with Tesseracts:
+<small>Internal and external interfaces of a Tesseract.</small>
+```
 
-1. **Define** entrypoints in `tesseract_api.py`
-2. **Build** a container with `tesseract build`
-3. **Serve** via HTTP with `tesseract serve`
-4. **Invoke** via CLI, HTTP, or the [Python SDK](../reference/tesseract-api.md)
+A Tesseract is a component defined in one file, `tesseract_api.py`:
 
-## Features and limitations
+- **Schemas** declare its inputs and outputs as Pydantic models and mark which fields are differentiable.
+- **`apply`** is the primary entrypoint and wraps whatever software you choose.
+- **Derivative endpoints** (`jacobian`, `jacobian_vector_product`, `vector_jacobian_product`) are optional and differentiate `apply`.
+- **`abstract_eval`** returns the output structure without running `apply`. See [endpoints](../reference/endpoints.md) for the full list.
+- **A process boundary** usually separates it from its callers, who reach it over HTTP or through the Python SDK instead of importing it, so it keeps its own interpreter and dependencies.
 
-::::{tab-set}
-:::{tab-item} Features
+## Design decisions
 
-- **Self-documenting** — Tesseracts announce their interfaces, so users can inspect them without reading source code and perform static validation without running the code.
-- **Auto-validating** — Input data is automatically validated against the schema, so internal logic can assume the data is in the expected format.
-- **Autodiff-native** — Tesseracts support [differentiable programming](../concepts/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
-- **Batteries included** — Every Tesseract ships with a containerized runtime, a CLI, a REST API, and a Python SDK.
+A few choices shape what working with a Tesseract is like. Each one helps in some settings and limits you in others.
 
-:::
-:::{tab-item} Limitations
+- **One `apply` per Tesseract.** A Tesseract exposes a single function, which keeps its interface and gradients easy to reason about. To expose several functions, build several Tesseracts and compose them (see [](../concepts/design-patterns.md)).
+- **Python as the glue.** A Tesseract can wrap software in any language, but the code between the runtime and that software is Python. Every Tesseract gets the same schemas and tooling as a result, and Python projects are the easiest to wrap.
+- **No knowledge of its context.** A Tesseract doesn't know which loop calls it or where it runs. The same component works inside an optimizer, a training loop, or a sampler, and orchestration stays in the calling code.
 
-- **Python as glue** — Tesseracts may use any software under the hood, but they always use Python as glue between the runtime and the wrapped functionality. Support for Python projects is more mature than other languages.
-- **Single entrypoint** — Each Tesseract has a single `apply` entrypoint. To expose N functions, create N Tesseracts.
-- **Context-free** — Tesseracts are not aware of outer-loop orchestration or runtime details.
-- **Runtime overhead** — Tesseracts are designed for compute kernels that run at least several seconds, so they may not suit very low-latency workloads.
+## The workflow
 
-:::
-::::
+1. **Define** the schemas and endpoints in `tesseract_api.py`. See [](../tutorials/create.md) and [](../how-to/defining-apis.md).
+2. **Check** every derivative endpoint against finite differences with [`check-gradients`](../how-to/check-gradients.md).
+3. **Run** it in its own environment with `Tesseract.from_source`, which needs no Docker, and call it from Python.
+4. **Compose** it into JAX or PyTorch programs with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) or [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch), or chain several Tesseracts into a [pipeline](../how-to/pipelines.md). [](../concepts/differentiable-programming.md) explains how gradients cross the boundary.
+5. **Ship** it once it needs to run somewhere else, as a container image built with `tesseract build` or as a remote service reached with `Tesseract.from_url`. See [](../how-to/deploy.md).
+
+(ways-to-run)=
+
+## Ways to run a Tesseract
+
+The same `tesseract_api.py` runs in four ways, without changes:
+
+| How                                                                   | What it does                                                                   | Use it when                                                                                                                                                                                                   |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`Tesseract.from_source`](#Tesseract.from_source)                     | Serves it from a local process, in an environment built from its configuration | You develop it, or call it on your own machine without Docker.                                                                                                                                                |
+| [`Tesseract.from_tesseract_api`](#Tesseract.from_tesseract_api)       | Imports it into your Python process                                            | Its dependencies fit into your environment. Calls are cheapest, and `print`, debuggers, and tracebacks work as in any imported module, which suits notebooks and unit tests (see [](../how-to/debugging.md)). |
+| `tesseract build` and [`Tesseract.from_image`](#Tesseract.from_image) | Builds a container image and serves it from Docker                             | You share it with people who don't have your environment, need system packages or compiled toolchains, or deploy to the cloud.                                                                                |
+| [`Tesseract.from_url`](#Tesseract.from_url)                           | Connects to a Tesseract served elsewhere                                       | It runs on another machine or a cluster, or several programs share one instance (see [](../how-to/deploy.md)).                                                                                                |
+
+## Where to go next
+
+- **Using a Tesseract someone else built:** [](../tutorials/interact.md)
+- **Finding ready-made differentiable solvers:** [Mosaic](https://github.com/pasteurlabs/mosaic), a benchmark suite of physics solvers packaged as Tesseracts
+- **Making calls faster:** [](../concepts/performance.md)
+- **Seeing complete examples:** [](../demo/demo.md)
 
 ## Citing Tesseract
 
@@ -72,12 +96,13 @@ If you use Tesseract in your research, please cite:
 :maxdepth: 2
 :hidden:
 
+Overview <self>
 installation.md
 Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Tutorials & Examples
+:caption: Tutorials & examples
 :maxdepth: 2
 :hidden:
 
@@ -90,7 +115,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: How-to Guides
+:caption: How-to guides
 :maxdepth: 2
 :hidden:
 
@@ -98,9 +123,10 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ../how-to/pipelines.md
 ../how-to/advanced-usage.md
 ../how-to/deploy.md
+../how-to/check-gradients.md
 ../how-to/fast-local-runs.md
+../how-to/gpu-transport.md
 ../how-to/debugging.md
-../how-to/llm-assistance.md
 ```
 
 ```{toctree}
@@ -108,6 +134,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 :maxdepth: 2
 :hidden:
 
+../concepts/when-to-use.md
 ../concepts/design-patterns.md
 ../concepts/differentiable-programming.md
 ../concepts/performance.md
@@ -124,7 +151,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Reference — Runtime
+:caption: Reference — runtime
 :maxdepth: 2
 :hidden:
 

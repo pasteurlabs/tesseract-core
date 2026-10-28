@@ -1,4 +1,4 @@
-# Wrapping Compiled Code (Fortran Example)
+# Wrapping compiled code (Fortran example)
 
 {gh-tree}`View on GitHub <examples/fortran_heat>`
 
