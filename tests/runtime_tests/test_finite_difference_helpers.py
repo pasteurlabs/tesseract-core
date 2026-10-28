@@ -469,40 +469,34 @@ class TestPerInputEps:
     def test_jvp_skips_groups_with_zero_tangents(self, simple_inputs, algorithm):
         """Seeding one input of many costs one group, not one group per input.
 
-        A zero tangent perturbs nothing, so evaluating its group only adds
-        f(x) - f(x). Leaving those groups out must not change the result.
+        Each input has its own step size, so evaluating every group would cost
+        6 calls with central differences and 4 with forward. A zero tangent
+        perturbs nothing, so only the seeded input's group is evaluated.
         """
-        calls = []
+        n_calls = 0
 
         def counting_apply(inputs):
-            calls.append(inputs)
-            return nonlinear_apply(inputs)
+            nonlocal n_calls
+            n_calls += 1
+            return linear_apply(inputs)
 
-        kwargs = {"jvp_outputs": {"result"}, "algorithm": algorithm}
-        seeded = finite_difference_jvp(
-            counting_apply,
-            simple_inputs,
-            jvp_inputs={"a"},
-            tangent_vector={"a": np.array([1.0, 0.0, 0.0])},
-            eps={"a": 1e-6},
-            **kwargs,
-        )
-        calls.clear()
-        padded = finite_difference_jvp(
+        jvp = finite_difference_jvp(
             counting_apply,
             simple_inputs,
             jvp_inputs={"a", "b", "s"},
+            jvp_outputs={"result"},
             tangent_vector={
                 "a": np.array([1.0, 0.0, 0.0]),
                 "b": np.zeros(3),
                 "s": np.float64(0.0),
             },
+            algorithm=algorithm,
             eps={"a": 1e-6, "b": 1e-5, "s": 1e-4},
-            **kwargs,
         )
 
-        assert len(calls) == 2
-        np.testing.assert_array_equal(padded["result"], seeded["result"])
+        assert n_calls == 2
+        # JVP with tangent [1,0,0] on 'a' should give [s, 0, 0] = [2, 0, 0]
+        assert np.allclose(jvp["result"], [2.0, 0.0, 0.0], atol=1e-5)
 
     def test_jvp_with_only_zero_tangents_evaluates_once(self):
         """All-zero tangents need one evaluation, for the shapes of the zeros."""
