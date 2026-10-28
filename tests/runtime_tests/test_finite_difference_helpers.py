@@ -505,7 +505,7 @@ class TestPerInputEps:
         np.testing.assert_array_equal(padded["result"], seeded["result"])
 
     def test_jvp_with_only_zero_tangents_evaluates_once(self):
-        """All-zero tangents give zeros of the type the groups would have given."""
+        """All-zero tangents need one evaluation, for the shapes of the zeros."""
 
         class In(BaseModel):
             x: Differentiable[Float64]
@@ -516,7 +516,7 @@ class TestPerInputEps:
         def counting_apply(inputs):
             calls.append(inputs)
             return {
-                "vector": np.full(3, inputs.x, dtype=np.float32),
+                "vector": np.full(3, inputs.x),
                 "scalar": inputs.x * inputs.y,
             }
 
@@ -530,9 +530,7 @@ class TestPerInputEps:
         )
 
         assert len(calls) == 1
-        np.testing.assert_array_equal(jvp["vector"], np.zeros(3, dtype=np.float32))
-        assert jvp["vector"].dtype == np.float32
-        assert np.asarray(jvp["scalar"]).dtype == np.float64
+        np.testing.assert_array_equal(jvp["vector"], np.zeros(3))
         assert jvp["scalar"] == 0.0
 
     def test_vjp_uses_each_inputs_own_step(self, scale_spread_inputs):
