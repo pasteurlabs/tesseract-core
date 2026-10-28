@@ -169,8 +169,9 @@ def available_transports() -> tuple[str, ...]:
 
     Registration says the code exists, not that a transport may be used: that is
     gated separately (a by-reference transport such as ``cuda_ipc`` is only
-    offered when the runtime is configured with a non-``none`` ``gpu_transport``;
-    see :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`).
+    offered when the runtime is configured with a non-``none`` ``gpu_transport``
+    and can see a CUDA device to serve it from; see
+    :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`).
     A caller deciding what to offer a client must apply that gating itself and
     not treat this list as the enabled set.
     """

@@ -59,8 +59,9 @@ class RuntimeConfig(BaseModel):
     # outputs. Any other value (e.g. ``cuda_ipc``) passes device memory by
     # reference and is experimental, so it may change or be removed without
     # notice. Responses only use it when a request asks for it (see
-    # serve.negotiate_encoding). Independent of ``output_format``, which only
-    # governs CPU arrays.
+    # serve.negotiate_encoding), and it is only offered when this process can
+    # see a CUDA device. Independent of ``output_format``, which only governs
+    # CPU arrays.
     gpu_transport: gpu_transport_type = "none"
     # Fraction of each GPU's memory that ``cuda_ipc`` may keep in idle device
     # buffers for reuse across requests, split evenly between buffers for
