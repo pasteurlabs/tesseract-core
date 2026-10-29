@@ -318,8 +318,11 @@ def _inject_page_context(app, pagename, templatename, context, doctree):
     if is_blog:
         context["docstitle"] = "Tesseract Blog"
 
-    # Landing page: suppress docstitle so Furo renders just "Tesseract" as <title>
+    # Landing page: use og:title as the full <title>. Furo renders just the page
+    # title when docstitle is empty. A bare "Tesseract" is ambiguous, so search
+    # engines tend to pad it with text from elsewhere on the domain.
     if is_landing:
+        context["title"] = context["meta"]["og:title"]
         context["docstitle"] = ""
 
     if not is_blog:
@@ -343,6 +346,24 @@ def _inject_page_context(app, pagename, templatename, context, doctree):
 
     context["forum_topic_url"] = _forum_topic_urls.get(pagename.removeprefix("blog/"))
     return "blog_post.html"
+
+
+def _meta_description_from_og(app, pagename, templatename, context, doctree):
+    """Reuse a page's og:description as its <meta name="description">.
+
+    Otherwise sphinxext-opengraph fills the meta description with the first
+    words of the page text, which on pages that open with a logo or a hidden
+    title reads as "Tesseract Tesseract ...". Search engines may show it as the
+    result snippet. Runs before sphinxext-opengraph, which skips the tag when
+    one is already present.
+    """
+    from html import escape
+
+    description = (context.get("meta") or {}).get("og:description")
+    if description:
+        context["metatags"] += (
+            f'<meta name="description" content="{escape(description)}" />\n'
+        )
 
 
 def _require_dirhtml(app) -> None:
@@ -388,6 +409,8 @@ def setup(app) -> None:
     app.connect("builder-inited", _resolve_forum_topics)
     # Inject blog post listing into blog index page context
     app.connect("html-page-context", _inject_page_context)
+    # Run before sphinxext-opengraph (default priority 500)
+    app.connect("html-page-context", _meta_description_from_og, priority=400)
 
 
 # -- Options for the linkcheck builder ---------------------------------------
