@@ -524,7 +524,10 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     display: none;
 }
 
+/* Furo gives .content a fixed width (100% on mobile); our padding would add to
+   it and make the page scroll horizontally. Let it fill the parent instead. */
 .blog-page .content {
+    width: auto;
     max-width: var(--blog-content-width);
     margin: 0 auto;
     padding: 1rem;
@@ -580,9 +583,11 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
 .blog-page .content h1 {
     font-size: 2rem;
     font-weight: 800;
-    margin-top: 0;
-    margin-bottom: 2rem;
-    padding-bottom: 1.5rem;
+    /* Reset Furo's rounded, outset heading box so the bottom border is a
+       straight rule aligned with the text column */
+    margin: 0 0 2rem;
+    padding: 0 0 1.5rem;
+    border-radius: 0;
     border-bottom: 1px solid var(--color-background-border);
     letter-spacing: -0.03em;
     line-height: 1.2;
