@@ -274,13 +274,12 @@ def test_Tesseract_from_tesseract_api_resolves_paths_against_own_config(
                 data: InputPath
 
             class OutputSchema(BaseModel):
-                read: str
-                written: OutputPath
+                copied: OutputPath
 
             def apply(inputs: InputSchema) -> OutputSchema:
-                outfile = Path(get_config().output_path) / "result.txt"
-                outfile.write_text("result")
-                return OutputSchema(read=inputs.data.read_text(), written=outfile)
+                outfile = Path(get_config().output_path) / "copied.txt"
+                outfile.write_text(inputs.data.read_text())
+                return OutputSchema(copied=outfile)
             """
         )
     )
@@ -301,8 +300,9 @@ def test_Tesseract_from_tesseract_api_resolves_paths_against_own_config(
         api_file, input_path=input_dir, output_path=output_dir
     )
     result = tess.apply({"data": "data.txt"})
-    assert result["read"] == "right"
-    assert Path(result["written"]) == Path("result.txt")
+    # OutputPath is returned relative to output_path, as from a container.
+    assert result["copied"] == "copied.txt"
+    assert (output_dir / "copied.txt").read_text() == "right"
 
 
 def test_rejects_imported_module(dummy_tesseract_module):
