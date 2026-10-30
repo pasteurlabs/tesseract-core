@@ -1460,6 +1460,37 @@ def test_container_diagnoses_its_own_exit(state, expected):
     assert expected in docker_client.diagnose_exit(container, logs="")
 
 
+def test_container_url_on_the_host_network():
+    """A host-network container publishes no ports and serves on its API port."""
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={
+            "Config": {"Cmd": ["serve", "--port", "41234", "--host", "0.0.0.0"]},
+            "HostConfig": {"NetworkMode": "host"},
+            "NetworkSettings": {"Ports": {}},
+        },
+    )
+    assert container.url == "http://127.0.0.1:41234"
+
+
+def test_container_url_from_its_published_port():
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={
+            "Config": {"Cmd": ["serve", "--port", "8000", "--host", "0.0.0.0"]},
+            "HostConfig": {"NetworkMode": "bridge"},
+            "NetworkSettings": {
+                "Ports": {"8000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "50001"}]}
+            },
+        },
+    )
+    assert container.url == "http://127.0.0.1:50001"
+
+
 def _stopped_container(logs=b"", state=None, **overrides):
     """A Container wired up to answer without a daemon behind it.
 
@@ -1734,6 +1765,24 @@ def test_parse_requirements(tmpdir):
         "torch==2.5.1",
         "--find-links https://data.pyg.org/whl/torch-2.5.1+cpu.html",
         "torch_scatter==2.1.2+pt25cpu",
+    ]
+
+
+def test_parse_requirements_continuations_and_comments(tmpdir):
+    reqs = (
+        "numpy==2.0.0 \\\n"
+        "    --hash=sha256:04494f6ec467ccb5369d1808570ae55f6ed9b5809d7f035059000a37b8d7e86f\n"
+        "scipy==1.14.0  # pinned\n"
+        "./internal_packages/foobar  # vendored\n"
+    )
+    reqs_file = Path(tmpdir) / "requirements.txt"
+    reqs_file.write_text(reqs)
+    locals, remotes = engine.parse_requirements(reqs_file)
+
+    assert locals == ["./internal_packages/foobar"]
+    assert remotes == [
+        "numpy==2.0.0     --hash=sha256:04494f6ec467ccb5369d1808570ae55f6ed9b5809d7f035059000a37b8d7e86f",
+        "scipy==1.14.0",
     ]
 
 

@@ -4,7 +4,7 @@
 
 ## `tesseract_core.runtime`
 
-The `tesseract_core.runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. It is available in all Tesseract container images.
+The `tesseract_core.runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. Install it with `pip install tesseract-core[runtime]`. It is also present in every environment `Tesseract.from_source` builds and in every Tesseract image.
 
 ```{eval-rst}
 .. automodule:: tesseract_core.runtime

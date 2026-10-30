@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from textwrap import dedent
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -106,6 +107,20 @@ def test_Tesseract_from_url():
     # Using it as a context manager should be a no-op
     with t:
         pass
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("localhost", "http://localhost"),
+        ("localhost:8000", "http://localhost:8000"),
+        ("helloworld:8000/", "http://helloworld:8000"),
+        ("127.0.0.1:8000", "http://127.0.0.1:8000"),
+        ("https://example.com:8443/prefix/", "https://example.com:8443/prefix"),
+    ],
+)
+def test_Tesseract_from_url_adds_missing_scheme(url, expected):
+    assert Tesseract.from_url(url)._client.url == expected
 
 
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
@@ -239,6 +254,55 @@ def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
 
     # The edit stayed contained to this instance's snapshot, not the global.
     assert get_config().profiling is False
+
+
+def test_Tesseract_from_tesseract_api_resolves_paths_against_own_config(
+    tmp_path, monkeypatch
+):
+    """InputPath / OutputPath resolve against the instance's paths, not the cwd (#880)."""
+    api_file = tmp_path / "tesseract_api.py"
+    api_file.write_text(
+        dedent(
+            """
+            from pathlib import Path
+
+            from pydantic import BaseModel
+            from tesseract_core.runtime.config import get_config
+            from tesseract_core.runtime.experimental import InputPath, OutputPath
+
+            class InputSchema(BaseModel):
+                data: InputPath
+
+            class OutputSchema(BaseModel):
+                copied: OutputPath
+
+            def apply(inputs: InputSchema) -> OutputSchema:
+                outfile = Path(get_config().output_path) / "copied.txt"
+                outfile.write_text(inputs.data.read_text())
+                return OutputSchema(copied=outfile)
+            """
+        )
+    )
+
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "data.txt").write_text("right")
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+
+    # A same-named decoy in the cwd must not be picked up.
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "data.txt").write_text("wrong")
+    monkeypatch.chdir(cwd)
+
+    tess = Tesseract.from_tesseract_api(
+        api_file, input_path=input_dir, output_path=output_dir
+    )
+    result = tess.apply({"data": "data.txt"})
+    # OutputPath is returned relative to output_path, as from a container.
+    assert result["copied"] == "copied.txt"
+    assert (output_dir / "copied.txt").read_text() == "right"
 
 
 def test_rejects_imported_module(dummy_tesseract_module):

@@ -288,8 +288,8 @@ class Tesseract:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError(
             "Tesseract cannot be instantiated directly. "
-            "Use Tesseract.from_url(), Tesseract.from_image(), or "
-            "Tesseract.from_tesseract_api() instead."
+            "Use Tesseract.from_source(), Tesseract.from_image(), "
+            "Tesseract.from_url(), or Tesseract.from_tesseract_api() instead."
         )
 
     @classmethod
@@ -483,10 +483,10 @@ class Tesseract:
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
-        Warning: This does not use a containerized Tesseract, but rather
-        imports the Tesseract API directly. This is useful for debugging,
-        but requires a matching runtime environment + all dependencies to be
-        installed locally.
+        Unlike :meth:`from_source` and :meth:`from_image`, this imports the
+        Tesseract API into the calling process. This is useful for debugging,
+        but requires ``tesseract-core[runtime]`` and all of the Tesseract's
+        dependencies to be installed in the calling environment.
 
         Note: Uses a thread lock internally, so concurrent calls to Tesseracts
         created via `from_tesseract_api` will always run sequentially.
@@ -616,8 +616,9 @@ class Tesseract:
             >>> with Tesseract.from_source("tesseract_api.py") as tess:
             ...     tess.apply({"a": 1})
 
-        This is not a substitute for a container: the Tesseract inherits this
-        process's environment, working directory, filesystem access and user.
+        The Tesseract is not isolated the way a container would be. It inherits
+        this process's environment, working directory, filesystem access and
+        user.
 
         Args:
             tesseract_api: Path to the `tesseract_api.py` file. Unlike
@@ -1194,9 +1195,8 @@ def _subprocess_spawn_config(
     )
 
     # Debug mode gives full tracebacks from the child and enables the `test`
-    # endpoint, matching what the in-process path configures. The debugpy
-    # listener it would normally imply is disabled separately, in
-    # `local_client.serve`.
+    # endpoint, matching what the in-process path configures. It also starts a
+    # debugpy listener, which `local_client.serve` puts on a free port.
     config_kwargs: dict[str, Any] = {"debug": True}
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
@@ -1712,7 +1712,7 @@ class HTTPClient:
     def _sanitize_url(url: str) -> str:
         parsed = urlparse(url)
 
-        if not parsed.scheme:
+        if not parsed.netloc:
             url = f"http://{url}"
             parsed = urlparse(url)
 
@@ -2182,11 +2182,6 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        if InputSchema is not None:
-            parsed_payload = InputSchema.model_validate(payload)
-        else:
-            parsed_payload = None
-
         # Set up run directory for logging
         if run_id is None:
             run_id = str(uuid.uuid4())
@@ -2205,10 +2200,17 @@ class LocalClient:
             )
 
         # Run under this instance's own config rather than whatever the global
-        # happens to be. Any update_config() the endpoint makes is captured back
-        # into the snapshot afterwards, so it persists to later calls (matching
-        # the containerized case).
+        # happens to be. This includes schema validation, which resolves
+        # InputPath / OutputPath against the configured input / output paths.
+        # Any update_config() the endpoint makes is captured back into the
+        # snapshot afterwards, so it persists to later calls (matching the
+        # containerized case).
         with override_config(self._config_snapshot):
+            if InputSchema is not None:
+                parsed_payload = InputSchema.model_validate(payload)
+            else:
+                parsed_payload = None
+
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
 
@@ -2233,11 +2235,13 @@ class LocalClient:
             finally:
                 self._config_snapshot = snapshot_config()
 
-        if OutputSchema is not None:
-            # Validate via schema, then dump to stay consistent with other clients
-            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
-                result = OutputSchema.model_validate(result).model_dump()
-            else:
-                result = TypeAdapter(OutputSchema).validate_python(result)
+            if OutputSchema is not None:
+                # Validate via schema, then dump to stay consistent with other clients
+                if isinstance(OutputSchema, type) and issubclass(
+                    OutputSchema, BaseModel
+                ):
+                    result = OutputSchema.model_validate(result).model_dump()
+                else:
+                    result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result
