@@ -88,6 +88,14 @@ $ pytest --skip-endtoend
 $ pytest --always-run-endtoend tests/endtoend_tests
 ```
 
+The tests in `tests/compat_tests` check this SDK and runtime against a released
+version (see the [version compatibility policy](docs/content/reference/version-compatibility.md)).
+They need `uv` and are skipped unless a version is given:
+
+```console
+$ pytest tests/compat_tests --compat-version 1.13.0
+```
+
 #### Testing philosophy
 
 We follow these principles when writing tests:
