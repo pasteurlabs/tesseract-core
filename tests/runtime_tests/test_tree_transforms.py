@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 import numpy as np
 import pytest
 from pydantic import BaseModel
@@ -220,6 +222,13 @@ class TestSetAtPath:
         tree = {"pair": ({"a": 1}, {"a": 2}), "flat": (1, 2, 3)}
         result = set_at_path(tree, {"pair.[1].a": 20, "flat.[0]": 10})
         assert result == {"pair": ({"a": 1}, {"a": 20}), "flat": (10, 2, 3)}
+
+    def test_namedtuples_keep_their_type(self):
+        tree = {"pair": _Pair(1, 2)}
+        by_index = set_at_path(tree, {"pair.[1]": 20})["pair"]
+        by_name = set_at_path(tree, {"pair.b": 20})["pair"]
+        assert by_index == by_name == _Pair(1, 20)
+        assert type(by_index) is type(by_name) is _Pair
 
     def test_set_at_path_creates_deep_copy(self, sample_tree):
         """Test that set_at_path creates a deep copy and doesn't modify original."""
@@ -849,3 +858,8 @@ class TestIsArraylike:
             shape: tuple[int, int]
 
         assert not is_arraylike(Params(shape=(2, 3)))
+
+
+class _Pair(NamedTuple):
+    a: int
+    b: int
