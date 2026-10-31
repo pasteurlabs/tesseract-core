@@ -942,15 +942,39 @@ def test_output_to_bytes_rejects_cuda_ipc_transport_by_default():
         )
 
 
-def test_available_gpu_transports_reflects_config():
+def test_available_gpu_transports_reflects_config(monkeypatch):
     from tesseract_core.runtime import config
     from tesseract_core.runtime.file_interactions import available_gpu_transports
+
+    monkeypatch.setattr(cuda_api, "device_count", lambda: 1)
 
     config.update_config(gpu_transport="none")
     assert available_gpu_transports() == ("none",)
 
     config.update_config(gpu_transport="cuda_ipc")
-    assert "cuda_ipc" in available_gpu_transports()
+    assert available_gpu_transports() == ("none", "cuda_ipc")
+
+
+def test_available_gpu_transports_hides_cuda_ipc_without_a_usable_device(monkeypatch):
+    """A configured cuda_ipc is only offered when this process can use CUDA.
+
+    A server started with CUDA_VISIBLE_DEVICES="" (or without a working CUDA
+    runtime) must not tell clients it can pass GPU arrays by reference: the
+    failure would otherwise only surface on their first GPU call.
+    """
+    from tesseract_core.runtime import config
+    from tesseract_core.runtime.file_interactions import available_gpu_transports
+
+    config.update_config(gpu_transport="cuda_ipc")
+
+    monkeypatch.setattr(cuda_api, "device_count", lambda: 0)
+    assert available_gpu_transports() == ("none",)
+
+    def no_device():
+        raise RuntimeError("cudaGetDeviceCount failed: no CUDA-capable device")
+
+    monkeypatch.setattr(cuda_api, "device_count", no_device)
+    assert available_gpu_transports() == ("none",)
 
 
 def test_output_formats_never_include_cuda_ipc():
@@ -968,6 +992,7 @@ def test_output_to_bytes_splits_host_encoding_and_device_transport(monkeypatch):
     from tesseract_core.runtime import config, file_interactions
 
     config.update_config(gpu_transport="cuda_ipc")
+    monkeypatch.setattr(cuda_api, "device_count", lambda: 1)
     captured = {}
 
     class FakeAdapter:

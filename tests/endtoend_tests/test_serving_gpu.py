@@ -229,12 +229,12 @@ def test_serve_cuda_ipc_vector_jacobian_product(gpu_image_name):
 
 @requires_cuda
 def test_serve_cuda_ipc_without_a_shared_gpu(gpu_image_name):
-    """A container offering cuda_ipc it cannot use leads clients to host copies.
+    """A container that cannot use its configured cuda_ipc does not offer it.
 
-    Hiding the GPU from the container stands in for a server that shares no GPU
-    with the client, such as one on another host. A plain ``from_url`` client
-    falls back to host copies with a warning, and the client that requested
-    cuda_ipc gets an error before any call is made.
+    Hiding the GPU from the container stands in for a server without a usable
+    device. The transport is not advertised, so a plain ``from_url`` client
+    uses host copies as it would for a server that never enabled it, and the
+    client that requested cuda_ipc gets an error before any call is made.
     """
     with Tesseract.from_image(
         gpu_image_name,
@@ -243,7 +243,7 @@ def test_serve_cuda_ipc_without_a_shared_gpu(gpu_image_name):
         environment={"CUDA_VISIBLE_DEVICES": ""},
     ) as t:
         remote = Tesseract.from_url(t._client.url)
-        with pytest.warns(UserWarning, match="copied to the host instead"):
-            assert remote.resolve_gpu_transport() == "none"
-        with pytest.raises(RuntimeError, match="does not work between"):
+        assert remote.server_capabilities.gpu_transports == ("none",)
+        assert remote.resolve_gpu_transport() == "none"
+        with pytest.raises(ValueError, match="does not accept gpu_transport"):
             t.resolve_gpu_transport()

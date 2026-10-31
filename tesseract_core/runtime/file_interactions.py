@@ -52,18 +52,52 @@ def available_formats() -> tuple[str, ...]:
     return SUPPORTED_FORMATS
 
 
+# Whether the configured transport has already been reported as unusable, so
+# the warning is logged once rather than on every request.
+_unusable_gpu_transport_reported = False
+
+
 def available_gpu_transports() -> tuple[str, ...]:
     """GPU transports the runtime accepts for inputs and outputs.
 
     Always includes ``none``, plus the configured ``gpu_transport`` if it is
-    anything else.
+    anything else and this process can serve it from a CUDA device. A
+    configured transport that cannot work here (no CUDA runtime library, no
+    visible device, or a failed initialisation) is left out and reported once,
+    so clients see what this Tesseract can do rather than what it was
+    configured with.
     """
+    global _unusable_gpu_transport_reported
+
     from tesseract_core.runtime.config import get_config
 
     configured = get_config().gpu_transport
-    if configured != "none":
+    if configured == "none":
+        return ("none",)
+    if _cuda_device_available():
         return ("none", configured)
+    if not _unusable_gpu_transport_reported:
+        _unusable_gpu_transport_reported = True
+        from tesseract_core.runtime.logs import get_logger
+
+        get_logger().warning(
+            "gpu_transport=%r is configured, but this Tesseract cannot use a CUDA "
+            "device, so the transport is not offered to clients.",
+            configured,
+        )
     return ("none",)
+
+
+def _cuda_device_available() -> bool:
+    """Whether this process sees a CUDA device it could serve arrays from."""
+    from tesseract_core.runtime.cuda import api as cuda_api
+
+    try:
+        return cuda_api.device_count() > 0
+    except RuntimeError:
+        # No CUDA runtime library, no driver, or a failed initialisation all mean
+        # there is no device to export from.
+        return False
 
 
 def available_compressions() -> tuple[str, ...]:
