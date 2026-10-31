@@ -1785,6 +1785,21 @@ class TestHTTPClientValidationErrors:
         err = exc_info.value.errors()[0]
         assert err["loc"] == ("body", "inputs")
 
+    @pytest.mark.parametrize(
+        "body",
+        [b"<html>Unprocessable</html>", orjson.dumps({"detail": "bad input"})],
+        ids=["not-json", "str-detail"],
+    )
+    def test_non_pydantic_422_is_reported(self, body):
+        """A 422 body that is not a Pydantic error list falls back to a plain error."""
+        response = _make_mock_response(422, {})
+        response.content = body
+        response.text = body.decode()
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(RuntimeError, match="Error 422 from Tesseract"):
+            tess.apply({"inputs": {}})
+
     def test_custom_error_type(self):
         """Custom error types (e.g. from PydanticCustomError) don't crash."""
         response = _make_mock_response(
