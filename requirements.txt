@@ -36,9 +36,9 @@ pip==26.2.2
     # via tesseract-core
 pybase64==1.5.1
     # via tesseract-core
-pydantic==2.14.1
+pydantic==2.14.2
     # via tesseract-core
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pygments==2.21.0
     # via rich
