@@ -1963,10 +1963,10 @@ class HTTPClient:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
                 data = from_json(response.content)
-            except requests.JSONDecodeError:
+            except ValueError:
                 # Is not a Pydantic error
                 data = {}
-            if "detail" in data:
+            if isinstance(data, dict) and isinstance(data.get("detail"), list):
                 errors = []
                 for e in data["detail"]:
                     error = InitErrorDetails(
