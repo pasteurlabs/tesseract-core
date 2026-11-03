@@ -6,6 +6,7 @@
 import csv
 import json
 import os
+import re
 import shutil
 import sys
 import threading
@@ -142,7 +143,7 @@ class MLflowBackend(BaseBackend):
         tracking_uri = config.mlflow_tracking_uri
 
         parsed = urlparse(tracking_uri)
-        if not parsed.scheme:
+        if not parsed.scheme or re.match(r"[^:/]+:\d+(/|$)", tracking_uri):
             tracking_uri = f"https://{tracking_uri}"
 
         parsed = urlparse(tracking_uri)
