@@ -445,12 +445,11 @@ def _validate_port(port: str | None) -> str | None:
         return None
 
     port = port.strip()
-    if "-" in port:
-        start, end = port.split("-")
-    else:
-        start = end = port
-
     try:
+        if "-" in port:
+            start, end = port.split("-")
+        else:
+            start = end = port
         start, end = int(start), int(end)
     except ValueError as ex:
         raise typer.BadParameter(
