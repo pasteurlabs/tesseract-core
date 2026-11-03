@@ -146,7 +146,7 @@ def get_free_port(
         raise ValueError("Invalid port range, must be between 0 and 65535")
 
     # Try random ports in the given range
-    portlist = list(range(start, end))
+    portlist = list(range(start, end + 1))
     random.shuffle(portlist)
     for port in portlist:
         if port in exclude:
