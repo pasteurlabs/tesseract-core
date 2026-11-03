@@ -223,7 +223,22 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     # mirroring jax_abstract_eval below. A scalar ``Differentiable[Float32]``
     # validates to a numpy scalar, which ``is_array`` accepts, so it stays
     # dynamic and keeps its gradient.
-    dynamic_inputs, static_inputs = eqx.partition(inputs_dict, filter_spec=eqx.is_array)
+    out, vjp_func, cotangent_template = _apply_with_vjp_jit(apply_jit, inputs_dict)
+    _jax_vjp_cache.put(
+        (apply_jit, _cache_key(inputs_dict)), (vjp_func, cotangent_template)
+    )
+    return out
+
+
+@eqx.filter_jit
+def _apply_with_vjp_jit(apply_jit: Callable, inputs: dict) -> tuple:
+    """Run the forward pass via ``jax.vjp`` in one program (see :func:`jax_apply`).
+
+    Returns the outputs, the backward, which is a pytree of residuals and can
+    therefore leave the program, and a cotangent template of shapes and dtypes
+    only, which costs nothing to copy.
+    """
+    dynamic_inputs, static_inputs = eqx.partition(inputs, filter_spec=eqx.is_array)
 
     def _apply_for_vjp(dynamic_inputs: dict) -> tuple:
         out = apply_jit(eqx.combine(static_inputs, dynamic_inputs))
@@ -233,13 +248,25 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     diff_primals, vjp_func, static_primals = jax.vjp(
         _apply_for_vjp, dynamic_inputs, has_aux=True
     )
-    out = eqx.combine(diff_primals, static_primals)
-
-    cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
-    _jax_vjp_cache.put(
-        (apply_jit, _cache_key(inputs_dict)), (vjp_func, cotangent_template)
+    template = jax.tree.map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), diff_primals
     )
-    return out
+    return eqx.combine(diff_primals, static_primals), vjp_func, template
+
+
+@eqx.filter_jit
+def _cached_vjp_jit(
+    vjp_func: Callable, cotangent: Any, vjp_inputs: tuple[str, ...]
+) -> dict:
+    """Apply a cached backward, with zeros for the outputs that got no cotangent."""
+    cotangent = jax.tree.map(
+        lambda x: (
+            jnp.zeros(x.shape, x.dtype) if isinstance(x, jax.ShapeDtypeStruct) else x
+        ),
+        cotangent,
+    )
+    (all_input_cotangents,) = vjp_func(cotangent)
+    return flatten_with_paths(all_input_cotangents, include_paths=vjp_inputs)
 
 
 def jax_vjp(
@@ -270,10 +297,8 @@ def jax_vjp(
         is not None
     ):
         vjp_func, cotangent_template = cached
-        full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)
-        full_cotangent = set_at_path(full_cotangent, cotangent_vector)
-        (all_input_cotangents,) = vjp_func(full_cotangent)
-        return flatten_with_paths(all_input_cotangents, include_paths=vjp_inputs)
+        full_cotangent = set_at_path(cotangent_template, cotangent_vector)
+        return _cached_vjp_jit(vjp_func, full_cotangent, tuple(sorted(vjp_inputs)))
 
     # Cache disabled or cache miss: fall back to original JIT-compiled path.
     return _vjp_jit(
