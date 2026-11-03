@@ -693,6 +693,17 @@ def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, 
         assert out.attrs == mocked_docker.images.get(image_name).attrs
 
 
+def test_build_tesseract_creates_missing_build_dir_parents(
+    dummy_tesseract_package, mocked_docker, tmp_path_factory
+):
+    build_dir = tmp_path_factory.mktemp("parent") / "missing" / "build"
+    out = engine.build_tesseract(
+        dummy_tesseract_package, "42", build_dir=build_dir, generate_only=True
+    )
+    assert out == build_dir
+    assert (build_dir / "Dockerfile").exists()
+
+
 @pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
 def test_init(tmpdir, recipe):
     """Test the initialization of a tesseract from the template."""
