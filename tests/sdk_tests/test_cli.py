@@ -54,6 +54,13 @@ def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     assert result.exit_code == 2, result.stdout
 
 
+@pytest.mark.parametrize("port", ["8000:8081", "8000-8080-9000"])
+def test_serve_rejects_malformed_port(cli_runner, port):
+    result = cli_runner.invoke(cli, ["serve", "some-image", "-p", port])
+    assert result.exit_code == 2, result.stdout
+    assert "Invalid value for port" in result.stderr
+
+
 def test_bad_docker_executable_env_var():
     env = os.environ.copy()
     env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
