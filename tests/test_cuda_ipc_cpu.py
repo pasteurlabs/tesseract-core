@@ -1007,6 +1007,30 @@ def test_validate_gpu_transport_config_raises_without_a_usable_device(monkeypatc
         validate_gpu_transport_config()
 
 
+def test_cli_user_command_validates_gpu_transport_config(monkeypatch):
+    import copy
+
+    from typer.testing import CliRunner
+
+    from tesseract_core.runtime import cli, config
+
+    config.update_config(gpu_transport="cuda_ipc")
+    monkeypatch.setattr(cuda_api, "device_count", lambda: 0)
+
+    def dummy_endpoint():
+        """Dummy endpoint."""
+        return {"res": 1}
+
+    app = copy.deepcopy(cli.app)
+    cli._create_user_defined_cli_command(app, dummy_endpoint, None)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["dummy-endpoint"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValueError)
+    assert "cuda_ipc" in str(result.exception)
+
+
 def test_output_formats_never_include_cuda_ipc():
     """The host-array output formats are the three stable ones, always."""
     from tesseract_core.runtime.file_interactions import available_formats

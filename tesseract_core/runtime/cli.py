@@ -596,6 +596,7 @@ def _create_user_defined_cli_command(
     OutputSchema = user_function.__annotations__.get("return", None)
 
     def _callback_wrapper(**kwargs: Any):
+        validate_gpu_transport_config()
         config = get_config()
         input_path = config.input_path
         output_path = config.output_path
