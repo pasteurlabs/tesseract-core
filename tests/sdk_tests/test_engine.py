@@ -2128,3 +2128,31 @@ def test_output_format_matches_runtime_source_of_truth():
     from tesseract_core.runtime.file_interactions import supported_format_type
 
     assert get_args(engine.OutputFormat) == get_args(supported_format_type)
+
+
+@pytest.mark.parametrize(
+    "requires_dist, expected",
+    [
+        ('numpy>=1.26; extra == "runtime"', ["numpy>=1.26"]),
+        (
+            'numpy>=1.26; python_version < "3.13" and extra == "runtime"',
+            ["numpy>=1.26; python_version < '3.13'"],
+        ),
+        (
+            'numpy>=2.1; (python_version > "3.12") and extra == "runtime"',
+            ["numpy>=2.1; python_version > '3.12'"],
+        ),
+        (
+            'numpy; (python_version > "3.12" or os_name == "nt") and extra == "runtime"',
+            ["numpy; (python_version > '3.12' or os_name == 'nt')"],
+        ),
+        ('numpy>=1.26; extra == "dev"', []),
+        ("numpy>=1.26", []),
+    ],
+)
+def test_runtime_dependencies_keep_non_extra_markers(
+    monkeypatch, requires_dist, expected
+):
+    """Per-Python conditions survive, to be evaluated where the runtime installs."""
+    monkeypatch.setattr(engine, "requires", lambda _: [requires_dist])
+    assert engine.get_runtime_dependencies() == expected
