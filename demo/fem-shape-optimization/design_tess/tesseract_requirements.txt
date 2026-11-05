@@ -1,2 +1,1 @@
-numpy==1.26.4
-pyvista==0.45.2
+pyvista==0.49.2
