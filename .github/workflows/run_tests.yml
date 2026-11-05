@@ -292,7 +292,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # test with oldest supported Python version only (for slow tests)
-        python-version: ["3.10"]
+        python-version: ["3.11"]
 
         demo: ${{ fromJson(needs.get-e2e-matrix.outputs.demos) }}
 
