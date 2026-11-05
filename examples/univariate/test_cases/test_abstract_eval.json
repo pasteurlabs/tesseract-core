@@ -1,0 +1,25 @@
+{
+  "endpoint": "abstract_eval",
+  "expected_outputs": {
+    "result": {
+      "shape": [],
+      "dtype": "float32"
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "x": {
+        "shape": [],
+        "dtype": "float32"
+      },
+      "y": {
+        "shape": [],
+        "dtype": "float32"
+      }
+    }
+  }
+}

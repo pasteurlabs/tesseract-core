@@ -91,4 +91,4 @@ def vector_jacobian_product(
 
 def abstract_eval(abstract_inputs):
     """Calculate output shape of apply from the shape of its inputs."""
-    return {"result": ShapeDType(shape=(), dtype="Float32")}
+    return {"result": ShapeDType(shape=(), dtype="float32")}
