@@ -235,9 +235,12 @@ def get_array_model(
             max_length=len(expected_shape),
         )
 
-    # Add flags to the model config
+    # Add flags and the declared dtype to the model config. The dtype enum lists
+    # every dtype the field accepts, which does not identify the declared one, so
+    # clients that need it (e.g. to cast before sending) read `array_dtype`.
+    # It is null when the field accepts any dtype.
     config = EncodedArrayModel.model_config
-    config["json_schema_extra"] = {"array_flags": flags}
+    config["json_schema_extra"] = {"array_flags": flags, "array_dtype": expected_dtype}
 
     fields = {
         "object_type": (
