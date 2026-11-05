@@ -5,7 +5,7 @@
 ## Quick install
 
 ```{note}
-This requires Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). Docker is only needed for the [last part](#get-started-build), which builds a container image. See the [installation guide](../introduction/installation.md) for details.
+This requires Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). Docker is only needed for the [last part](#get-started-build), which builds a container image. See the [installation guide](../introduction/installation.md) for details.
 ```
 
 ```bash

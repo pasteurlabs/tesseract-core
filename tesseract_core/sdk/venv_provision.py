@@ -216,10 +216,7 @@ def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
 
     The key is optional, but an unreadable file or invalid value raises.
     """
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # Python 3.10; pip is an SDK dependency.
-        from pip._vendor import tomli as tomllib
+    import tomllib
 
     try:
         with lockfile.open("rb") as handle:

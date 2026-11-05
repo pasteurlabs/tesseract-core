@@ -43,7 +43,7 @@ def write_unbounded_pyproject(pyproject_file: str, workdir: str) -> None:
         "project": {
             "name": "tesseract-runtime-deps-resolver",
             "version": "0.0.0",
-            "requires-python": pyproject["project"].get("requires-python", ">=3.10"),
+            "requires-python": pyproject["project"].get("requires-python", ">=3.11"),
             "dependencies": new_deps,
         }
     }

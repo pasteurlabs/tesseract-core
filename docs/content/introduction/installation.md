@@ -3,7 +3,7 @@
 ## Basic installation
 
 ```{note}
-Tesseract Core needs Python 3.10+, ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
+Tesseract Core needs Python 3.11+, ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
 To run a Tesseract in its own environment with `Tesseract.from_source`, you also need [uv](https://docs.astral.sh/uv/getting-started/installation/) (or conda, for Tesseracts that declare conda requirements).
 Docker is only needed to [build and run container images](#installation-docker).
 ```

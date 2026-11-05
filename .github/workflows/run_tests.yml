@@ -22,13 +22,13 @@ jobs:
 
         # test with oldest and latest supported Python versions
         # NOTE: If bumping the minimum Python version here, also do it in
-        # ruff.toml, setup.py and other CI files as well.
-        python-version: ["3.10", "3.14"]
+        # pyproject.toml (requires-python, ruff target-version) and other CI files.
+        python-version: ["3.11", "3.14"]
         runtime-deps: ["latest"]
 
         include:
           - os: ubuntu-latest
-            python-version: "3.10"
+            python-version: "3.11"
             runtime-deps: "oldest"
 
       fail-fast: false
