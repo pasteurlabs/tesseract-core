@@ -7,7 +7,7 @@ build_config:
   # `Tesseract.from_source`.
 
   # Base image for the container, must be Ubuntu or Debian-based (images only)
-  # base_image: "debian:bookworm-slim"
+  # base_image: "debian:trixie-slim"
 
   # Platform to build the container for (images only). In general, images can
   # only be executed on the platform they were built for.

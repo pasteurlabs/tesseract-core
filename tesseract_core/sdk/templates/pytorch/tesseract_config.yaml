@@ -15,7 +15,7 @@ description: ""
 
 build_config:
   # Base image to use for the container, must be Ubuntu or Debian-based
-  # base_image: "debian:bookworm-slim"
+  # base_image: "debian:trixie-slim"
 
   # Python version to use inside the container (e.g. "3.12"). When set, the given
   # version is installed via `uv python install`, decoupling it from the base

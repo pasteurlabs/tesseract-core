@@ -222,7 +222,7 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
     """Configuration options for building a Tesseract."""
 
     base_image: StrictStr = Field(
-        "debian:bookworm-slim",
+        "debian:trixie-slim",
         description=(
             "Base Docker image for the build. Must be Debian-based. "
             "Only applies to container images."

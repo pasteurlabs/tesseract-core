@@ -1064,18 +1064,16 @@ def test_a_removed_interpreter_is_not_trusted(example_copy):
 def test_default_python_tracks_the_default_base_image():
     """Changing the default base image means updating DEFAULT_BASE_IMAGE_PYTHON."""
     assert (
-        TesseractBuildConfig.model_fields["base_image"].default
-        == "debian:bookworm-slim"
+        TesseractBuildConfig.model_fields["base_image"].default == "debian:trixie-slim"
     ), "update DEFAULT_BASE_IMAGE_PYTHON to the new base image's Python"
-    assert DEFAULT_BASE_IMAGE_PYTHON == "3.11"
+    assert DEFAULT_BASE_IMAGE_PYTHON == "3.13"
 
 
 def test_undeclared_python_matches_the_build(example_copy):
     """With no python_version, build on the default base image's Python.
 
     That is what `tesseract build` does, so a Tesseract that builds there serves
-    here too: `univariate` pins `jax[cpu]==0.4.28`, which has no wheel past
-    cp312.
+    here too, even if its pins have no wheels for the host's Python.
     """
     for name in ("univariate", "localpackage"):
         api_path = example_copy(name)
@@ -1090,7 +1088,7 @@ def test_undeclared_python_matches_the_build(example_copy):
 
 @pytest.mark.parametrize(
     "requires_python, expected",
-    [(">=3.10", DEFAULT_BASE_IMAGE_PYTHON), (">=3.12", ">=3.12")],
+    [(">=3.11", DEFAULT_BASE_IMAGE_PYTHON), (">=3.14", ">=3.14")],
 )
 def test_a_lockfile_python_range_is_honoured(
     dummy_tesseract_package, requires_python, expected

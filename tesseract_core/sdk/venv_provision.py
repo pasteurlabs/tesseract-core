@@ -47,9 +47,9 @@ _SCRUBBED_INSTALL_VARS = ("PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_USER")
 
 
 # The Python in the default `build_config.base_image`, which `tesseract build`
-# uses when no python_version is set. debian:bookworm-slim is Debian 12, which
-# ships 3.11 for its whole lifetime; a test fails if the default image changes.
-DEFAULT_BASE_IMAGE_PYTHON = "3.11"
+# uses when no python_version is set. debian:trixie-slim is Debian 13, which
+# ships 3.13 for its whole lifetime; a test fails if the default image changes.
+DEFAULT_BASE_IMAGE_PYTHON = "3.13"
 
 # Deliberately not `.venv`: that one is the user's, and we neither read nor write it.
 _MANAGED_VENV_NAME = ".tesseract-venv"
