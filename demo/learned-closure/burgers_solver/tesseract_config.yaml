@@ -3,4 +3,8 @@ version: "0.1.0"
 description: "1D Burgers equation solver with pluggable neural viscosity closure (PyTorch)"
 
 build_config:
+  requirements:
+    provider: uv-pip
+    python_version: "3.14"
+
   target_platform: "native"

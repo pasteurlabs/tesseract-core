@@ -5,4 +5,8 @@ version: "0.1.0"
 description: "Lorenz 96 Tesseract with finite-difference gradients (opaque simulator scenario)"
 
 build_config:
+  requirements:
+    provider: uv-pip
+    python_version: "3.14"
+
   target_platform: "native"
