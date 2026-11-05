@@ -149,3 +149,25 @@ lz4==4.9.9
 
     assert "pydantic<=2.99.0,>=2.10" in updated
     assert "typer<=0.28.0,>=0.26.8" in updated
+
+
+PER_PYTHON_PYPROJECT = """\
+[project.optional-dependencies]
+runtime = [
+    "numpy<=2.5.4,>=1.26; python_version < '3.13'",
+    "numpy<=2.5.4,>=2.1; python_version > '3.12'",
+]
+"""
+
+
+def test_per_python_lines_keep_their_own_floor_and_marker(tmp_path):
+    """Two lines for one package, split by marker, are rewritten independently."""
+    path = tmp_path / "pyproject.toml"
+    path.write_text(PER_PYTHON_PYPROJECT)
+
+    final_deps = get_updated_bounds(str(path), "numpy==2.6.0\nnumpy==2.4.6\n")
+    write_new_pyproject(final_deps, str(path))
+
+    lines = path.read_text().splitlines()
+    assert "    \"numpy<=2.6.0,>=1.26; python_version < '3.13'\"," in lines
+    assert "    \"numpy<=2.6.0,>=2.1; python_version > '3.12'\"," in lines
