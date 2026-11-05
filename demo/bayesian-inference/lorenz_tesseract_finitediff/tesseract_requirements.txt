@@ -1,2 +1,1 @@
 # No JAX needed — this simulates an opaque simulator
-numpy==1.26.0

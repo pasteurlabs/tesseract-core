@@ -18,6 +18,10 @@ description: |
   design, and differentiable physics for digital twins.
 
 build_config:
+  requirements:
+    provider: uv-pip
+    python_version: "3.14"
+
   base_image: "debian:bookworm-slim"
   target_platform: "linux/amd64"
 
