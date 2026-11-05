@@ -2079,7 +2079,7 @@ def test_get_free_port_skips_port_in_use():
         # Release the spare port so it becomes the only free port in the range.
         spare.close()
 
-        within_range = (min(in_use, free), max(in_use, free) + 1)
+        within_range = (min(in_use, free), max(in_use, free))
         port = engine.get_free_port(within_range=within_range)
 
     assert port == free
@@ -2091,9 +2091,9 @@ def test_get_free_port_no_free_ports():
         occupied.bind(("127.0.0.1", 0))
         in_use = occupied.getsockname()[1]
 
-        # Range containing only the single occupied port (end is exclusive).
+        # Range containing only the single occupied port.
         with pytest.raises(RuntimeError, match="No free ports found"):
-            engine.get_free_port(within_range=(in_use, in_use + 1))
+            engine.get_free_port(within_range=(in_use, in_use))
 
 
 def test_get_free_port_all_excluded():
@@ -2103,7 +2103,17 @@ def test_get_free_port_all_excluded():
         free = s.getsockname()[1]
 
     with pytest.raises(RuntimeError, match="No free ports found"):
-        engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+        engine.get_free_port(within_range=(free, free), exclude=(free,))
+
+
+def test_serve_port_range_of_one_port(mocked_docker):
+    """A range's end port can be picked, so ``-p 8080-8080`` serves on 8080."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+
+    res, _ = engine.serve("foobar", port=f"{free}-{free}")
+    assert json.loads(res)["ports"] == {f"127.0.0.1:{free}": engine.CONTAINER_API_PORT}
 
 
 def test_output_format_matches_runtime_source_of_truth():
