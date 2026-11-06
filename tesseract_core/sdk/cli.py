@@ -436,7 +436,10 @@ def init(
     """Initialize a new Tesseract API module."""
     recipe: str = _enum_to_val(recipe)
     logger.info(f"Initializing Tesseract {name} in directory: {target_dir}")
-    engine.init_api(target_dir, name, recipe=recipe)
+    try:
+        engine.init_api(target_dir, name, recipe=recipe)
+    except FileExistsError as e:
+        raise UserError(f"Cannot initialize Tesseract: {e}") from e
 
 
 def _validate_port(port: str | None) -> str | None:

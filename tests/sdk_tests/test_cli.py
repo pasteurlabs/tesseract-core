@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from tesseract_core.sdk.cli import app as cli
+from tesseract_core.sdk.exceptions import UserError
 
 
 def test_suggestion_on_misspelled_command(cli_runner):
@@ -33,6 +34,15 @@ def test_version(cli_runner):
     result = cli_runner.invoke(cli, ["--version"])
     assert result.exit_code == 0, result.stdout
     assert __version__ in result.stdout
+
+
+def test_init_refuses_existing_files_as_user_error(cli_runner, tmp_path):
+    args = ["init", "--name", "foo", "--target-dir", str(tmp_path)]
+    assert cli_runner.invoke(cli, args).exit_code == 0
+
+    result = cli_runner.invoke(cli, args)
+    assert isinstance(result.exception, UserError), result.exception
+    assert "tesseract_api.py already exists" in str(result.exception)
 
 
 @pytest.mark.parametrize("cmd", ["serve", "run"])
