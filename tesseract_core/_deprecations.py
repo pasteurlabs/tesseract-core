@@ -54,7 +54,7 @@ class Release(NamedTuple):
 
 # The implicit default `build_config.base_image` is changing; `tesseract build`
 # warns about it until then. Shared with that warning so the two cannot drift.
-DEFAULT_BASE_IMAGE_CHANGE = date(2027, 2, 1)
+DEFAULT_BASE_IMAGE_CHANGE = date(2026, 12, 18)
 NEXT_DEFAULT_BASE_IMAGE = "debian:trixie-slim"
 
 # Deprecations awaiting removal. Delete an entry together with its code once the
