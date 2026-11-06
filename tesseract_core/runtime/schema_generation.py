@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import functools
+import inspect
 import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -84,6 +85,25 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
+def _default_factory_takes_data(field: FieldInfo) -> bool:
+    """Whether a field's default_factory takes the validated data as an argument."""
+    # FieldInfo.default_factory_takes_validated_data is missing from pydantic 2.10,
+    # so fall back to the same check pydantic does internally.
+    takes_data = getattr(field, "default_factory_takes_validated_data", None)
+    if takes_data is not None:
+        return takes_data
+    try:
+        params = list(inspect.signature(field.default_factory).parameters.values())
+    except (ValueError, TypeError):
+        return False
+    return (
+        len(params) == 1
+        and params[0].kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        and params[0].default is inspect.Parameter.empty
+    )
+
+
 def _wrap_default_factory(
     field: FieldInfo, default_func: Callable[[Any, Any], Any]
 ) -> Callable[..., Any]:
@@ -94,7 +114,7 @@ def _wrap_default_factory(
     factory = field.default_factory
     annotation = field.annotation
 
-    if field.default_factory_takes_validated_data:
+    if _default_factory_takes_data(field):
 
         def wrapped(data: dict[str, Any]) -> Any:
             return default_func(annotation, factory(data))
