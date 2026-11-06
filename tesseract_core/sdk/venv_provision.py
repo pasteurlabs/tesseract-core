@@ -272,9 +272,8 @@ def _warn_about_default_python() -> None:
         f"build_config.requirements.python_version is not set, so this environment "
         f"is built on Python {DEFAULT_BASE_IMAGE_PYTHON}, the Python of the default "
         f"base image. That will change to Python 3.13 in the first minor release "
-        f"after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To choose, set it in "
-        f'tesseract_config.yaml: python_version: "{DEFAULT_BASE_IMAGE_PYTHON}" keeps '
-        f'the current Python, python_version: "3.13" switches now.'
+        f"after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To pin, set it with "
+        f"the `python_version` field in  tesseract_config.yaml."
     )
 
 

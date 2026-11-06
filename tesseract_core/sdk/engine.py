@@ -697,9 +697,9 @@ def _warn_about_default_base_image(build_config: TesseractBuildConfig) -> None:
         f"build_config.base_image is not set, so this Tesseract builds on the "
         f"default {current} (Debian 12, Python 3.11). The default will change to "
         f"{NEXT_DEFAULT_BASE_IMAGE} (Debian 13, Python 3.13) in the first minor "
-        f"release after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To choose, set it in "
-        f'tesseract_config.yaml: base_image: "{current}" keeps the current image, '
-        f'base_image: "{NEXT_DEFAULT_BASE_IMAGE}" switches now.'
+        f"release after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To pin, set it with "
+        f"the `base_image` field in tesseract_config.yaml. {current} keeps the "
+        f"current image, {NEXT_DEFAULT_BASE_IMAGE} switches now."
     )
 
 
