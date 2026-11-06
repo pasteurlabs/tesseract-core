@@ -693,9 +693,6 @@ def _warn_about_default_base_image(build_config: TesseractBuildConfig) -> None:
     if "base_image" in build_config.model_fields_set:
         return
     current = build_config.base_image
-    # Through the logger rather than warnings.warn: a library-emitted
-    # DeprecationWarning is hidden by Python's default filters, so a CLI user would
-    # never see it.
     logger.warning(
         f"build_config.base_image is not set, so this Tesseract builds on the "
         f"default {current} (Debian 12, Python 3.11). The default will change to "
