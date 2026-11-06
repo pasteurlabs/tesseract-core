@@ -759,7 +759,7 @@ def build_tesseract(
         keep_build_dir = bool(generate_only)
     else:
         build_dir = Path(build_dir)
-        build_dir.mkdir(exist_ok=True)
+        build_dir.mkdir(parents=True, exist_ok=True)
         keep_build_dir = True
 
     # Build secrets are supplied generically on the command line and mounted into
