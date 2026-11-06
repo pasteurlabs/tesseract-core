@@ -2128,3 +2128,66 @@ def test_output_format_matches_runtime_source_of_truth():
     from tesseract_core.runtime.file_interactions import supported_format_type
 
     assert get_args(engine.OutputFormat) == get_args(supported_format_type)
+
+
+def _write_minimal_tesseract(path, config_yaml):
+    (path / "tesseract_api.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class InputSchema(BaseModel):\n    x: int = 0\n"
+        "class OutputSchema(BaseModel):\n    y: int = 0\n"
+        "def apply(inputs: InputSchema) -> OutputSchema:\n    return OutputSchema()\n"
+    )
+    (path / "tesseract_config.yaml").write_text(config_yaml)
+
+
+@pytest.mark.parametrize(
+    "config_yaml, override, warns",
+    [
+        ("name: demo\n", None, True),
+        ("name: demo\nbuild_config:\n  target_platform: native\n", None, True),
+        (
+            'name: demo\nbuild_config:\n  base_image: "debian:bookworm-slim"\n',
+            None,
+            False,
+        ),
+        (
+            'name: demo\nbuild_config:\n  base_image: "debian:trixie-slim"\n',
+            None,
+            False,
+        ),
+        ("name: demo\n", {("build_config", "base_image"): "debian:trixie-slim"}, False),
+    ],
+)
+def test_build_warns_only_when_relying_on_the_default_base_image(
+    tmp_path, caplog, config_yaml, override, warns
+):
+    """The default base image is changing; only builds that rely on it are told."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_minimal_tesseract(src, config_yaml)
+
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine.build_tesseract(
+            src,
+            None,
+            build_dir=tmp_path / "build",
+            config_override=override,
+            generate_only=True,
+        )
+
+    warned = [r for r in caplog.records if "base_image is not set" in r.getMessage()]
+    assert bool(warned) is warns
+    if warns:
+        message = warned[0].getMessage()
+        assert 'base_image: "debian:bookworm-slim"' in message
+        assert 'base_image: "debian:trixie-slim"' in message
+
+
+def test_default_base_image_warning_matches_the_scheduled_change():
+    """The warning names the image the default is moving to, and it isn't the current one."""
+    from tesseract_core._deprecations import NEXT_DEFAULT_BASE_IMAGE
+
+    current = TesseractBuildConfig.model_fields["base_image"].default
+    assert current != NEXT_DEFAULT_BASE_IMAGE, (
+        "the default has switched: remove the deprecation warning and its tombstone"
+    )

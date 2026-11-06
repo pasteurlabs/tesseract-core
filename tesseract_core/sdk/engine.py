@@ -25,7 +25,9 @@ from packaging.requirements import Requirement
 from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
+from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE, NEXT_DEFAULT_BASE_IMAGE
 from .api_parse import (
+    TesseractBuildConfig,
     TesseractConfig,
     get_config,
     validate_tesseract_api,
@@ -683,6 +685,27 @@ def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) 
             ) from parsed_error
 
 
+def _warn_about_default_base_image(build_config: TesseractBuildConfig) -> None:
+    """Warn a build relying on the implicit default base image that it will change.
+
+    Scheduled in tesseract_core/_deprecations.py (DEFAULT_BASE_IMAGE_CHANGE).
+    """
+    if "base_image" in build_config.model_fields_set:
+        return
+    current = build_config.base_image
+    # Through the logger rather than warnings.warn: a library-emitted
+    # DeprecationWarning is hidden by Python's default filters, so a CLI user would
+    # never see it.
+    logger.warning(
+        f"build_config.base_image is not set, so this Tesseract builds on the "
+        f"default {current} (Debian 12, Python 3.11). The default will change to "
+        f"{NEXT_DEFAULT_BASE_IMAGE} (Debian 13, Python 3.13) in the first minor "
+        f"release after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To choose, set it in "
+        f'tesseract_config.yaml: base_image: "{current}" keeps the current image, '
+        f'base_image: "{NEXT_DEFAULT_BASE_IMAGE}" switches now.'
+    )
+
+
 def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
@@ -742,6 +765,8 @@ def build_tesseract(
                     setattr(c, k, _coerce_config_override(value, annotation, path))
                 else:
                     c = getattr(c, k)
+
+    _warn_about_default_base_image(config.build_config)
 
     image_name = config.name
     if image_tag:
