@@ -647,20 +647,10 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
         )
 
 
-def test_parse_eps_for_overrides_and_default():
-    """--eps-for overrides its paths; every other path falls back to --eps."""
+def test_parse_eps_for():
     from tesseract_core.runtime.cli import _parse_eps_for
 
-    eps = _parse_eps_for(["a=1e-3", "b=2e-6"], default=1e-4)
-    assert eps["a"] == 1e-3
-    assert eps["b"] == 2e-6
-    # Unlisted paths resolve to the global default...
-    assert eps["s"] == 1e-4
-    assert "s" in eps
-    # ...but iteration yields only the explicit overrides, so the core's
-    # unknown-path validation can still flag typos.
-    assert set(eps) == {"a", "b"}
-    assert len(eps) == 2
+    assert _parse_eps_for(["a=1e-3", "b=2e-6"]) == {"a": 1e-3, "b": 2e-6}
 
 
 @pytest.mark.parametrize(
@@ -675,7 +665,7 @@ def test_parse_eps_for_rejects_malformed(bad_value):
     from tesseract_core.runtime.cli import BadParameter, _parse_eps_for
 
     with pytest.raises(BadParameter):
-        _parse_eps_for([bad_value], default=1e-4)
+        _parse_eps_for([bad_value])
 
 
 def test_check_gradients_eps_for(cli, cli_runner):

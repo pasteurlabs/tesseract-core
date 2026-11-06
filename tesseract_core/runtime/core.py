@@ -334,6 +334,18 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
         endpoints.append(abstract_eval)
 
+    gradient_endpoints = {
+        "jacobian",
+        "jacobian_vector_product",
+        "vector_jacobian_product",
+    }
+    if gradient_endpoints.intersection(supported_functions):
+        from tesseract_core.runtime.testing.finite_differences import (
+            make_check_gradients_endpoint,
+        )
+
+        endpoints.append(make_check_gradients_endpoint(api_module))
+
     from tesseract_core.runtime.testing.regression import make_test_endpoint
 
     test = make_test_endpoint(api_module, endpoints)

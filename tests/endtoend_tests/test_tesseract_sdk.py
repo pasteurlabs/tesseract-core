@@ -20,6 +20,7 @@ expected_endpoints = {
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
+    "check_gradients",
     "test",
 }
 
@@ -201,6 +202,15 @@ def test_all_endpoints(
                 "atol": 1e-8,
                 "rtol": 0.00001,
             }
+        }
+    elif endpoint_name == "check_gradients":
+        # The dummy's JVP and VJP deliberately return zeros, so check jacobian only
+        inputs = {
+            "inputs": inputs,
+            "endpoints": ["jacobian"],
+            "eps": 1e-2,
+            "max_evals": 10,
+            "seed": 0,
         }
     else:
         inputs = {}
