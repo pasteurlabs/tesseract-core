@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Callable, Collection
 from functools import cache
@@ -26,6 +27,7 @@ from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
 from .api_parse import (
+    TesseractBuildConfig,
     TesseractConfig,
     get_config,
     validate_tesseract_api,
@@ -622,6 +624,11 @@ def init_api(
         "version": tesseract_version,
         "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "name": tesseract_name,
+        # Written out explicitly, so later changes to either default leave this
+        # Tesseract alone. The Python is the one `tesseract init` runs on, which is
+        # also what the user tests `Tesseract.from_source` with.
+        "base_image": TesseractBuildConfig.model_fields["base_image"].default,
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
     }
 
     # If target dir does not exist, create it

@@ -18,20 +18,23 @@ build_config:
   # `Tesseract.from_source`.
 
   # Base image for the container, must be Ubuntu or Debian-based (images only)
-  # base_image: "debian:bookworm-slim"
+  # Set by `tesseract init` to the current default, so that a future change of
+  # default does not change this Tesseract.
+  base_image: "{{ base_image }}"
 
   # Python version to use for the Tesseract's environment (e.g. "3.12"), installed
   # via uv if needed. When unset, container images use the base image's system
   # Python. Only available for the uv-pip provider; with conda, set the version in
   # tesseract_environment.yaml.
-  # requirements:
-  #   provider: uv-pip
-  #   python_version: "3.12"
+  # Set by `tesseract init` to the Python it ran on.
+  requirements:
+    provider: uv-pip
+    python_version: "{{ python_version }}"
 
   # If true, create the Python virtual environment with --system-site-packages so
   # it inherits packages pre-installed in the base image (or, with
   # `Tesseract.from_source`, in the host Python). Cannot be combined with
-  # requirements.python_version.
+  # requirements.python_version, so remove that above when enabling this.
   # inherit_base_image_packages: false
 
   # Platform to build the container for (images only). In general, images can
