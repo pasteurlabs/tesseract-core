@@ -89,8 +89,8 @@ ENV TESSERACT_REQUIREMENTS_FILE="{{ config.build_config.requirements._filename }
 ENV TESSERACT_INHERIT_BASE_IMAGE_PACKAGES=1
 {% endif %}
 
-{% if config.build_config.effective_python_version %}
-ENV TESSERACT_PYTHON_VERSION="{{ config.build_config.effective_python_version }}"
+{% if config.build_config.image_python_version %}
+ENV TESSERACT_PYTHON_VERSION="{{ config.build_config.image_python_version }}"
 {% endif %}
 
 # Reset uv configuration inherited from the base image to inert defaults, so the
