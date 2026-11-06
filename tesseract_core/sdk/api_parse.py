@@ -225,7 +225,8 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         "debian:bookworm-slim",
         description=(
             "Base Docker image for the build. Must be Debian-based. "
-            "Only applies to container images."
+            "Only applies to container images. The default will change to "
+            "debian:trixie-slim (Python 3.13); set this explicitly to choose."
         ),
     )
     target_platform: StrictStr = Field(
