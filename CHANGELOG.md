@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.15.1] - 2026-11-06
+
+### Bug Fixes
+
+- *(runtime)* Let the finite difference helpers take an apply that returns a dict (#852)
+- *(runtime)* Let apply return an output model that has computed fields (#855)
+- Match only the root pyproject.toml in the update-uv-env hook (#861)
+- *(runtime)* Keep the JAX VJP cache apart for each apply function (#854)
+- *(runtime)* Set values inside tuples at a path (#853)
+- Point HTTP 500 errors to server logs and debug mode (#846)
+- *(sdk)* Leave the caller's environment dict untouched (#862)
+- *(runtime)* Let a NaN scalar match NaN in regression tests (#864)
+- *(runtime)* Keep the protocol on remote glob matches (#865)
+- *(runtime)* Read --input-path=DIR before importing the Tesseract API (#866)
+- *(runtime)* Pass CLI config to the workers of serve --num-workers (#863)
+- *(runtime)* Let a served Tesseract print non-ASCII text on Windows (#833)
+- *(sdk)* Add http:// to a host:port URL in from_url (#869)
+- *(sdk)* Keep continued lines and drop comments when staging requirements (#870)
+- *(sdk)* Give Tesseracts served with network="host" a reachable URL (#868)
+- *(runtime)* Find built-in GPU transports when the first calls run concurrently (#859)
+- *(runtime)* Make `tesseract-runtime --debug` wait for a debugger in one-shot commands (#849)
+- *(sdk)* Resolve InputPath/OutputPath against in-process Tesseract's own paths (#881)
+- *(runtime)* Stop leaking sys.path to subprocesses via PYTHONPATH (#885)
+- *(sdk)* Report a 422 whose body is not a Pydantic error list (#887)
+- *(sdk)* Report a port with two dashes as a usage error (#891)
+- Use a valid dtype in the univariate examples' abstract_eval (#897)
+- *(sdk)* Include the end port of a --port range (#892)
+- Show a clean error when tesseract init would overwrite files (#896)
+
+### Documentation
+
+- Lead with `from_source` instead of Docker, add a gradient-checking guide and project gallery (#821)
+- Add a `cuda_ipc` GPU transport how-to and a "Tesseract is now GPU-native" blog post (#791)
+- Improve search and link previews of the landing page, fix blog posts overflowing on mobile (#884)
+
+### Performance
+
+- Improve podman runtime (#826)
+- *(runtime)* Skip zero tangents in finite_difference_jvp (#873)
+- *(runtime)* Cut the per-call overhead of the JAX recipe's VJP cache (#860)
+
 ## [1.15.0] - 2026-10-15
 
 ### Features
