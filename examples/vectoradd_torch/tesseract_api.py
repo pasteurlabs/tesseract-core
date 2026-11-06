@@ -1,13 +1,12 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 import torch
 from pydantic import BaseModel, Field, model_validator
 from torch.utils._pytree import tree_map
-from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths

@@ -23,11 +23,10 @@ dt) or initial conditions (T_in) with respect to any output.
 
 import ctypes
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
-from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float64, ShapeDType
 

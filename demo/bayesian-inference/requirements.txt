@@ -1,8 +1,6 @@
-# Pinned to a verified-working set that also supports Python 3.10 (the project's
-# floor). The notebook runs end-to-end on 3.10 with these. Two constraints drive
+# Pinned to a verified-working set that also supports Python 3.11 (the project's
+# floor). The notebook runs end-to-end on 3.11 with these. One constraint drives
 # the pins:
-#   - Python 3.10: jax > 0.6.2 and numpy >= 2.3 require >= 3.11, which in turn
-#     caps numpyro at 0.19 (later releases need jax >= 0.7 / Python >= 3.11).
 #   - arviz >= 1.0 dropped support for az.ess() on a bare ndarray.
 jax[cpu]==0.6.2
 numpy==2.2.6

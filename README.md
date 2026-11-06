@@ -73,7 +73,7 @@ Solvers in C++, Julia, JAX, and PyTorch, from deal.II and OpenFOAM to JAX-FEM an
 
 ## Quick start
 
-You need Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), which Tesseract uses to build an isolated environment for each component.
+You need Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), which Tesseract uses to build an isolated environment for each component.
 
 ```bash
 $ pip install tesseract-core tesseract-jax

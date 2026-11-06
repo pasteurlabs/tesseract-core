@@ -5,7 +5,7 @@ authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
 ]
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10,<4"
+requires-python = ">=3.11,<4"
 dependencies = [
     "jinja2",
     "rich",
@@ -165,7 +165,7 @@ omit = [
 
 [tool.ruff]
 # Set to the lowest supported Python version.
-target-version = "py310"
+target-version = "py311"
 
 # Set the target line length for formatting.
 line-length = 88
