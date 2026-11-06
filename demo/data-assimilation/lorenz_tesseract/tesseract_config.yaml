@@ -6,6 +6,10 @@ version: "0.1.0"
 description: "Tesseract that runs a scan of forecasting for a single-scale Lorenz 96 system"
 
 build_config:
+  requirements:
+    provider: uv-pip
+    python_version: "3.14"
+
   # Base image to use for the container, must be Ubuntu or Debian-based
   # base_image: "debian:bookworm-slim"
 

@@ -2,61 +2,38 @@
 
 # Interacting with Tesseracts
 
-You've built a Tesseract — now let's put it to work. This page walks through
-calling a Tesseract from all three interfaces (CLI, REST API, and Python SDK),
-computing derivatives, and reading a Tesseract's schema so you know exactly what
-it expects. We recommend working through [Get Started](tr-quickstart) and
-[Creating Tesseracts](tr-create) first.
+This page shows how to call a Tesseract through all three interfaces (CLI, REST
+API, and Python SDK), compute its derivatives, and read its schema so you know
+exactly what it expects. We recommend working through [Get started](tr-quickstart)
+and [Creating Tesseracts](tr-create) first.
 
 We'll use the `vectoradd` Tesseract from the {gh-tree}`examples <examples/vectoradd>`,
-which computes `s·a + b` for two vectors `a`, `b` and a scalar `s`. Build it the
-same way you built `helloworld`:
-
-```bash
-$ tesseract build examples/vectoradd
-```
-
-## See what's running
-
-Some ways of calling a Tesseract (the REST API, or a served Python session)
-need a running container. To list every Tesseract currently running on your
-machine:
-
-% invisible-code-block: bash
-%
-% $ tesseract serve vectoradd
-
-```bash
-$ tesseract ps
-┏━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID           ┃ Name      ┃ Version ┃ Host Address    ┃ Container Name         ┃ Description                             ┃
-┡━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 997fca92ea37 │ vectoradd │ 1.2.3   │ 127.0.0.1:56434 │ tesseract-afn60xa27hih │ Simple tesseract that adds two vectors. │
-└──────────────┴───────────┴─────────┴─────────────────┴────────────────────────┴─────────────────────────────────────────┘
-```
-
-The output is a table showing each container's ID, name, version, host address,
-container name, and description. Two columns you'll reach for often:
-
-- **Host Address** — the address to use when calling the Tesseract's REST endpoints.
-- **Container Name** — pass this to `tesseract teardown` to stop the container.
+which computes `s·a + b` for two vectors `a`, `b` and a scalar `s`. As in
+[Get started](tr-quickstart), commands on this page run from the directory that
+contains `examples/`.
 
 ## Invoke the `apply` endpoint
 
-Every Tesseract's core operation is `apply` — for `vectoradd` it's the vector
+Every Tesseract's core operation is `apply`. For `vectoradd` it's the vector
 sum, but in general this could be a neural network forward pass, a simulation
 step, or any other computation. Let's call it with `a = (1, 2, 3)` and
 `b = (4, 5, 6)`, which should give us `(5, 7, 9)`.
 
-Pick whichever interface fits how you're working — all three return the same
+Pick whichever interface fits how you're working. All three return the same
 result:
 
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
 
+The `tesseract-runtime` CLI runs a Tesseract in your current environment, so
+the runtime (`pip install "tesseract-core[runtime]"`) and the Tesseract's
+requirements have to be installed there. Point it at the Tesseract with
+`TESSERACT_API_PATH`:
+
 ```bash
-$ tesseract run vectoradd apply @examples/vectoradd/example_inputs.json
+$ export TESSERACT_API_PATH=examples/vectoradd/tesseract_api.py
+$ tesseract-runtime apply @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
 ```
 
@@ -71,24 +48,31 @@ For small payloads, you can also pass JSON inline:
 % skip: next "abbreviated payload"
 
 ```bash
-$ tesseract run vectoradd apply '{"inputs": {"a": ..., "b": ...}}'
+$ tesseract-runtime apply '{"inputs": {"a": ..., "b": ...}}'
 ```
 
 :::
 :::{tab-item} REST API
 :sync: http
 
-First make sure the Tesseract is running (check `tesseract ps`), or launch it with:
+With the runtime installed as in the CLI tab, start a server for the Tesseract:
+
+% invisible-code-block: bash
+%
+% $ tesseract-runtime serve --port 8080 > /dev/null 2>&1 & echo $! > "$DOC_TMPDIR/serve.pid"
+% $ for i in $(seq 60); do curl -sf http://127.0.0.1:8080/health > /dev/null && break; sleep 0.5; done
+
+% skip: next "long-running server, started in the background above"
 
 ```bash
-$ tesseract serve vectoradd
+$ export TESSERACT_API_PATH=examples/vectoradd/tesseract_api.py
+$ tesseract-runtime serve --port 8080
 ```
 
-Then post to its `/apply` endpoint, replacing `<tesseract-address>:<port>` with the
-host address from `tesseract ps`:
+Then, from a second terminal, post to its `/apply` endpoint:
 
 ```bash
-$ curl http://<tesseract-address>:<port>/apply \
+$ curl http://127.0.0.1:8080/apply \
   -H "Content-Type: application/json" \
   -d @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
@@ -111,14 +95,15 @@ The payload posted to `/apply` is:
 >>> a = np.array([1.0, 2.0, 3.0])
 >>> b = np.array([4.0, 5.0, 6.0])
 >>>
->>> with Tesseract.from_image("vectoradd") as vectoradd:
+>>> with Tesseract.from_source("examples/vectoradd/tesseract_api.py") as vectoradd:
 ...     vectoradd.apply({"a": a, "b": b})
 {'result': array([5., 7., 9.])}
 ```
 
-The [Tesseract](#tesseract_core.Tesseract) context manager starts the container
-locally and tears it down when the context exits, so you don't have to manage
-its lifecycle by hand.
+`Tesseract.from_source` starts the Tesseract in a separate process when the
+`with` block is entered and stops it when the block exits. On first use, it
+also creates an environment for the Tesseract (see
+[Creating Tesseracts](tr-create-run)).
 
 ```{tip}
 To connect to a Tesseract that's already running elsewhere, use `Tesseract.from_url(...)` instead.
@@ -129,14 +114,14 @@ To connect to a Tesseract that's already running elsewhere, use `Tesseract.from_
 
 Notice the shape of the result. Over the CLI and REST API, arrays come back in a
 structured JSON form that records the `dtype`, `shape`, and `encoding` alongside
-the raw `buffer` — this is what makes Tesseract outputs self-describing across
+the raw `buffer`, which makes Tesseract outputs self-describing across
 languages. The Python SDK unpacks that form into a NumPy array for you.
 
 ## Compute derivatives
 
-`vectoradd` is _differentiable_: it was built with `Differentiable` inputs and
-outputs, so it exposes derivative endpoints in addition to `apply`. (If you
-haven't yet met differentiable Tesseracts, the
+`vectoradd` is _differentiable_: its schemas mark inputs and outputs as
+`Differentiable`, so it exposes derivative endpoints in addition to `apply`.
+(If you haven't yet met differentiable Tesseracts, the
 [Differentiability](tr-create-diff) section of the previous page introduces
 them.)
 
@@ -149,7 +134,7 @@ expect the 3×3 identity matrix:
 :sync: cli
 
 ```bash
-$ tesseract run vectoradd jacobian @examples/vectoradd/example_jacobian_inputs.json
+$ tesseract-runtime jacobian @examples/vectoradd/example_jacobian_inputs.json
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
 ```
 
@@ -158,9 +143,9 @@ $ tesseract run vectoradd jacobian @examples/vectoradd/example_jacobian_inputs.j
 :sync: http
 
 ```bash
-$ curl -d @examples/vectoradd/example_jacobian_inputs.json \
+$ curl http://127.0.0.1:8080/jacobian \
   -H "Content-Type: application/json" \
-  http://<tesseract-address>:<port>/jacobian
+  -d @examples/vectoradd/example_jacobian_inputs.json
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
 ```
 
@@ -175,7 +160,7 @@ $ curl -d @examples/vectoradd/example_jacobian_inputs.json \
 >>> a = np.array([1.0, 2.0, 3.0])
 >>> b = np.array([4.0, 5.0, 6.0])
 >>>
->>> with Tesseract.from_image("vectoradd") as vectoradd:
+>>> with Tesseract.from_source("examples/vectoradd/tesseract_api.py") as vectoradd:
 ...     vectoradd.jacobian({"a": a, "b": b}, jac_inputs=["a"], jac_outputs=["result"])
 {'result': {'a': array([[1., 0., 0.],
        [0., 1., 0.],
@@ -197,32 +182,33 @@ and REST API, those live in the payload:
 Only fields marked `Differentiable` may appear in `jac_inputs` / `jac_outputs`;
 asking for a non-differentiable field raises a validation error before the
 endpoint runs. Alongside `jacobian`, Tesseracts can expose the
-`jacobian_vector_product` (JVP) and `vector_jacobian_product` (VJP) endpoints —
-these are what [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and
+`jacobian_vector_product` (JVP) and `vector_jacobian_product` (VJP) endpoints.
+These are what [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and
 [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) use under the
 hood to make gradients flow through your Tesseract automatically. See
-[Differentiable Programming](tr-autodiff) for what each one computes.
+[Differentiable programming basics](tr-autodiff) for what each one computes.
 
 Not every Tesseract implements every endpoint. To check which ones a Tesseract
 supports:
 
 ```python
->>> with Tesseract.from_image("vectoradd") as vectoradd:
+>>> with Tesseract.from_source("examples/vectoradd/tesseract_api.py") as vectoradd:
 ...     print(vectoradd.available_endpoints)
 ['apply', 'jacobian', 'health', 'test']
 ```
 
 `vectoradd` implements `jacobian` but not JVP or VJP, so those don't appear.
-(`test` is listed because the Python SDK serves Tesseracts in debug mode, which
+(`test` is listed because `from_source` serves Tesseracts in debug mode, which
 enables the [`test` endpoint](testing-a-tesseract).)
 
-Equivalently, run `tesseract apidoc vectoradd` or open the `/docs` endpoint of a
-running Tesseract in your browser.
+A served Tesseract also has human-readable API docs at its `/docs` endpoint.
+With the server from the REST API tab running, open
+`http://127.0.0.1:8080/docs` in your browser.
 
 ## Read a Tesseract's schema
 
 Because each Tesseract has its own input/output signature, you'll often want to
-discover that signature programmatically — for validation, for building a UI, or
+discover that signature programmatically: for validation, for building a UI, or
 just to remind yourself what a Tesseract expects. Every Tesseract can emit its
 schema in [OpenAPI](https://swagger.io/specification/) format:
 
@@ -231,7 +217,7 @@ schema in [OpenAPI](https://swagger.io/specification/) format:
 :sync: cli
 
 ```bash
-$ tesseract run vectoradd openapi-schema
+$ tesseract-runtime openapi-schema
 ```
 
 :::
@@ -239,7 +225,7 @@ $ tesseract run vectoradd openapi-schema
 :sync: http
 
 ```bash
-$ curl <tesseract-address>:<port>/openapi.json
+$ curl http://127.0.0.1:8080/openapi.json
 ```
 
 :::
@@ -248,7 +234,7 @@ $ curl <tesseract-address>:<port>/openapi.json
 
 ```python
 >>> from tesseract_core import Tesseract
->>> with Tesseract.from_image("vectoradd") as vectoradd:
+>>> with Tesseract.from_source("examples/vectoradd/tesseract_api.py") as vectoradd:
 ...     schema = vectoradd.openapi_schema
 ```
 
@@ -257,13 +243,87 @@ $ curl <tesseract-address>:<port>/openapi.json
 
 The OpenAPI schema covers every endpoint, though they're all derived from the
 `apply` input/output schemas. It's built for machines; for a human-readable
-view, run `tesseract apidoc vectoradd` or open a running Tesseract's `/docs`
-endpoint.
+view, open a served Tesseract's `/docs` endpoint.
+
+% invisible-code-block: bash
+%
+% $ kill "$(cat "$DOC_TMPDIR/serve.pid")"
+
+## Call a Tesseract image
+
+Tesseracts are often shared as container images, which bundle the Tesseract with
+its environment and any system dependencies. With [Docker](#installation-docker)
+installed, build an image from the Tesseract's folder:
+
+```bash
+$ tesseract build examples/vectoradd
+```
+
+The image is named after the Tesseract, and the same three interfaces work
+against it:
+
+::::{tab-set}
+:::{tab-item} CLI
+:sync: cli
+
+```bash
+$ tesseract run vectoradd apply @examples/vectoradd/example_inputs.json
+{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
+```
+
+:::
+:::{tab-item} REST API
+:sync: http
+
+`tesseract serve` starts a container in the background:
+
+```bash
+$ tesseract serve vectoradd
+```
+
+To list every Tesseract container running on your machine:
+
+```bash
+$ tesseract ps
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ID           ┃ Name      ┃ Version ┃ Host Address    ┃ Container Name         ┃ Description                             ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 997fca92ea37 │ vectoradd │ 1.2.3   │ 127.0.0.1:56434 │ tesseract-afn60xa27hih │ Simple tesseract that adds two vectors. │
+└──────────────┴───────────┴─────────┴─────────────────┴────────────────────────┴─────────────────────────────────────────┘
+```
+
+Use the **Host Address** to call the container's endpoints:
+
+```bash
+$ curl http://<tesseract-address>:<port>/apply \
+  -H "Content-Type: application/json" \
+  -d @examples/vectoradd/example_inputs.json
+{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
+```
+
+Pass the **Container Name** to `tesseract teardown` to stop the container.
+
+:::
+:::{tab-item} Python
+:sync: python
+
+```python
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
+...     vectoradd.apply({"a": a, "b": b})
+{'result': array([5., 7., 9.])}
+```
+
+:::
+::::
+
+To view an image's API docs in your browser, run `tesseract apidoc vectoradd`.
+[Deploying Tesseracts](../how-to/deploy.md) covers pushing images to a registry
+and running them on other machines.
 
 ## What's next
 
-You can now build a Tesseract and drive it through all three interfaces,
-including its derivatives. From here:
+You can now call a Tesseract through all three interfaces, from source or as an
+image, and compute its derivatives. From here:
 
 - [](../how-to/pipelines.md) — chain several Tesseracts into a larger differentiable workflow.
 - [](../concepts/differentiable-programming.md) — how the `jacobian`, JVP, and VJP endpoints relate, and how to implement them.

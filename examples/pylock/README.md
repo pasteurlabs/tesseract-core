@@ -1,11 +1,11 @@
-# Build a Tesseract from a lockfile
+# Install a Tesseract's dependencies from a lockfile
 
 This Tesseract installs its dependencies from a [PEP 751](https://packaging.python.org/en/latest/specifications/pylock-toml/)
 lockfile (`pylock.toml`) instead of a flat `tesseract_requirements.txt`. A
 lockfile pins every dependency's exact version, source index, and artifact
-hashes, so the build performs no resolution.
+hashes, so installing it performs no resolution.
 
-Point the build at a lockfile with `requirements_file` (see
+Point the Tesseract at a lockfile with `requirements_file` (see
 [`tesseract_config.yaml`](tesseract_config.yaml)):
 
 ```yaml
@@ -16,8 +16,18 @@ build_config:
 ```
 
 Any PEP 751 filename is accepted, either `pylock.toml` or a named variant like
-`pylock.prod.toml`. The format is inferred from the name. Then build and run as
-usual:
+`pylock.prod.toml`. The format is inferred from the name. Then use the Tesseract
+as usual. `Tesseract.from_source` installs the lockfile into the environment it
+builds for the Tesseract:
+
+```python
+from tesseract_core import Tesseract
+
+with Tesseract.from_source("examples/pylock/tesseract_api.py") as t:
+    print(t.apply({"a": 2.0, "b": 3.0}))  # {'result': 5.0}
+```
+
+`tesseract build` installs it into a container image:
 
 ```bash
 $ tesseract build examples/pylock

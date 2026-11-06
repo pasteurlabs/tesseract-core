@@ -709,7 +709,8 @@ def check_gradients(
         output_paths: The output paths to check. If not provided, all differentiable paths are checked.
         base_dir: The base directory to resolve relative paths.
         endpoints: The gradient endpoints to check. If not provided, all available endpoints are checked.
-        max_evals: The target number of ``apply`` evaluations to perform.
+        max_evals: The target number of input elements to sample, split across
+            ``input_paths`` in proportion to their size.
         max_output_samples: Maximum number of output elements sampled when checking the
             vector_jacobian_product endpoint. If None, all output elements are checked
             exhaustively.

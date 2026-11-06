@@ -1,4 +1,4 @@
-# Finite Difference Gradients
+# Finite difference gradients
 
 {gh-tree}`View on GitHub <examples/meshstats_finitediff>`
 

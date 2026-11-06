@@ -1,4 +1,4 @@
-# Wrapping MATLAB Code
+# Wrapping MATLAB code
 
 {gh-tree}`View on GitHub <examples/_matlab_springmass>`
 

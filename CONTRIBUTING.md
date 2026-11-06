@@ -24,7 +24,7 @@ pull request. This allows all parties to talk things over before jumping into
 action, and increase the likelihood of pull requests getting merged.
 
 In case you have general questions or feedback, need support from the
-community, or have a cool demo to share, start a thread in our [Discourse
+community, or have a cool demo to share, start a thread in our [User
 Forum](https://si-tesseract.discourse.group/). We use GitHub Issues for bug
 reports and feature requests only.
 
@@ -49,7 +49,7 @@ The resulting HTMLs are in `docs/build/html/`.
 
 Contributions in the form of tutorials, examples, demos, blog posts (including
 those posted elsewhere already) are best highlighted and celebrated in the
-[Discourse Forum](https://si-tesseract.discourse.group/).
+[User Forum](https://si-tesseract.discourse.group/).
 
 ## Code
 
@@ -211,4 +211,4 @@ artifacts and publish them to the [GitHub Releases](https://github.com/pasteurla
 4. In the meantime, you can add more commits to `main` (and update the release branch) which will trigger re-generation of the changelog and release notes.
 5. Once the pull request is ready, merge it into `main`.
 6. GitHub Actions will then automatically release the new version. Verify that the release artifacts are correctly built and published.
-7. For major and minor releases, the release notes are mirrored to the [Discourse Forum](https://si-tesseract.discourse.group/) automatically, and the release links to that topic for questions and feedback. Announce the release on social media, if applicable.
+7. For major and minor releases, the release notes are mirrored to the [User Forum](https://si-tesseract.discourse.group/) automatically, and the release links to that topic for questions and feedback. Announce the release on social media, if applicable.

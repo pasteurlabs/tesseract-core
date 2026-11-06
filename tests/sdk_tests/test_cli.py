@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from tesseract_core.sdk.cli import app as cli
+from tesseract_core.sdk.exceptions import UserError
 
 
 def test_suggestion_on_misspelled_command(cli_runner):
@@ -35,6 +36,15 @@ def test_version(cli_runner):
     assert __version__ in result.stdout
 
 
+def test_init_refuses_existing_files_as_user_error(cli_runner, tmp_path):
+    args = ["init", "--name", "foo", "--target-dir", str(tmp_path)]
+    assert cli_runner.invoke(cli, args).exit_code == 0
+
+    result = cli_runner.invoke(cli, args)
+    assert isinstance(result.exception, UserError), result.exception
+    assert "tesseract_api.py already exists" in str(result.exception)
+
+
 @pytest.mark.parametrize("cmd", ["serve", "run"])
 def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     """cuda_ipc is a GPU transport, not a host output format, and never on the CLI.
@@ -52,6 +62,13 @@ def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     )
     result = cli_runner.invoke(cli, command)
     assert result.exit_code == 2, result.stdout
+
+
+@pytest.mark.parametrize("port", ["8000:8081", "8000-8080-9000"])
+def test_serve_rejects_malformed_port(cli_runner, port):
+    result = cli_runner.invoke(cli, ["serve", "some-image", "-p", port])
+    assert result.exit_code == 2, result.stdout
+    assert "Invalid value for port" in result.stderr
 
 
 def test_bad_docker_executable_env_var():

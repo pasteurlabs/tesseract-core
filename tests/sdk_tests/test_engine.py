@@ -1768,6 +1768,24 @@ def test_parse_requirements(tmpdir):
     ]
 
 
+def test_parse_requirements_continuations_and_comments(tmpdir):
+    reqs = (
+        "numpy==2.0.0 \\\n"
+        "    --hash=sha256:04494f6ec467ccb5369d1808570ae55f6ed9b5809d7f035059000a37b8d7e86f\n"
+        "scipy==1.14.0  # pinned\n"
+        "./internal_packages/foobar  # vendored\n"
+    )
+    reqs_file = Path(tmpdir) / "requirements.txt"
+    reqs_file.write_text(reqs)
+    locals, remotes = engine.parse_requirements(reqs_file)
+
+    assert locals == ["./internal_packages/foobar"]
+    assert remotes == [
+        "numpy==2.0.0     --hash=sha256:04494f6ec467ccb5369d1808570ae55f6ed9b5809d7f035059000a37b8d7e86f",
+        "scipy==1.14.0",
+    ]
+
+
 def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
     """Conda provider without an environment file is reported at staging.
 
@@ -2061,7 +2079,7 @@ def test_get_free_port_skips_port_in_use():
         # Release the spare port so it becomes the only free port in the range.
         spare.close()
 
-        within_range = (min(in_use, free), max(in_use, free) + 1)
+        within_range = (min(in_use, free), max(in_use, free))
         port = engine.get_free_port(within_range=within_range)
 
     assert port == free
@@ -2073,9 +2091,9 @@ def test_get_free_port_no_free_ports():
         occupied.bind(("127.0.0.1", 0))
         in_use = occupied.getsockname()[1]
 
-        # Range containing only the single occupied port (end is exclusive).
+        # Range containing only the single occupied port.
         with pytest.raises(RuntimeError, match="No free ports found"):
-            engine.get_free_port(within_range=(in_use, in_use + 1))
+            engine.get_free_port(within_range=(in_use, in_use))
 
 
 def test_get_free_port_all_excluded():
@@ -2085,7 +2103,17 @@ def test_get_free_port_all_excluded():
         free = s.getsockname()[1]
 
     with pytest.raises(RuntimeError, match="No free ports found"):
-        engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+        engine.get_free_port(within_range=(free, free), exclude=(free,))
+
+
+def test_serve_port_range_of_one_port(mocked_docker):
+    """A range's end port can be picked, so ``-p 8080-8080`` serves on 8080."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+
+    res, _ = engine.serve("foobar", port=f"{free}-{free}")
+    assert json.loads(res)["ports"] == {f"127.0.0.1:{free}": engine.CONTAINER_API_PORT}
 
 
 def test_output_format_matches_runtime_source_of_truth():

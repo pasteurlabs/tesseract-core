@@ -913,3 +913,107 @@ def apply(inputs: InputSchema) -> OutputSchema:
     assert result.returncode == 0, f"CLI failed: {result.stderr}"
     output = json.loads(result.stdout)
     assert output["value"] == 42
+
+
+@pytest.mark.parametrize("outer_pythonpath", [None, "/opt/elsewhere"])
+def test_subprocesses_inherit_only_module_dir_on_pythonpath(
+    dummy_tesseract_package, outer_pythonpath
+):
+    """Subprocesses must not inherit the runtime's sys.path via PYTHONPATH.
+
+    See https://github.com/pasteurlabs/tesseract-core/issues/883
+    """
+    tesseract_api_file = Path(dummy_tesseract_package) / "tesseract_api.py"
+    with open(tesseract_api_file, "w") as f:
+        f.write("""\
+import subprocess
+import sys
+from pydantic import BaseModel
+
+class InputSchema(BaseModel):
+    pass
+
+class OutputSchema(BaseModel):
+    child_pythonpath: str
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    result = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ.get('PYTHONPATH', ''))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return OutputSchema(child_pythonpath=result.stdout.strip())
+""")
+
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    if outer_pythonpath is not None:
+        env["PYTHONPATH"] = outer_pythonpath
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tesseract_core.runtime.cli",
+            "apply",
+            '{"inputs": {}}',
+        ],
+        capture_output=True,
+        text=True,
+        env={**env, "TESSERACT_API_PATH": str(tesseract_api_file)},
+        check=False,
+    )
+    assert result.returncode == 0, f"CLI failed: {result.stderr}"
+
+    expected = [str(tesseract_api_file.parent.resolve())]
+    if outer_pythonpath is not None:
+        expected.append(outer_pythonpath)
+    child_pythonpath = json.loads(result.stdout)["child_pythonpath"]
+    assert child_pythonpath.split(os.pathsep) == expected
+
+
+def test_debug_flag_waits_for_debugger(dummy_tesseract_package):
+    """`--debug` must attach the debugger before a one-shot command runs.
+
+    The flag is parsed by Typer only after the Tesseract API is imported, so it
+    has to be applied earlier for the debugger to start, as the environment
+    variable already is.
+    """
+    import socket
+    import time
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "tesseract_core.runtime.cli",
+            "--debug",
+            "--debugpy-port",
+            str(port),
+            "openapi-schema",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={
+            **os.environ,
+            "TESSERACT_API_PATH": str(dummy_tesseract_package / "tesseract_api.py"),
+        },
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert proc.poll() is None, "Command ran without waiting for a debugger"
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            pytest.fail(f"No debugger listening on port {port}")
+    finally:
+        proc.kill()
+        proc.wait()

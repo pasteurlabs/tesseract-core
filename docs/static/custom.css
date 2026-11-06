@@ -183,8 +183,9 @@ body[data-theme="dark"] .invert-on-dark {
 
 .landing-hero {
     display: flex;
-    align-items: center;
-    gap: 2.5rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 1.5rem 2.5rem;
     padding: 3.5rem 1.5rem 2.5rem;
     max-width: var(--landing-max-width);
     margin: 0 auto;
@@ -192,14 +193,19 @@ body[data-theme="dark"] .invert-on-dark {
 
 .landing-hero-logo {
     flex-shrink: 0;
+    /* Line up the logo's top edge with the eyebrow's cap height */
+    margin-top: 0.45rem;
 }
 
 .landing-hero-text {
+    flex: 1;
     text-align: left;
 }
 
-.landing-hero-text .landing-cta > p {
-    justify-content: flex-start;
+/* CTA row spans the full hero width below the logo and text */
+.landing-hero > .landing-cta {
+    flex-basis: 100%;
+    margin-bottom: 0;
 }
 
 .landing-logo {
@@ -238,17 +244,30 @@ body:not([data-theme="dark"]) .landing-logo.only-dark {
     }
 }
 
-.landing-hero-tagline,
+.landing-hero-eyebrow,
+.landing-hero-headline,
 .landing-hero-subtitle {
     max-width: 640px;
     margin: 0 0 0.5rem;
     line-height: 1.5;
 }
 
-.landing-hero-tagline {
-    font-size: 1.25rem;
+.landing-hero-eyebrow {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-foreground-secondary);
+}
+
+.landing-hero-eyebrow > p {
+    margin-top: 0;
+}
+
+.landing-hero-headline {
+    font-size: 1.6rem;
     font-weight: 700;
+    line-height: 1.25;
     color: var(--color-foreground-primary);
+    margin-bottom: 0.75rem;
 }
 
 .landing-hero-subtitle {
@@ -454,24 +473,29 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
 @media (max-width: 768px) {
     .landing-hero {
         flex-direction: column;
+        align-items: center;
         text-align: center;
         gap: 1rem;
+    }
+
+    .landing-hero-logo {
+        margin-top: 0;
     }
 
     .landing-hero-text {
         text-align: center;
     }
 
-    .landing-hero-text .landing-cta > p {
-        justify-content: center;
-    }
-
     .landing-hero h1 {
         font-size: 2.2rem;
     }
 
-    .landing-hero-tagline {
-        font-size: 1.05rem;
+    .landing-hero-eyebrow {
+        font-size: 0.85rem;
+    }
+
+    .landing-hero-headline {
+        font-size: 1.3rem;
     }
 
     .landing-logo {
@@ -500,7 +524,10 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     display: none;
 }
 
+/* Furo gives .content a fixed width (100% on mobile); our padding would add to
+   it and make the page scroll horizontally. Let it fill the parent instead. */
 .blog-page .content {
+    width: auto;
     max-width: var(--blog-content-width);
     margin: 0 auto;
     padding: 1rem;
@@ -556,9 +583,11 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
 .blog-page .content h1 {
     font-size: 2rem;
     font-weight: 800;
-    margin-top: 0;
-    margin-bottom: 2rem;
-    padding-bottom: 1.5rem;
+    /* Reset Furo's rounded, outset heading box so the bottom border is a
+       straight rule aligned with the text column */
+    margin: 0 0 2rem;
+    padding: 0 0 1.5rem;
+    border-radius: 0;
     border-bottom: 1px solid var(--color-background-border);
     letter-spacing: -0.03em;
     line-height: 1.2;

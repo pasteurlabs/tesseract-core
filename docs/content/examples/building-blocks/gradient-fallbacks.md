@@ -1,4 +1,4 @@
-# Deriving Gradient Endpoints from Each Other
+# Deriving gradient endpoints from each other
 
 {gh-tree}`View on GitHub <examples/univariate_gradient_fallbacks>`
 
