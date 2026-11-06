@@ -48,8 +48,15 @@ if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
     UV_PYTHON_DIR=$(dirname "$(dirname "$(readlink -f /python-env/bin/python)")")
     rm /python-env/bin/python /python-env/bin/python3 /python-env/bin/python3.*
     cp -a "$UV_PYTHON_DIR"/bin/* /python-env/bin/
-    cp -a "$UV_PYTHON_DIR"/lib/* /python-env/lib/
+    # Leave out the installation's own site-packages: it bundles pip and
+    # setuptools, which would be copied over (and break) the venv's.
+    tar -C "$UV_PYTHON_DIR/lib" --exclude='./python3*/site-packages' -cf - . \
+        | tar -C /python-env/lib -xf -
     cp -a "$UV_PYTHON_DIR"/include/* /python-env/include/
+    # After the merge, /python-env is its own base installation rather than a venv,
+    # so pip would honour the installation's EXTERNALLY-MANAGED marker and refuse
+    # to install (e.g. `RUN pip install ...` in custom_build_steps).
+    rm -f /python-env/lib/python3*/EXTERNALLY-MANAGED
 
     # pyvenv.cfg still points `home` at the uv-managed installation, which does
     # not exist after the Docker multi-stage COPY. Point it at the now-local
