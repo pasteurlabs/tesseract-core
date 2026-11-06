@@ -2190,8 +2190,10 @@ def test_build_warns_only_when_relying_on_the_default_base_image(
     assert bool(warned) is warns
     if warns:
         message = warned[0].getMessage()
-        assert 'base_image: "debian:bookworm-slim"' in message
-        assert 'base_image: "debian:trixie-slim"' in message
+        # Points to the field to set, and names both images to choose between.
+        assert "`base_image` field" in message
+        assert "debian:bookworm-slim" in message
+        assert "debian:trixie-slim" in message
 
 
 def test_default_base_image_warning_matches_the_scheduled_change():

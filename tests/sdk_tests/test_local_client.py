@@ -1565,6 +1565,6 @@ def test_building_on_the_default_python_warns_it_will_change(
     ]
     assert bool(warned) is warns
     if warns:
-        assert (
-            f'python_version: "{DEFAULT_BASE_IMAGE_PYTHON}"' in warned[0].getMessage()
-        )
+        message = warned[0].getMessage()
+        assert f"Python {DEFAULT_BASE_IMAGE_PYTHON}" in message
+        assert "`python_version` field" in message
