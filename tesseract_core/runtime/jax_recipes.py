@@ -18,7 +18,7 @@ import jax.numpy as jnp
 import numpy as np
 from pydantic import BaseModel
 
-from tesseract_core.runtime.cuda.ipc import has_cuda_array_interface
+from tesseract_core.runtime.cuda.arrays import has_cuda_array_interface
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     filter_func,

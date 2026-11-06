@@ -32,7 +32,7 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
-gpu_transport_type = Literal["none", "cuda_ipc"]
+gpu_transport_type = Literal["none", "cuda_ipc", "nixl"]
 
 # Compressions for array buffers. Disabled compression is ``None`` in the config
 # and in array payloads, and ``"none"`` in an Accept header.

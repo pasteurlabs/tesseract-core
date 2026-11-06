@@ -684,6 +684,7 @@ def mocked_cuda(monkeypatch):
     differently.
     """
     from tesseract_core.runtime.cuda import api as cuda_api
+    from tesseract_core.runtime.cuda import arrays as cuda_arrays
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     IPC_HANDLE_SIZE = cuda_api.IPC_HANDLE_SIZE
@@ -808,8 +809,8 @@ def mocked_cuda(monkeypatch):
 
     # Each test starts with empty buffer pools, and must not leave fake pointers
     # behind for the next one.
-    monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_ipc._BufferPool())
-    monkeypatch.setattr(cuda_ipc, "_DECODE_POOL", cuda_ipc._BufferPool())
+    monkeypatch.setattr(cuda_ipc, "_STAGING_POOL", cuda_arrays.BufferPool())
+    monkeypatch.setattr(cuda_arrays, "_DECODE_POOL", cuda_arrays.BufferPool())
     yield fake
 
 

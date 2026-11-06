@@ -107,9 +107,9 @@ def _serve_cuda_ipc(image_name: str):
 
 def _assert_device_result(got, expected: np.ndarray) -> None:
     """Assert a cuda_ipc result is a float32 device array holding ``expected``."""
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
 
-    assert isinstance(got, IpcDeviceArray), (
+    assert isinstance(got, DeviceArray), (
         f"expected a device array from cuda_ipc, got {type(got)}"
     )
     assert got.dtype == np.float32

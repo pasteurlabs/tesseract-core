@@ -62,11 +62,23 @@ class RuntimeConfig(BaseModel):
     # serve.negotiate_encoding). Independent of ``output_format``, which only
     # governs CPU arrays.
     gpu_transport: gpu_transport_type = "none"
-    # Fraction of each GPU's memory that ``cuda_ipc`` may keep in idle device
-    # buffers for reuse across requests, split evenly between buffers for
-    # exported and for received arrays. Applies per process, so a client and a
-    # server on the same GPU can each keep this much. ``0`` disables reuse.
+    # Fraction of each GPU's memory that the GPU transports may keep in idle
+    # device buffers for reuse across requests, split evenly between buffers
+    # ``cuda_ipc`` exports from and buffers the transports receive into.
+    # Applies per process, so a client and a server on the same GPU can each
+    # keep this much. ``0`` disables reuse.
     cuda_ipc_pool_fraction: float = Field(default=0.25, ge=0, le=1)
+    # How many parallel reads the ``nixl`` transport splits a large array into.
+    # Each read gets its own UCX worker, and so its own connection when UCX uses
+    # TCP, where one connection can be far slower than the link. Read when the
+    # process first decodes a ``nixl`` array.
+    nixl_parallel_reads: int = Field(default=4, ge=1)
+    # TCP segment size the ``nixl`` transport sets for UCX. Setting
+    # ``UCX_TCP_TX_SEG_SIZE`` or ``UCX_TCP_RX_SEG_SIZE`` overrides it for that
+    # direction. With UCX's smaller defaults, GPU memory crosses TCP at a
+    # fraction of the link speed however many parallel reads run. An empty
+    # string keeps UCX's defaults. Read when the process first uses ``nixl``.
+    nixl_ucx_tcp_seg_size: str = "1m"
 
     @field_validator("input_path", "output_path")
     @classmethod

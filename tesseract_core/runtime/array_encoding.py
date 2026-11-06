@@ -23,6 +23,10 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from tesseract_core.runtime.device_transport import (
+    available_transports,
+    get_transport,
+)
 from tesseract_core.runtime.file_interactions import (
     available_gpu_transports,
     compression_type,
@@ -161,6 +165,30 @@ class CudaIpcArrayData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class NixlArrayData(BaseModel):
+    """Data structure for a NIXL GPU transfer descriptor.
+
+    The buffer field packs ``<agent_name>:<agent_metadata>:<address>:<device>``,
+    holding the name and base64-encoded metadata of the producer's NIXL agent,
+    then the device address and producer-side device ordinal of the array's
+    registered bytes. All four are empty for an empty array. Neither the agent
+    name nor the base64 alphabet contains ``:``, so it is safe as a delimiter.
+
+    The encoding is produced and consumed in :mod:`tesseract_core.runtime.cuda.nixl`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^([A-Za-z0-9_.-]+:[A-Za-z0-9+/=]+:\d+:\d+|:::)$",
+        description=(
+            "Packed NIXL descriptor: <agent_name>:<agent_metadata>:<address>:<device>"
+        ),
+    )
+    encoding: Literal["nixl"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class EncodedArrayModel(BaseModel):
     """Base class for general encoded arrays.
 
@@ -170,7 +198,13 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[NonNegativeInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
+    data: (
+        BinrefArrayData
+        | Base64ArrayData
+        | JsonArrayData
+        | CudaIpcArrayData
+        | NixlArrayData
+    )
     model_config = ConfigDict(extra="forbid")
 
 
@@ -263,7 +297,11 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
+            BinrefArrayData
+            | Base64ArrayData
+            | JsonArrayData
+            | CudaIpcArrayData
+            | NixlArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -735,7 +773,7 @@ def validate_python_or_gpu_array(
     validated from its metadata and returned unchanged. Everything else is
     coerced to a NumPy array via :func:`python_to_array`.
     """
-    from tesseract_core.runtime.cuda import ipc as cuda_ipc
+    from tesseract_core.runtime.cuda import arrays as cuda_arrays
     from tesseract_core.runtime.experimental.binref_passthrough import (
         BinrefArray,
         validate_binref_array,
@@ -744,8 +782,8 @@ def validate_python_or_gpu_array(
     if isinstance(val, BinrefArray):
         return validate_binref_array(val, expected_shape, expected_dtype)
 
-    if cuda_ipc.has_cuda_array_interface(val):
-        return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
+    if cuda_arrays.has_cuda_array_interface(val):
+        return cuda_arrays.validate_cuda_array(val, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
     return python_to_array(val, expected_shape, expected_dtype, context)
@@ -773,9 +811,7 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = load_binref_arraydict(val.model_dump(), base_dir)
 
-        elif val.data.encoding == "cuda_ipc":
-            from tesseract_core.runtime.device_transport import get_transport
-
+        elif val.data.encoding in available_transports():
             if val.data.encoding not in available_gpu_transports():
                 raise ValueError(
                     f"GPU transport {val.data.encoding!r} is not enabled on this "
@@ -847,7 +883,7 @@ def encode_array(
     re-encoded for any other host encoding.
     """
     from tesseract_core.runtime.config import get_config
-    from tesseract_core.runtime.cuda import ipc as cuda_ipc
+    from tesseract_core.runtime.cuda import arrays as cuda_arrays
     from tesseract_core.runtime.experimental.binref_passthrough import (
         BinrefArray,
         load_for_inline_encoding,
@@ -864,7 +900,7 @@ def encode_array(
             return arr.to_arraydict()
         arr = load_for_inline_encoding(arr, array_encoding, context)
 
-    is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
+    is_gpu_array = cuda_arrays.has_cuda_array_interface(arr)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate
@@ -879,8 +915,6 @@ def encode_array(
     # through to the host encoding below -- so a mixed payload (some GPU, some
     # CPU arrays) serializes each leaf by where it lives instead of failing.
     if device_transport is not None and is_gpu_array:
-        from tesseract_core.runtime.device_transport import get_transport
-
         transport = get_transport(device_transport)
         return transport.descriptor(
             transport.register(arr, context.get("device_exports"))
@@ -890,7 +924,7 @@ def encode_array(
     # validation untouched (see validate_python_or_gpu_array), so materialise it
     # here with an explicit device-to-host copy before the numpy-based coercion.
     if is_gpu_array and not isinstance(arr, np.ndarray):
-        arr = cuda_ipc.cuda_array_to_host(arr)
+        arr = cuda_arrays.cuda_array_to_host(arr)
 
     # Convert to a NumPy array if necessary
     arr = python_to_array(arr, expected_shape, expected_dtype, context)

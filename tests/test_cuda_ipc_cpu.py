@@ -22,21 +22,21 @@ are CUDA-runtime properties with no meaning against a fake. Those guarantees are
 covered by the GPU tests in ``test_cuda_ipc.py`` (marked ``@pytest.mark.gpu``).
 
 Library-discovery tests (wheel/soname resolution) live at the bottom and target
-``tesseract_core.runtime.cuda.loader`` directly, since that is where discovery
-now lives.
+``tesseract_core.runtime.cuda.loader`` directly.
 """
 
 from __future__ import annotations
 
 import types
-from typing import Any
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
+from cuda_fakes import FakeCudaArray
 
 from tesseract_core.runtime import array_encoding
 from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda import arrays as cuda_arrays
 from tesseract_core.runtime.cuda import ipc as cuda_ipc
 from tesseract_core.runtime.cuda import loader
 
@@ -58,28 +58,6 @@ def _unpack_cuda_ipc(data: dict) -> dict:
 
 
 # ── Fakes ───────────────────────────────────────────────────────────────
-
-
-class FakeCudaArray:
-    """Mimics a GPU array's metadata surface without any device memory."""
-
-    def __init__(
-        self,
-        shape: tuple[int, ...],
-        typestr: str,
-        data_ptr: int = 0x1000,
-        device: Any = None,
-        strides: tuple[int, ...] | None = None,
-    ) -> None:
-        self.__cuda_array_interface__ = {
-            "shape": tuple(shape),
-            "typestr": typestr,
-            "data": (data_ptr, False),
-            "strides": strides,
-            "version": 3,
-        }
-        if device is not None:
-            self.device = device
 
 
 class _CuPyDevice:
@@ -283,7 +261,7 @@ def test_release_recycles_staging_buffers(mocked_cuda):
 
 def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
     """Idle staging buffers beyond the pool's byte limit are freed, oldest first."""
-    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 16)
+    monkeypatch.setattr(cuda_arrays, "_pool_max_bytes", lambda device: 16)
     mocked_cuda.reject_foreign_ipc = True
     group = cuda_ipc.ExportGroup()
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000), group)
@@ -299,7 +277,7 @@ def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
 
 def test_staging_pool_makes_room_for_a_new_size(mocked_cuda, monkeypatch):
     """Releasing a buffer of a new size evicts idle buffers of other sizes to make room."""
-    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 64)
+    monkeypatch.setattr(cuda_arrays, "_pool_max_bytes", lambda device: 64)
     mocked_cuda.reject_foreign_ipc = True
     group = cuda_ipc.ExportGroup()
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000), group)
@@ -326,7 +304,7 @@ def test_pool_limit_follows_runtime_config(mocked_cuda, fraction, expected):
 
     with override_config():
         update_config(cuda_ipc_pool_fraction=fraction)
-        assert cuda_ipc._pool_max_bytes(0) == expected  # fake device has 8 GiB
+        assert cuda_arrays._pool_max_bytes(0) == expected  # fake device has 8 GiB
 
 
 def test_zero_pool_fraction_disables_reuse(mocked_cuda):
@@ -406,11 +384,9 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     encoding = RequestedEncoding("json+base64", "cuda_ipc")
 
     def _boom():
-        raise AssertionError(
-            "the cuda_ipc runtime must not be used for a CPU-only payload"
-        )
+        raise AssertionError("the CUDA runtime must not be used for a CPU-only payload")
 
-    monkeypatch.setattr(sdk, "_import_cuda_ipc", _boom)
+    monkeypatch.setattr(sdk, "_import_cuda_arrays", _boom)
 
     client = HTTPClient("http://localhost:8000")
     client._session.request = lambda **kwargs: Mock(
@@ -426,10 +402,10 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     )
 
 
-def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
-    """Without the runtime extra, cuda_ipc use points at tesseract-core[runtime].
+def test_import_cuda_arrays_explains_missing_runtime_extra(monkeypatch):
+    """Without the runtime extra, copying GPU arrays points at tesseract-core[runtime].
 
-    Simulate a base SDK install (no runtime deps) by making the cuda_ipc import
+    Simulate a base SDK install (no runtime deps) by making the runtime import
     fail, and assert the friendly ImportError naming the extra is raised instead
     of a bare ModuleNotFoundError from deep in the import chain.
     """
@@ -439,10 +415,10 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 
     # A None entry makes importing the module raise ImportError, as its deep
     # dependencies (e.g. fsspec) would on a base install.
-    monkeypatch.setitem(sys.modules, "tesseract_core.runtime.cuda.ipc", None)
+    monkeypatch.setitem(sys.modules, "tesseract_core.runtime.cuda.arrays", None)
 
     with pytest.raises(ImportError, match=r"tesseract-core\[runtime\]"):
-        sdk._import_cuda_ipc()
+        sdk._import_cuda_arrays()
 
 
 def test_decode_cuda_ipc_failure_gives_actionable_error(monkeypatch):
@@ -521,7 +497,7 @@ def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     # The caller's active device is restored.
     assert mocked_cuda.current_device == 0
     # Returned wrapper is framework-agnostic and correctly shaped.
-    assert isinstance(out, cuda_ipc.IpcDeviceArray)
+    assert isinstance(out, cuda_arrays.DeviceArray)
     assert out.shape == (4, 8)
     assert out.dtype == np.float32
     assert hasattr(out, "__cuda_array_interface__")
@@ -596,7 +572,7 @@ def test_load_reuses_owned_buffer_released_by_dlpack_deleter(mocked_cuda):
 
 
 def test_owned_buffers_beyond_pool_limit_are_freed(mocked_cuda, monkeypatch):
-    monkeypatch.setattr(cuda_ipc, "_pool_max_bytes", lambda device: 0)
+    monkeypatch.setattr(cuda_arrays, "_pool_max_bytes", lambda device: 0)
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     )
@@ -667,9 +643,9 @@ def test_copy_to_host_reads_device_bytes(mocked_cuda, allow_device_host_copy):
 def test_validate_cuda_array_passthrough():
     """A matching GPU array validates and is returned unchanged (not copied)."""
     arr = FakeCudaArray((4, 8), "<f4")
-    assert cuda_ipc.validate_cuda_array(arr, (None, 8), "float32") is arr
+    assert cuda_arrays.validate_cuda_array(arr, (None, 8), "float32") is arr
     # Ellipsis shape means "no shape check".
-    assert cuda_ipc.validate_cuda_array(arr, ..., None) is arr
+    assert cuda_arrays.validate_cuda_array(arr, ..., None) is arr
 
 
 @pytest.mark.parametrize(
@@ -685,7 +661,7 @@ def test_validate_cuda_array_rejections(expected_shape, expected_dtype, match):
 
     arr = FakeCudaArray((4, 8), "<f4")
     with pytest.raises(PydanticCustomError, match=match):
-        cuda_ipc.validate_cuda_array(arr, expected_shape, expected_dtype)
+        cuda_arrays.validate_cuda_array(arr, expected_shape, expected_dtype)
 
 
 # ── encode_array dispatch (Python-side, no CUDA calls) ──────────────────
@@ -894,11 +870,11 @@ def test_cuda_array_to_host_branches(allow_device_host_copy):
             out = np.array([5.0, 6.0])
             return out if dtype is None else out.astype(dtype)
 
-    assert cuda_ipc.cuda_array_to_host(CupyLike()).tolist() == [1.0, 2.0]
-    assert cuda_ipc.cuda_array_to_host(TorchLike()).tolist() == [3.0, 4.0]
-    assert cuda_ipc.cuda_array_to_host(ArrayLike()).tolist() == [5.0, 6.0]
+    assert cuda_arrays.cuda_array_to_host(CupyLike()).tolist() == [1.0, 2.0]
+    assert cuda_arrays.cuda_array_to_host(TorchLike()).tolist() == [3.0, 4.0]
+    assert cuda_arrays.cuda_array_to_host(ArrayLike()).tolist() == [5.0, 6.0]
     with pytest.raises(TypeError, match="Cannot copy GPU array"):
-        cuda_ipc.cuda_array_to_host(object())
+        cuda_arrays.cuda_array_to_host(object())
 
 
 def test_forbid_device_host_copy_blocks_implicit_copies(mocked_cuda):
@@ -1227,7 +1203,7 @@ def test_cuda_ipc_transport_receive_materialises_wrapper(mocked_cuda):
 
     out = transport.receive(encoded)
 
-    assert isinstance(out, cuda_ipc.IpcDeviceArray)
+    assert isinstance(out, cuda_arrays.DeviceArray)
     assert out.shape == (2, 3)
     assert out.dtype == np.float32
 
@@ -1297,10 +1273,10 @@ def test_dtype_without_numpy_equivalent_is_refused(mocked_cuda):
 
 
 def test_strided_arrays_are_copied_on_the_device_by_their_framework():
-    # cuda_ipc moves a flat byte range, so a strided array is first made
+    # The GPU transports move a flat byte range, so a strided array is first made
     # contiguous by the framework that made it, never through the host.
     contiguous = FakeCudaArray((3, 2), "<f4")
-    assert cuda_ipc._contiguous_on_device(contiguous)[0] is contiguous
+    assert cuda_arrays.contiguous_on_device(contiguous)[0] is contiguous
 
     class TorchLike(FakeCudaArray):
         def contiguous(self):
@@ -1313,7 +1289,7 @@ def test_strided_arrays_are_copied_on_the_device_by_their_framework():
 
     for cls in (TorchLike, CuPyLike):
         strided = cls((3, 2), "<f4", strides=(4, 12))
-        copy, info = cuda_ipc._contiguous_on_device(strided)
+        copy, info = cuda_arrays.contiguous_on_device(strided)
         assert copy is contiguous
         assert info.is_c_contiguous()
 
@@ -1325,7 +1301,7 @@ def test_release_while_the_pool_lock_is_held_does_not_wait(mocked_cuda):
     """
     import threading
 
-    pool = cuda_ipc._BufferPool()
+    pool = cuda_arrays.BufferPool()
 
     def finalizer_inside_the_pool():
         with pool._lock:
