@@ -2144,7 +2144,11 @@ def test_output_format_matches_runtime_source_of_truth():
         ),
         (
             'numpy; (python_version > "3.12" or os_name == "nt") and extra == "runtime"',
-            ["numpy; (python_version > '3.12' or os_name == 'nt')"],
+            ["numpy; python_version > '3.12' or os_name == 'nt'"],
+        ),
+        (
+            'pkg @ https://example.com/p.whl ; python_version < "3.13" and extra == "runtime"',
+            ["pkg @ https://example.com/p.whl ; python_version < '3.13'"],
         ),
         ('numpy>=1.26; extra == "dev"', []),
         ("numpy>=1.26", []),
