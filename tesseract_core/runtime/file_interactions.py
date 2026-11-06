@@ -56,26 +56,14 @@ def available_gpu_transports() -> tuple[str, ...]:
     """GPU transports the runtime accepts for inputs and outputs.
 
     Always includes ``none``, plus the configured ``gpu_transport`` if it is
-    anything else and this process can serve it from a CUDA device.
+    anything else.
     """
     from tesseract_core.runtime.config import get_config
 
     configured = get_config().gpu_transport
-    if configured == "none" or not _cuda_device_available():
-        return ("none",)
-    return ("none", configured)
-
-
-def _cuda_device_available() -> bool:
-    """Whether this process sees a CUDA device it could serve arrays from."""
-    from tesseract_core.runtime.cuda import api as cuda_api
-
-    try:
-        return cuda_api.device_count() > 0
-    except RuntimeError:
-        # No CUDA runtime library, no driver, or a failed initialisation all mean
-        # there is no device to export from.
-        return False
+    if configured != "none":
+        return ("none", configured)
+    return ("none",)
 
 
 def validate_gpu_transport_config() -> None:
@@ -87,11 +75,10 @@ def validate_gpu_transport_config() -> None:
     running without it.
     """
     from tesseract_core.runtime.config import get_config
+    from tesseract_core.runtime.cuda import api as cuda_api
 
     configured = get_config().gpu_transport
-    if configured == "none":
-        return
-    if _cuda_device_available():
+    if configured == "none" or cuda_api.has_device():
         return
     raise ValueError(
         f"gpu_transport={configured!r} is configured, but this Tesseract cannot "

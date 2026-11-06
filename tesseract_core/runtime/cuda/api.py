@@ -104,6 +104,16 @@ def device_count() -> int:
     return count.value
 
 
+def has_device() -> bool:
+    """Whether this process can initialise a CUDA device to serve arrays from."""
+    try:
+        return device_count() > 0
+    except RuntimeError:
+        # No CUDA runtime library, no driver, or a failed initialisation all
+        # mean there is no device to export from.
+        return False
+
+
 def malloc(nbytes: int) -> int:
     """Allocate ``nbytes`` of device memory; return its device pointer."""
     ptr = ctypes.c_void_p()

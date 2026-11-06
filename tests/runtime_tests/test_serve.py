@@ -286,13 +286,10 @@ def test_parse_media_range(media_range, expected):
         ),
     ],
 )
-def test_negotiate_encoding(gpu_transport, compression, accept, expected, monkeypatch):
+def test_negotiate_encoding(gpu_transport, compression, accept, expected):
     from tesseract_core.runtime.config import update_config
-    from tesseract_core.runtime.cuda import api as cuda_api
     from tesseract_core.runtime.serve import negotiate_encoding
 
-    # A configured transport is only negotiable when a device is visible.
-    monkeypatch.setattr(cuda_api, "device_count", lambda: 1)
     update_config(gpu_transport=gpu_transport, compression=compression)
     assert tuple(negotiate_encoding(accept)) == expected
 
@@ -323,21 +320,17 @@ def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):
     assert "not enabled" in response.text
 
 
-def test_check_gpu_transport_route(dummy_tesseract_module, monkeypatch):
+def test_check_gpu_transport_route(dummy_tesseract_module):
     """Clients check a GPU transport at a route that exists only when one is enabled.
 
     It stays out of the schema clients read endpoints from, and answers requests
     it cannot serve without touching the GPU, so this needs no GPU.
     """
     from tesseract_core.runtime.config import update_config
-    from tesseract_core.runtime.cuda import api as cuda_api
 
     client = TestClient(create_rest_api(dummy_tesseract_module))
     assert client.post("/check_gpu_transport", json={}).status_code == 404
 
-    # The route is only enabled by the config, so a fake device keeps it
-    # answering the malformed request below on a GPU-less machine.
-    monkeypatch.setattr(cuda_api, "device_count", lambda: 1)
     update_config(gpu_transport="cuda_ipc")
     client = TestClient(create_rest_api(dummy_tesseract_module))
     assert "/check_gpu_transport" not in client.get("/openapi.json").json()["paths"]
@@ -444,15 +437,13 @@ def test_get_openapi_schema(http_client):
     assert "run_id" not in response.json()
 
 
-def test_openapi_schema_advertises_encodings(dummy_tesseract_module, monkeypatch):
+def test_openapi_schema_advertises_encodings(dummy_tesseract_module):
     """Clients can read which encodings this server accepts from openapi.json.
 
     A configured GPU transport is advertised separately and never appears among
-    the output formats, which are always the same three. It is only advertised
-    when the server can use a CUDA device.
+    the output formats, which are always the same three.
     """
     from tesseract_core.runtime.config import update_config
-    from tesseract_core.runtime.cuda import api as cuda_api
 
     update_config(gpu_transport="none")
     client = TestClient(create_rest_api(dummy_tesseract_module))
@@ -464,13 +455,7 @@ def test_openapi_schema_advertises_encodings(dummy_tesseract_module, monkeypatch
     ]
     assert schema["x-supported-gpu-transports"] == ["none"]
 
-    monkeypatch.setattr(cuda_api, "device_count", lambda: 0)
     update_config(gpu_transport="cuda_ipc")
-    client = TestClient(create_rest_api(dummy_tesseract_module))
-    schema = client.get("/openapi.json").json()
-    assert schema["x-supported-gpu-transports"] == ["none"]
-
-    monkeypatch.setattr(cuda_api, "device_count", lambda: 1)
     client = TestClient(create_rest_api(dummy_tesseract_module))
     schema = client.get("/openapi.json").json()
     assert schema["x-supported-output-formats"] == [

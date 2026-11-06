@@ -36,10 +36,7 @@ def _has_cuda_device() -> bool:
     """Whether this machine exposes a CUDA device, as a spawned server sees it."""
     from tesseract_core.runtime.cuda import api as cuda_api
 
-    try:
-        return cuda_api.device_count() > 0
-    except RuntimeError:
-        return False
+    return cuda_api.has_device()
 
 
 def _process_alive(pid: int) -> bool:
@@ -275,8 +272,15 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
     ("gpu_transport", "expected"),
     [
         ("none", ("none",)),
-        # A configured transport is only offered when a CUDA device is visible.
-        ("cuda_ipc", ("none", "cuda_ipc") if _has_cuda_device() else ("none",)),
+        # A server configured with cuda_ipc only comes up where it can be used
+        # (the runtime validates the config at startup), so ask for a device.
+        pytest.param(
+            "cuda_ipc",
+            ("none", "cuda_ipc"),
+            marks=pytest.mark.skipif(
+                not _has_cuda_device(), reason="needs a CUDA device"
+            ),
+        ),
     ],
 )
 def test_server_capabilities_reflect_the_server(

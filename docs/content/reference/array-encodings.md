@@ -185,6 +185,8 @@ $ curl \
 
 Anything the header leaves out falls back to the server's defaults. If the server cannot produce any encoding the header accepts, it responds with `406 Not Acceptable` without running the endpoint and lists what it supports. The same values are advertised in the server's OpenAPI schema (`/openapi.json`) as `x-supported-output-formats`, `x-supported-compressions` and `x-supported-gpu-transports`.
 
+The experimental GPU transports (the `gpu_transport` parameter) must also be enabled on the server, and are only used for requests that ask for them.
+
 In the Python SDK, `Tesseract.server_capabilities` lists the output formats, compressions and GPU transports the server accepts, and `Tesseract.with_encoding` returns a view of the Tesseract that requests a different encoding for every call made through it. To query the encoding requested by a given Tesseract object or view, use `Tesseract.current_encoding`:
 
 ```python

@@ -567,7 +567,8 @@ def serve(
         _exit_when_parent_closes(parent_pipe_fd)
 
     config = get_config()
-    validate_gpu_transport_config()
+    # An unusable GPU transport is reported by serve() itself, which also covers
+    # servers started without the CLI.
     if config.debug:
         # The server is long-running, so a debugger can attach at any time.
         _start_debug_server(
