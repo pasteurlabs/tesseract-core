@@ -51,7 +51,7 @@ def test_gradients():
         t.check_gradients({"x": [1.0, 2.0, 3.0]}, eps=1e-3, seed=0)
 ```
 
-It takes the options described below as keyword arguments, with `eps_for` as a dict such as `eps_for={"pressure": 1e2}`. The check runs inside the Tesseract's own process, as an endpoint, so `apply` isn't called over the network. That endpoint is only served in [debug mode](debug-mode), which `from_source`, `from_image`, and `from_tesseract_api` turn on by default. A Tesseract served elsewhere must be served in debug mode for `Tesseract.from_url(...).check_gradients` to work.
+It takes the options described below as keyword arguments, with `eps_for` as a dict such as `eps_for={"pressure": 1e2}`. The check runs inside the Tesseract's own process, as an endpoint which is only served in [debug mode](debug-mode).
 
 ## What it compares
 
