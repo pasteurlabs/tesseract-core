@@ -8,7 +8,7 @@ import subprocess
 import sys
 import textwrap
 from collections.abc import Hashable
-from typing import Any
+from typing import Any, NamedTuple
 
 import equinox as eqx
 import jax
@@ -277,6 +277,30 @@ class TestCacheCorrectness:
             assert not np.allclose(
                 np.asarray(grad_hit_off[k]), np.asarray(grad_miss_off[k])
             ), "hit and miss inputs produced identical gradients; test is vacuous"
+
+    def test_cache_hit_with_namedtuple_output(self, monkeypatch):
+        """The cotangent keeps the output's NamedTuple type, so the cached backward accepts it."""
+
+        class Inputs(BaseModel):
+            x: Differentiable[Array[(None,), Float32]]
+
+        @eqx.filter_jit
+        def apply_jit(inputs):
+            return {"t": _TwoOutputs(2.0 * inputs["x"], 3.0 * inputs["x"])}
+
+        def no_fallback(*args, **kwargs):
+            raise AssertionError("vjp missed the cache")
+
+        inp = Inputs(x=np.ones(2, dtype=np.float32))
+        ct = {"t.[1]": np.ones(2, dtype=np.float32)}
+        set_jax_vjp_cache_size(1)
+        try:
+            jax_apply(apply_jit, inp)
+            monkeypatch.setattr(jax_recipes, "_vjp_jit", no_fallback)
+            got = jax_vjp(apply_jit, inp, {"x"}, {"t.[1]"}, ct)
+        finally:
+            set_jax_vjp_cache_size(0)
+        np.testing.assert_allclose(np.asarray(got["x"]), [3.0, 3.0])
 
     def test_cache_is_not_shared_between_functions(self, monkeypatch):
         # Two Tesseracts in one process, evaluated at the same inputs, must
@@ -599,3 +623,8 @@ class TestFingerprint:
             for i in range(2000)
         }
         assert len(fps) == 2000
+
+
+class _TwoOutputs(NamedTuple):
+    a: Any
+    b: Any
