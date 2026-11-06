@@ -148,6 +148,13 @@ class HostCredential(BaseModel):
         return value
 
 
+# The Python of the default `build_config.base_image` (debian:bookworm-slim is
+# Debian 12, which ships 3.11 for its whole lifetime). Builds that set neither
+# base_image nor python_version get this version pinned, rather than whatever
+# the default image ships, so changing the default image cannot change their
+# Python. `Tesseract.from_source` builds on it too.
+DEFAULT_BASE_IMAGE_PYTHON = "3.11"
+
 # Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
 # ``pylock.prod.toml``.
 _PYLOCK_NAME_RE = re.compile(r"^pylock(\.[^.]+)?\.toml$")
@@ -162,7 +169,9 @@ class PipRequirements(BaseModel):
         description=(
             "Python version to use for the Tesseract's environment (e.g., '3.12'), "
             "installed via uv if needed. "
-            "When unset, container images use the base image's system Python. "
+            "When unset, a container image built on the default base image uses "
+            "Python 3.11, and one built on a custom ``base_image`` uses that "
+            "image's system Python. "
             "``Tesseract.from_source`` uses Python 3.11 to match the default base image, "
             "unless a ``pylock.toml`` lockfile's ``requires-python`` excludes it."
         ),
@@ -312,11 +321,30 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         return None
 
     @property
+    def image_python_version(self) -> str | None:
+        """Python version a container build installs, or None to use the base image's.
+
+        The declared ``python_version``; else, for a build on the default base
+        image, :data:`DEFAULT_BASE_IMAGE_PYTHON`, so its Python does not follow the
+        default image when that changes. ``inherit_base_image_packages`` needs the
+        base image's own Python, and conda pins Python in its environment file.
+        """
+        if self.effective_python_version is not None:
+            return self.effective_python_version
+        if (
+            isinstance(self.requirements, PipRequirements)
+            and not self.inherit_base_image_packages
+            and "base_image" not in self.model_fields_set
+        ):
+            return DEFAULT_BASE_IMAGE_PYTHON
+        return None
+
+    @property
     def uses_base_image_python(self) -> bool:
         """Whether /python-env uses the base image's Python instead of bundling its own."""
         return (
             isinstance(self.requirements, PipRequirements)
-            and self.requirements.python_version is None
+            and self.image_python_version is None
         )
 
     @model_validator(mode="after")
