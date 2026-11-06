@@ -7,7 +7,7 @@ description: "Example of a differentiable QP solver"
 
 build_config:
   # Base image to use for the container, must be Ubuntu or Debian-based
-  # base_image: "debian:bookworm-slim"
+  # base_image: "debian:trixie-slim"
 
   # Platform to build the container for. In general, images can only be executed
   # on the platform they were built for.

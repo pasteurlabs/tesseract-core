@@ -48,11 +48,14 @@ runtime = [
     "fsspec[http,s3]<=2026.9.0,>=2024.12",
     "s3fs<=2026.9.0,>=2024.12",  # enters via fsspec[s3]; pin explicitly so the oldest resolution can't pair an ancient s3fs with a modern aiobotocore
     "pybase64<=1.5.1,>=1.4",
-    "orjson<=3.13.0,>=3.10",
-    "numpy<=2.5.4,>=1.26",
+    "orjson<=3.13.0,>=3.10.7",  # first release with cp313 wheels
+    # numpy 2.1 is the first with cp313 wheels; keep 1.26 for older Pythons. The
+    # markers avoid ">=", which CI's oldest-deps job rewrites to "==".
+    "numpy<=2.5.4,>=1.26; python_version < '3.13'",
+    "numpy<=2.5.4,>=2.1; python_version > '3.12'",
     "debugpy<=1.8.22,>=1.8.14",
     "mlflow-skinny<=3.17.2,>=3.7.0",
-    "lz4<=4.4.5,>=4.0.0",
+    "lz4<=4.4.5,>=4.4.3",  # first release with cp313 wheels
 ]
 # END RUNTIME DEPENDENCIES
 

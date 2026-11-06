@@ -21,6 +21,7 @@ from urllib.request import url2pathname
 
 import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from packaging.markers import Marker
 from packaging.requirements import Requirement
 from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
@@ -338,16 +339,22 @@ def get_runtime_dependencies() -> list[str]:
     deps = []
     for req_str in sorted(requires("tesseract-core") or []):
         req = Requirement(req_str)
-        # Check if this requirement is for the 'runtime' extra
-        if req.marker and req.marker.evaluate({"extra": "runtime"}):
-            # Reconstruct the requirement string without the marker
-            dep_str = req.name
-            if req.extras:
-                dep_str += f"[{','.join(sorted(req.extras))}]"
-            if req.specifier:
-                dep_str += str(req.specifier)
-            deps.append(dep_str)
+        match = req.marker and _RUNTIME_EXTRA_MARKER.fullmatch(str(req.marker))
+        if not match:
+            continue
+        # Keep the declared condition (e.g. a per-Python floor): it must be
+        # evaluated where the runtime is installed, not in this environment.
+        req.marker = Marker(match["rest"]) if match["rest"] else None
+        # Single quotes, as this lands in a double-quoted TOML string.
+        deps.append(str(req).replace('"', "'"))
     return deps
+
+
+# Package metadata appends the extra to the declared marker:
+# `<declared> and extra == "runtime"`, or just `extra == "runtime"`.
+_RUNTIME_EXTRA_MARKER = re.compile(
+    r"""(?:(?P<rest>.+?)\s+and\s+)?extra\s*==\s*["']runtime["']"""
+)
 
 
 def get_template_dir() -> Path:

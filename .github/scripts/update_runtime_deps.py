@@ -22,6 +22,11 @@ from packaging.version import Version
 EXTRA_NAME = "runtime"
 
 
+def _dep_key(req: Requirement) -> tuple[str, str]:
+    """Name *and* marker: a package may have one line per Python range."""
+    return req.name, str(req.marker)
+
+
 def _filter_upper_bounds(specs: SpecifierSet) -> SpecifierSet:
     """Return a SpecifierSet with upper bounds removed."""
     return SpecifierSet([spec for spec in specs if spec.operator != "<="])
@@ -135,14 +140,18 @@ def write_new_pyproject(final_deps: list[str], pyproject_file: str) -> None:
             f"Could not find '{EXTRA_NAME} = [' section in {pyproject_file}"
         )
 
-    deps_by_name = {Requirement(dep).name: dep for dep in final_deps}
+    deps_by_key = {_dep_key(Requirement(dep)): dep for dep in final_deps}
 
     dep_lines = []
     for line in original_lines[dep_start_line:dep_end_line]:
         # Anything that isn't a dependency we still resolve a bound for -- comments,
         # blank lines, dropped deps -- passes through untouched.
         match = re.search(r"""(?P<quote>["'])(?P<dep>.+?)(?P=quote)""", line)
-        if match and (new_dep := deps_by_name.get(Requirement(match["dep"]).name)):
+        if match and (new_dep := deps_by_key.get(_dep_key(Requirement(match["dep"])))):
+            # Markers come back from `packaging` double-quoted; use whichever quote
+            # the line does not, so the TOML string stays valid.
+            other = "'" if match["quote"] == '"' else '"'
+            new_dep = new_dep.replace(match["quote"], other)
             line = line[: match.start("dep")] + new_dep + line[match.end("dep") :]
 
         dep_lines.append(line)

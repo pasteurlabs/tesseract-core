@@ -18,7 +18,7 @@ build_config:
   # `Tesseract.from_source`.
 
   # Base image for the container, must be Ubuntu or Debian-based (images only)
-  # base_image: "debian:bookworm-slim"
+  # base_image: "debian:trixie-slim"
 
   # Python version to use for the Tesseract's environment (e.g. "3.12"), installed
   # via uv if needed. When unset, container images use the base image's system

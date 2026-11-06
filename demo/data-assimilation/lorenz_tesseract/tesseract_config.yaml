@@ -11,7 +11,7 @@ build_config:
     python_version: "3.14"
 
   # Base image to use for the container, must be Ubuntu or Debian-based
-  # base_image: "debian:bookworm-slim"
+  # base_image: "debian:trixie-slim"
 
   # Platform to build the container for. In general, images can only be executed
   # on the platform they were built for.
