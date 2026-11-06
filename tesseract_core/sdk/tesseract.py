@@ -1177,8 +1177,8 @@ class Tesseract:
         """Check gradient endpoints against finite differences, raising AssertionError on failure.
 
         Runs the same check as ``tesseract-runtime check-gradients`` inside the
-        Tesseract's own process, so ``apply`` is not called over the network.
-        Works in LocalClient, HTTPClient and remote if served in debug mode.
+        Tesseract's own process. Works in LocalClient, HTTPClient and remote if
+        served in debug mode.
 
         Args:
             inputs: Inputs at which to check the gradients.
