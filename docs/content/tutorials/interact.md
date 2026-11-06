@@ -194,12 +194,13 @@ supports:
 ```python
 >>> with Tesseract.from_source("examples/vectoradd/tesseract_api.py") as vectoradd:
 ...     print(vectoradd.available_endpoints)
-['apply', 'jacobian', 'health', 'test']
+['apply', 'jacobian', 'health', 'check_gradients', 'test']
 ```
 
 `vectoradd` implements `jacobian` but not JVP or VJP, so those don't appear.
-(`test` is listed because `from_source` serves Tesseracts in debug mode, which
-enables the [`test` endpoint](testing-a-tesseract).)
+(`check_gradients` and `test` are listed because `from_source` serves Tesseracts
+in debug mode, which enables the [`check_gradients`](check-gradients-python) and
+[`test`](testing-a-tesseract) endpoints.)
 
 A served Tesseract also has human-readable API docs at its `/docs` endpoint.
 With the server from the REST API tab running, open

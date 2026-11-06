@@ -131,6 +131,7 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
         "vector_jacobian_product",
         "health",
         "abstract_eval",
+        "check_gradients",
         "test",
     }
 
@@ -1738,6 +1739,47 @@ def test_test_endpoint_with_exception_type_local(dummy_tesseract_package):
             "expected_exception": ValidationError,  # Type, not string
         }
     )
+
+
+def test_check_gradients_success_local(dummy_tesseract_package):
+    """check_gradients() passes for a correct gradient, with eps_for overriding one input."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    # Should not raise. The dummy's jacobian is correct; `b` falls back to `eps`.
+    tess.check_gradients(
+        {
+            "a": np.array([1.0, 2.0], dtype=np.float32),
+            "b": np.array([3.0, 4.0], dtype=np.float32),
+            "s": 1,
+        },
+        endpoints=["jacobian"],
+        eps=1e-2,
+        eps_for={"a": 1e-3},
+        max_evals=20,
+    )
+
+
+def test_check_gradients_failure_local(dummy_tesseract_package):
+    """check_gradients() raises with the report and the seed to rerun it."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    # The dummy's JVP deliberately returns zeros
+    with pytest.raises(AssertionError) as excinfo:
+        tess.check_gradients(
+            {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                "b": np.array([3.0, 4.0], dtype=np.float32),
+                "s": 1,
+            },
+            endpoints=["jacobian_vector_product"],
+            eps=1e-2,
+            max_evals=5,
+            seed=123,
+        )
+
+    message = str(excinfo.value)
+    assert "Gradient check for jacobian_vector_product failed" in message
+    assert "rerun with seed 123" in message
 
 
 def _make_mock_response(status_code, json_data):
