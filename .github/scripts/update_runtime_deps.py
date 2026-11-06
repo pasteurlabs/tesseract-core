@@ -22,13 +22,9 @@ from packaging.version import Version
 EXTRA_NAME = "runtime"
 
 
-def _dep_key(req: Requirement) -> tuple[str, str | None]:
-    """Identify a dependency line by name *and* marker.
-
-    The same package may appear once per Python range (e.g. a higher floor on
-    newer Pythons), so the name alone does not pick out a single line.
-    """
-    return req.name, str(req.marker) if req.marker else None
+def _dep_key(req: Requirement) -> tuple[str, str]:
+    """Name *and* marker: a package may have one line per Python range."""
+    return req.name, str(req.marker)
 
 
 def _filter_upper_bounds(specs: SpecifierSet) -> SpecifierSet:

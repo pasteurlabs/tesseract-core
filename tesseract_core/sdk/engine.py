@@ -339,37 +339,22 @@ def get_runtime_dependencies() -> list[str]:
     deps = []
     for req_str in sorted(requires("tesseract-core") or []):
         req = Requirement(req_str)
-        if req.marker is None or not _RUNTIME_EXTRA.search(str(req.marker)):
+        match = req.marker and _RUNTIME_EXTRA_MARKER.fullmatch(str(req.marker))
+        if not match:
             continue
-        dep_str = req.name
-        if req.extras:
-            dep_str += f"[{','.join(sorted(req.extras))}]"
-        if req.specifier:
-            dep_str += str(req.specifier)
-        # Keep any other condition (e.g. a per-Python floor): it must be evaluated
-        # against the environment the runtime is installed into, not this one.
-        if rest := _without_runtime_extra(str(req.marker)):
-            # Single quotes, as this lands in a double-quoted TOML string.
-            dep_str += "; " + rest.replace('"', "'")
-        deps.append(dep_str)
+        # Keep the declared condition (e.g. a per-Python floor): it must be
+        # evaluated where the runtime is installed, not in this environment.
+        req.marker = Marker(match["rest"]) if match["rest"] else None
+        # Single quotes, as this lands in a double-quoted TOML string.
+        deps.append(str(req).replace('"', "'"))
     return deps
 
 
-_RUNTIME_EXTRA = re.compile(r"""\bextra\s*==\s*["']runtime["']""")
-
-
-def _without_runtime_extra(marker: str) -> str:
-    """Drop the ``extra == "runtime"`` clause from a requirement's marker.
-
-    Package metadata joins the extra onto the declared marker with ``and``
-    (``python_version < "3.13" and extra == "runtime"``), so removing that clause
-    leaves the declared condition, or nothing.
-    """
-    rest = _RUNTIME_EXTRA.sub("", marker, count=1)
-    rest = re.sub(r"^\s*and\s+|\s+and\s*$", "", rest.strip()).strip()
-    if rest:
-        Marker(rest)  # raises if the result is not a well-formed marker
-    return rest
+# Package metadata appends the extra to the declared marker:
+# `<declared> and extra == "runtime"`, or just `extra == "runtime"`.
+_RUNTIME_EXTRA_MARKER = re.compile(
+    r"""(?:(?P<rest>.+?)\s+and\s+)?extra\s*==\s*["']runtime["']"""
+)
 
 
 def get_template_dir() -> Path:
