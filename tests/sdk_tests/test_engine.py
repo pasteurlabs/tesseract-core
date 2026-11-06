@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import socket
+import sys
 import time
 from contextlib import closing
 from pathlib import Path
@@ -725,6 +726,17 @@ def test_init(tmpdir, recipe):
     with open(tmpdir / "test_dir/tesseract_config.yaml") as config_yaml:
         test = yaml.safe_load(config_yaml)
         assert test["name"] == "foo"
+
+    # The defaults are written out explicitly, so changing them later leaves this
+    # Tesseract alone; the Python is the one init ran on.
+    assert (
+        test["build_config"]["base_image"]
+        == TesseractBuildConfig.model_fields["base_image"].default
+    )
+    assert test["build_config"]["requirements"] == {
+        "provider": "uv-pip",
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+    }
 
     # Ensure template passes validation
     validate_tesseract_api(api_path.parent)
