@@ -3,6 +3,8 @@ name: Run test suite
 on:
   pull_request:
 
+  merge_group:
+
   push:
     branches:
       - main
