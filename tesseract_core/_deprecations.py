@@ -67,8 +67,8 @@ TOMBSTONES: tuple[Tombstone, ...] = (
             "Switch the default to NEXT_DEFAULT_BASE_IMAGE in "
             "tesseract_core/sdk/api_parse.py and DEFAULT_BASE_IMAGE_PYTHON in "
             "tesseract_core/sdk/venv_provision.py, then remove "
-            "_warn_about_default_base_image from tesseract_core/sdk/engine.py and "
-            "the two constants above. Update the tests, too."
+            "_warn_about_default_base_image (engine.py), _warn_about_default_python "
+            "(venv_provision.py) and the two constants above. Update the tests, too."
         ),
     ),
     # Example:

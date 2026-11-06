@@ -24,6 +24,7 @@ from typing import Any
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
+from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE
 from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
 from .engine import (
@@ -259,6 +260,24 @@ def _build_python_version(
     return DEFAULT_BASE_IMAGE_PYTHON
 
 
+def _warn_about_default_python() -> None:
+    """Warn that the default base image's Python, used here, is about to change.
+
+    The from_source counterpart of engine._warn_about_default_base_image; see
+    DEFAULT_BASE_IMAGE_CHANGE in tesseract_core/_deprecations.py. Here only
+    python_version matters (base_image does not pick this Python), so that is
+    what the warning points to.
+    """
+    logger.warning(
+        f"build_config.requirements.python_version is not set, so this environment "
+        f"is built on Python {DEFAULT_BASE_IMAGE_PYTHON}, the Python of the default "
+        f"base image. That will change to Python 3.13 in the first minor release "
+        f"after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To choose, set it in "
+        f'tesseract_config.yaml: python_version: "{DEFAULT_BASE_IMAGE_PYTHON}" keeps '
+        f'the current Python, python_version: "3.13" switches now.'
+    )
+
+
 def _ensure_runtime(
     python_executable: Path,
     installer: Sequence[Any] | None = None,
@@ -313,6 +332,11 @@ def _build_pip_venv(
     """Build a uv environment, following ``build_pip_venv.sh``."""
     env = build_config.build_env
     python_version = _build_python_version(build_config, requirements_file)
+    if (
+        build_config.effective_python_version is None
+        and python_version == DEFAULT_BASE_IMAGE_PYTHON
+    ):
+        _warn_about_default_python()
     python_executable = _create_venv(
         dest,
         python_version,
