@@ -9,7 +9,7 @@ from typing import Annotated
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
@@ -22,6 +22,7 @@ from tesseract_core.runtime.schema_generation import (
     create_apply_schema,
     create_gradient_schema,
 )
+from tesseract_core.runtime.schema_types import ShapeDType
 from tesseract_core.runtime.tree_transforms import escape_dict_key, path_to_index_op
 
 
@@ -179,6 +180,40 @@ def test_abstract_eval_schema_array_defaults():
         "z": None,
         "sub": {"s": {"shape": (), "dtype": "float32"}},
     }
+
+
+def test_abstract_eval_schema_array_default_factory():
+    class Model(BaseModel):
+        s: Array[..., Float32] = Field(default_factory=lambda: np.float32(1.0))
+        y: Array[(None,), Float64] = Field(default_factory=lambda: np.zeros(3))
+        n: list[int] = Field(default_factory=list)
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+
+    assert isinstance(inputs.s, ShapeDType)
+    assert inputs.model_dump() == {
+        "s": {"shape": (), "dtype": "float32"},
+        "y": {"shape": (3,), "dtype": "float64"},
+        "n": [],
+    }
+
+    # Factories still run per instance, so mutable defaults are not shared
+    other = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+    assert other.n is not inputs.n
+
+
+def test_apply_function_to_model_tree_default_factory_takes_data():
+    class Model(BaseModel):
+        a: int = 1
+        b: int = Field(default_factory=lambda data: data["a"] + 1)
+
+    NewModel = apply_function_to_model_tree(
+        Model, lambda obj, _: obj, default_func=lambda _, default: default * 10
+    )
+    # a's default becomes 10; b's factory sees a=10 and its output is scaled too
+    assert NewModel().model_dump() == {"a": 10, "b": 110}
+    assert NewModel(a=2).model_dump() == {"a": 2, "b": 30}
 
 
 def test_create_jacobian_schema():
