@@ -29,6 +29,7 @@ from pydantic import (
     create_model,
     field_validator,
 )
+from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
 from .schema_types import (
@@ -81,6 +82,49 @@ def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
 def _is_annotated(obj: Any) -> bool:
     """Check if an object is typing.Annotated or typing_extensions.Annotated."""
     return get_origin(obj) is Annotated
+
+
+def _wrap_default_factory(
+    field: FieldInfo, default_func: Callable[[Any, Any], Any]
+) -> Callable[..., Any]:
+    """Wrap a field's default_factory so its output is passed through default_func.
+
+    The factory still runs once per instance, so mutable defaults stay unshared.
+    """
+    factory = field.default_factory
+    annotation = field.annotation
+
+    if field.default_factory_takes_validated_data:
+
+        def wrapped(data: dict[str, Any]) -> Any:
+            return default_func(annotation, factory(data))
+
+    else:
+
+        def wrapped() -> Any:
+            return default_func(annotation, factory())
+
+    return wrapped
+
+
+def validate_array_default(annotation: Any, default: Any) -> Any:
+    """Validate a field's default against its array annotation.
+
+    Returns the validated array, as the real schema would see it when the field is omitted.
+    Raises ``ValidationError`` if the default does not match the annotation.
+    """
+    return _type_adapter(annotation).validate_python(default)
+
+
+def _replace_array_default_with_shapedtype(annotation: Any, default: Any) -> Any:
+    """Replace the default of an array field by a ShapeDType of the same shape and dtype."""
+    if not safe_issubclass(annotation, PydanticArrayAnnotation):
+        return default
+    try:
+        arr = validate_array_default(annotation, default)
+    except ValidationError:
+        return default
+    return ShapeDType(shape=arr.shape, dtype=str(arr.dtype))
 
 
 def apply_function_to_model_tree(
@@ -151,8 +195,15 @@ def apply_function_to_model_tree(
                 new_field = copy(field)
                 # Need to strip off metadata to trigger re-evaluation of the field
                 new_field.metadata = []
-                if default_func is not None and field.default is not PydanticUndefined:
-                    new_field.default = default_func(field.annotation, field.default)
+                if default_func is not None:
+                    if field.default is not PydanticUndefined:
+                        new_field.default = default_func(
+                            field.annotation, field.default
+                        )
+                    elif field.default_factory is not None:
+                        new_field.default_factory = _wrap_default_factory(
+                            field, default_func
+                        )
 
                 new_fields[field_name] = (new_type, new_field)
 
@@ -371,21 +422,12 @@ def create_abstract_eval_schema(
             return ShapeDType.from_array_type(obj)
         return obj
 
-    def replace_array_default_with_shapedtype(obj: Any, default: Any) -> Any:
-        if not safe_issubclass(obj, PydanticArrayAnnotation):
-            return default
-        try:
-            arr = TypeAdapter(obj).validate_python(default)
-        except ValidationError:
-            return default
-        return ShapeDType(shape=arr.shape, dtype=str(arr.dtype))
-
     GeneratedInputSchema = apply_function_to_model_tree(
         InputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=replace_array_default_with_shapedtype,
+        default_func=_replace_array_default_with_shapedtype,
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
@@ -393,7 +435,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=replace_array_default_with_shapedtype,
+        default_func=_replace_array_default_with_shapedtype,
     )
 
     class AbstractInputSchema(BaseModel):
