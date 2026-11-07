@@ -141,8 +141,7 @@ class MLflowBackend(BaseBackend):
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
 
-        parsed = urlparse(tracking_uri)
-        if not parsed.scheme:
+        if "://" not in tracking_uri:
             tracking_uri = f"https://{tracking_uri}"
 
         parsed = urlparse(tracking_uri)
