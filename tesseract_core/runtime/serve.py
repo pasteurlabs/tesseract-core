@@ -201,6 +201,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
             if run_id is None:
                 run_id = str(uuid.uuid4())
+            elif "/" in run_id or "\\" in run_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid run_id {run_id!r}: must not contain '/' or '\\'.",
+                )
             output_path = config.output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)

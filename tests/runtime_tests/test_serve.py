@@ -95,6 +95,23 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
+@pytest.mark.parametrize("run_id", ["/../../escaped", "..\\..\\escaped"])
+def test_apply_rejects_run_id_with_path_separator(
+    http_client, dummy_tesseract_module, run_id
+):
+    """A run_id must not move the run directory out of the output path."""
+    output_path = Path(get_config().output_path)
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = http_client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        params={"run_id": run_id},
+    )
+    assert response.status_code == 400, response.text
+    assert "run_id" in response.json()["detail"]
+    assert not (output_path.parent / "escaped").exists()
+
+
 def test_apply_rejects_cuda_ipc_as_output_format(dummy_tesseract_module):
     """``json+cuda_ipc`` is not a host output format and is refused via Accept.
 
