@@ -302,6 +302,25 @@ class TestCacheCorrectness:
             set_jax_vjp_cache_size(0)
         np.testing.assert_allclose(np.asarray(got["x"]), [3.0, 3.0])
 
+    def test_cache_rejects_other_pytree_containers(self):
+        """Outputs the cache cannot rebuild fail in jax_apply, not on a later vjp."""
+
+        class Inputs(BaseModel):
+            x: Differentiable[Array[(None,), Float32]]
+
+        @eqx.filter_jit
+        def apply_jit(inputs):
+            return {"p": [_Pair(2.0 * inputs["x"], 3.0 * inputs["x"])]}
+
+        inp = Inputs(x=np.ones(2, dtype=np.float32))
+        jax_apply(apply_jit, inp)
+        set_jax_vjp_cache_size(1)
+        try:
+            with pytest.raises(TypeError, match=r"_Pair at p\.\[0\]"):
+                jax_apply(apply_jit, inp)
+        finally:
+            set_jax_vjp_cache_size(0)
+
     def test_cache_is_not_shared_between_functions(self, monkeypatch):
         # Two Tesseracts in one process, evaluated at the same inputs, must
         # each get their own backward pass.
@@ -626,5 +645,10 @@ class TestFingerprint:
 
 
 class _TwoOutputs(NamedTuple):
+    a: Any
+    b: Any
+
+
+class _Pair(eqx.Module):
     a: Any
     b: Any
