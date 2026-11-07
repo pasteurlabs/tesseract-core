@@ -32,6 +32,13 @@ from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
 pytestmark = pytest.mark.timeout(120)
 
 
+def _has_cuda_device() -> bool:
+    """Whether this machine exposes a CUDA device, as a spawned server sees it."""
+    from tesseract_core.runtime.cuda import api as cuda_api
+
+    return cuda_api.has_device()
+
+
 def _process_alive(pid: int) -> bool:
     """Whether `pid` still exists, without reaping or signalling it."""
     try:
@@ -263,7 +270,18 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
 
 @pytest.mark.parametrize(
     ("gpu_transport", "expected"),
-    [("none", ("none",)), ("cuda_ipc", ("none", "cuda_ipc"))],
+    [
+        ("none", ("none",)),
+        # A server configured with cuda_ipc only comes up where it can be used
+        # (the runtime validates the config at startup), so ask for a device.
+        pytest.param(
+            "cuda_ipc",
+            ("none", "cuda_ipc"),
+            marks=pytest.mark.skipif(
+                not _has_cuda_device(), reason="needs a CUDA device"
+            ),
+        ),
+    ],
 )
 def test_server_capabilities_reflect_the_server(
     dummy_api_path, gpu_transport, expected
