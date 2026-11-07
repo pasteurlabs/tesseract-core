@@ -38,10 +38,10 @@ from tesseract_core.runtime.core import (
     redirect_fd,
     use_utf8_stdio,
 )
+from tesseract_core.runtime.cuda.api import validate_gpu_transport_config
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
     read_from_path,
-    validate_gpu_transport_config,
     write_to_path,
 )
 from tesseract_core.runtime.mpa import start_run

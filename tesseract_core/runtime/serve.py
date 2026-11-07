@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .config import config_overrides_as_env, get_config
 from .core import create_endpoints
+from .cuda.api import validate_gpu_transport_config
 from .cuda.serving import (
     EXPORTS_DONE_HEADER,
     ResponseExports,
@@ -27,7 +28,6 @@ from .file_interactions import (
     available_gpu_transports,
     join_paths,
     output_to_bytes,
-    validate_gpu_transport_config,
 )
 from .mpa import start_run
 from .profiler import Profiler

@@ -955,7 +955,7 @@ def test_available_gpu_transports_reflects_config():
 
 def test_validate_gpu_transport_config_accepts_none_or_usable_device(monkeypatch):
     from tesseract_core.runtime import config
-    from tesseract_core.runtime.file_interactions import validate_gpu_transport_config
+    from tesseract_core.runtime.cuda.api import validate_gpu_transport_config
 
     config.update_config(gpu_transport="none")
     validate_gpu_transport_config()
@@ -967,7 +967,7 @@ def test_validate_gpu_transport_config_accepts_none_or_usable_device(monkeypatch
 
 def test_validate_gpu_transport_config_raises_without_a_usable_device(monkeypatch):
     from tesseract_core.runtime import config
-    from tesseract_core.runtime.file_interactions import validate_gpu_transport_config
+    from tesseract_core.runtime.cuda.api import validate_gpu_transport_config
 
     config.update_config(gpu_transport="cuda_ipc")
 

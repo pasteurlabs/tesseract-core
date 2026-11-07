@@ -114,6 +114,25 @@ def has_device() -> bool:
         return False
 
 
+def validate_gpu_transport_config() -> None:
+    """Raise if the configured GPU transport cannot be served.
+
+    A user who explicitly configures a GPU transport expects it to work. When
+    this process cannot serve it (no CUDA runtime library, no visible device,
+    or a failed initialisation), fail fast at startup rather than silently
+    running without it.
+    """
+    from tesseract_core.runtime.config import get_config
+
+    configured = get_config().gpu_transport
+    if configured == "none" or has_device():
+        return
+    raise ValueError(
+        f"gpu_transport={configured!r} is configured, but this Tesseract cannot "
+        "use a CUDA device, so it cannot serve that transport."
+    )
+
+
 def malloc(nbytes: int) -> int:
     """Allocate ``nbytes`` of device memory; return its device pointer."""
     ptr = ctypes.c_void_p()
