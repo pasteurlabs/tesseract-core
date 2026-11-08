@@ -71,6 +71,35 @@ def test_serve_rejects_malformed_port(cli_runner, port):
     assert "Invalid value for port" in result.stderr
 
 
+@pytest.mark.parametrize("user", [None, "1000"])
+def test_run_test_spec_with_null_cli_config(
+    cli_runner, mocked_docker, mocker, tmp_path, user
+):
+    from tesseract_core.runtime.testing.regression import TestCliConfig, TestSpec
+
+    spec = TestSpec(
+        endpoint="apply",
+        payload={"inputs": {}},
+        expected_outputs={},
+        cli_config=None if user is None else TestCliConfig(user=user),
+    )
+    spec_path = tmp_path / "test_apply.json"
+    spec_path.write_text(spec.model_dump_json())
+    mocked_run = mocker.patch(
+        "tesseract_core.sdk.engine.run_tesseract", return_value=("{}", "")
+    )
+
+    result = cli_runner.invoke(
+        cli,
+        ["run", "some-image", "test", f"@{spec_path}"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    assert mocked_run.call_args.kwargs["user"] == user
+    assert mocked_run.call_args.kwargs["volumes"] == []
+    assert mocked_run.call_args.kwargs["input_path"] is None
+
+
 def test_bad_docker_executable_env_var():
     env = os.environ.copy()
     env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
