@@ -583,6 +583,27 @@ def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
     assert "./local_requirements/mylocaldep" in reqs
 
 
+def test_prepare_build_context_editable_local_dependency(tmp_path_factory):
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text(
+        "numpy\n-e ./mylocaldep[extra]\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert reqs == ["numpy", "./local_requirements/mylocaldep[extra]"]
+
+
 def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
     """A local dependency that does not exist raises a clear error."""
     src_dir = tmp_path_factory.mktemp("src")
