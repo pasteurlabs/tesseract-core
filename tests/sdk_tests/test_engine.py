@@ -1862,6 +1862,41 @@ def test_stage_local_dependency_file(tmp_path):
     assert staged.read_text() == "wheel contents"
 
 
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            './mypkg[extra] ; python_version >= "3.8"',
+            './local_requirements/mypkg[extra] ; python_version >= "3.8"',
+        ),
+        (
+            "./mypkg;sys_platform=='linux'",
+            "./local_requirements/mypkg ; sys_platform=='linux'",
+        ),
+    ],
+)
+def test_stage_local_dependency_marker(tmp_path, line, expected):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == expected
+    assert (local_requirements / "mypkg").is_dir()
+
+
+def test_stage_local_dependency_file_url_marker(tmp_path):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    line = (src_dir / "mypkg").as_uri() + ' ; python_version >= "3.8"'
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == './local_requirements/mypkg ; python_version >= "3.8"'
+
+
 def test_stage_local_dependency_name_collision(tmp_path):
     """Two dependencies resolving to the same basename get distinct staged names."""
     src_dir = tmp_path / "src"
