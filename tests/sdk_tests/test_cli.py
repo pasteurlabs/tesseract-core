@@ -68,9 +68,7 @@ def test_serve_accepts_valid_gpu_transport(cli_runner, mocked_docker, mocker):
     help_result = cli_runner.invoke(cli, ["serve", "--help"])
     assert "gpu-transport" in help_result.stdout
 
-    mocker.patch(
-        "tesseract_core.sdk.cli._display_container_meta", return_value={}
-    )
+    mocker.patch("tesseract_core.sdk.cli._display_container_meta", return_value={})
 
     command = ["serve", "some-image", "--gpu-transport", "none"]
     result = cli_runner.invoke(cli, command)
