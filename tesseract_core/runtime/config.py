@@ -24,6 +24,21 @@ from tesseract_core.runtime.file_interactions import (
 )
 
 
+def _split_gpu_transports(obj: Any) -> Any:
+    """Read ``gpu_transport`` as the transports it enables besides ``none``.
+
+    Accepts one name, a comma-separated string of names (as in
+    ``TESSERACT_GPU_TRANSPORT``), or a sequence of names. Order is kept,
+    repeats and ``none`` are dropped.
+    """
+    if isinstance(obj, str):
+        obj = obj.split(",")
+    if not isinstance(obj, list | tuple):
+        return obj
+    names = (str(name).strip() for name in obj)
+    return tuple(dict.fromkeys(name for name in names if name and name != "none"))
+
+
 def _eval_str(obj: Any) -> Any:
     """Evaluate a string into the corresponding Python object."""
     if isinstance(obj, str):
@@ -55,13 +70,16 @@ class RuntimeConfig(BaseModel):
     )
     profiling: bool = False
     tracing: bool = False
-    # GPU transport this Tesseract accepts besides ``none``, for inputs and
-    # outputs. Any other value (e.g. ``cuda_ipc``) passes device memory by
-    # reference and is experimental, so it may change or be removed without
-    # notice. Responses only use it when a request asks for it (see
+    # GPU transports this Tesseract accepts besides ``none``, for inputs and
+    # outputs. Set as one name or several separated by commas, e.g.
+    # ``cuda_ipc``. Transports pass device memory by reference and
+    # are experimental, so they may change or be removed without notice.
+    # Responses only use one when a request asks for it (see
     # serve.negotiate_encoding). Independent of ``output_format``, which only
-    # governs CPU arrays.
-    gpu_transport: gpu_transport_type = "none"
+    # governs CPU arrays. Empty means ``none``.
+    gpu_transport: Annotated[
+        tuple[gpu_transport_type, ...], BeforeValidator(_split_gpu_transports)
+    ] = ()
     # Fraction of each GPU's memory that ``cuda_ipc`` may keep in idle device
     # buffers for reuse across requests, split evenly between buffers for
     # exported and for received arrays. Applies per process, so a client and a
@@ -121,6 +139,8 @@ def config_overrides_as_env() -> dict[str, str]:
             continue
         if isinstance(value, bool):
             value = int(value)
+        elif isinstance(value, tuple):
+            value = ",".join(value) or "none"
         env[f"TESSERACT_{field.upper()}"] = str(value)
     return env
 

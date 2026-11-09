@@ -2062,6 +2062,10 @@ _UNSET = object()
         ("none", {"gpu_transport": "cuda_ipc"}, "none"),
         # Passing None explicitly is the same as not passing it: defer.
         (None, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+        # Lists of transports reach the container as a comma-separated string.
+        (["cuda_ipc"], {"gpu_transport": "none"}, "cuda_ipc"),
+        (_UNSET, {"gpu_transport": ["none", "cuda_ipc"]}, "cuda_ipc"),
+        ([], {"gpu_transport": "cuda_ipc"}, "none"),
     ],
 )
 def test_serve_gpu_transport_precedence(monkeypatch, kwarg, runtime_config, expected):

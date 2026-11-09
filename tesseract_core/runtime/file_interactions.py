@@ -32,6 +32,9 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
+#
+# A server can enable several transports at once (see the ``gpu_transport``
+# config). New transports are added here and registered in device_transport.
 gpu_transport_type = Literal["none", "cuda_ipc"]
 
 # Compressions for array buffers. Disabled compression is ``None`` in the config
@@ -55,15 +58,12 @@ def available_formats() -> tuple[str, ...]:
 def available_gpu_transports() -> tuple[str, ...]:
     """GPU transports the runtime accepts for inputs and outputs.
 
-    Always includes ``none``, plus the configured ``gpu_transport`` if it is
-    anything else.
+    Always includes ``none``, followed by the transports the ``gpu_transport``
+    config enables.
     """
     from tesseract_core.runtime.config import get_config
 
-    configured = get_config().gpu_transport
-    if configured != "none":
-        return ("none", configured)
-    return ("none",)
+    return ("none", *get_config().gpu_transport)
 
 
 def available_compressions() -> tuple[str, ...]:

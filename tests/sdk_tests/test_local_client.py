@@ -239,6 +239,7 @@ def test_any_unreadable_log_does_not_mask_the_startup_failure(dummy_api_path):
         ({}, "none"),
         ({"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
         ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, "cuda_ipc"),
+        ({"gpu_transport": ["cuda_ipc"]}, "cuda_ipc"),
         # An explicit value wins, including when it is the default.
         (
             {"gpu_transport": "none", "runtime_config": {"gpu_transport": "cuda_ipc"}},

@@ -156,6 +156,12 @@ With `from_image` and `from_source`, `gpu_transport` can also be set through
 `runtime_config={"gpu_transport": "cuda_ipc"}`. If both are given, the keyword
 argument wins.
 
+`gpu_transport` also takes a list, to enable several transports at once (in
+`TESSERACT_GPU_TRANSPORT`, separate them with commas). Calls through the
+Tesseract that enabled them ask for the first in the list. Other clients, such
+as one connecting with `from_url`, find one that works from where they run with
+`resolve_gpu_transport`, as described below.
+
 However you serve it, the Tesseract's requirements need a CUDA-enabled build of
 its framework, such as `jax[cuda13]` or a CUDA build of PyTorch. The runtime
 finds the CUDA runtime library in those packages or in a system CUDA install.
