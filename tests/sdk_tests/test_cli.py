@@ -64,6 +64,23 @@ def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     assert result.exit_code == 2, result.stdout
 
 
+def test_serve_accepts_valid_gpu_transport(cli_runner, mocked_docker, mocker):
+    help_result = cli_runner.invoke(cli, ["serve", "--help"])
+    assert "gpu-transport" in help_result.stdout
+
+    mocker.patch(
+        "tesseract_core.sdk.cli._display_container_meta", return_value={}
+    )
+
+    command = ["serve", "some-image", "--gpu-transport", "none"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 0
+
+    command = ["serve", "some-image", "--gpu-transport", "wrong"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 2
+
+
 @pytest.mark.parametrize("port", ["8000:8081", "8000-8080-9000"])
 def test_serve_rejects_malformed_port(cli_runner, port):
     result = cli_runner.invoke(cli, ["serve", "some-image", "-p", port])
