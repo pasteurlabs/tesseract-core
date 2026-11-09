@@ -246,14 +246,30 @@ def test_any_unreadable_log_does_not_mask_the_startup_failure(dummy_api_path):
         ),
     ],
 )
-def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, expected):
+def test_gpu_transport_reaches_child_and_client_alike(
+    dummy_api_path, monkeypatch, kwargs, expected
+):
     """Both ends have to agree, or inputs and outputs cross differently.
 
     The child reads it from its environment and the client from the spawn
     config, by two separate paths, so this pins that they resolve to the same
     thing under each way of setting it. Does not exercise the transport itself,
     which needs a GPU.
+
+    No child is started: one configured with cuda_ipc refuses to start without
+    a device, and both values are fixed before it would run anyway.
     """
+
+    class _NotStarted:
+        url = _DEAD_URL
+
+        def logs(self):
+            return b""
+
+        def remove(self, force=False):
+            pass
+
+    monkeypatch.setattr(local_client, "serve", lambda **kwargs: _NotStarted())
     with Tesseract.from_source(
         dummy_api_path, python_executable=sys.executable, **kwargs
     ) as tess:
