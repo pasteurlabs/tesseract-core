@@ -65,8 +65,9 @@ def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
 
 
 def test_serve_accepts_valid_gpu_transport(cli_runner, mocked_docker, mocker):
-    help_result = cli_runner.invoke(cli, ["serve", "--help"])
-    assert "gpu-transport" in help_result.stdout
+    # NO_COLOR ensures Rich isn't wrapping output symbols
+    help_result = cli_runner.invoke(cli, ["serve", "--help"], env={"NO_COLOR": "1"})
+    assert "GPU transport" in help_result.stdout
 
     mocker.patch("tesseract_core.sdk.cli._display_container_meta", return_value={})
 
