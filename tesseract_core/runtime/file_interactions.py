@@ -189,7 +189,10 @@ def get_filesize(path: PathLike) -> int:
 def join_paths(base: PathLike, other: PathLike) -> str:
     """Join the base path (URL or local path) with the given other path.
 
-    If the other path is an absolute URL, return it as is.
+    If the other path is an absolute URL, return it as is. A URL base is treated as
+    a directory and must have the form ``scheme://netloc/path``, as fsspec returns
+    it for a glob match (``file://``, ``http(s)://``, ``s3://``, ``memory://``, ...).
+    A query string or fragment is not supported.
     """
     # Coerce to str to avoid "Cannot mix str and non-str arguments"
     # when mixing PurePosixPath / PureWindowsPath on Windows
@@ -217,7 +220,12 @@ def is_url(path: PathLike) -> bool:
 
 
 def parent_path(x: PathLike) -> PathLike:
-    """Get parent of given path (which may be a URL)."""
+    """Get parent of given path (which may be a URL).
+
+    A URL must have the form ``scheme://netloc/path``, as fsspec returns it for a
+    glob match; its parent is everything before the last ``/``. A query string or
+    fragment is not supported, since it may contain ``/`` itself.
+    """
     if is_url(x):
         return posixpath.dirname(str(x))
 
