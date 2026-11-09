@@ -225,6 +225,10 @@ def test_abstract_eval_schema_nested_array_defaults(use_factory):
         mapping: dict[str, Array[(None,), Float64]] = default({"a": [1]})
         sub: Sub = default(Sub(v=np.zeros(4, dtype=np.float32)))
         none: Array[(None,), Float64] | None = default(None)
+        # Unhashable metadata must not break building the converter
+        meta: Annotated[Array[(2,), Float64], {"unhashable": "metadata"}] = default(
+            [1, 2]
+        )
 
     AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
     inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
@@ -236,6 +240,7 @@ def test_abstract_eval_schema_nested_array_defaults(use_factory):
         "mapping": {"a": {"shape": (1,), "dtype": "float64"}},
         "sub": {"v": {"shape": (4,), "dtype": "float32"}},
         "none": None,
+        "meta": {"shape": (2,), "dtype": "float64"},
     }
     # A model default becomes an instance of the abstract model
     assert type(inputs.sub).__name__ == "AbstractEval_Sub"
@@ -252,15 +257,6 @@ def test_abstract_eval_schema_advertises_abstract_defaults():
     ]
     assert props["y"]["default"] == {"shape": [2], "dtype": "float64"}
     assert props["seq"]["default"] == [{"shape": [2], "dtype": "float64"}]
-
-
-def test_abstract_eval_schema_default_with_unhashable_metadata():
-    class Model(BaseModel):
-        y: Annotated[Array[(2,), Float64], {"unhashable": "metadata"}] = [1, 2]
-
-    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
-    inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
-    assert inputs.y == ShapeDType(shape=(2,), dtype="float64")
 
 
 def test_apply_function_to_model_tree_default_factory_takes_data():

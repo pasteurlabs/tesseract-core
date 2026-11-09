@@ -31,7 +31,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import PydanticUndefined
 
 from .schema_types import (
     Array,
@@ -117,13 +116,13 @@ def _abstract_default_converter(
     in it is replaced by its shape and dtype, and the result is validated against
     the abstract annotation. A default that fails validation is returned unchanged.
 
-    Returns None if ``new_type`` has no arrays to replace. Both TypeAdapters are built
-    here, once per field, so converting a default per request does not rebuild them,
-    and annotations need not be hashable as they would for a cache.
+    Returns None if ``new_type`` has no arrays to replace.
     """
     if new_type == old_type:
         return None
 
+    # Built once per field and reused for every factory default, so no cache is
+    # needed (which would also require the annotations to be hashable).
     real_adapter = TypeAdapter(old_type)
     abstract_adapter = TypeAdapter(new_type)
 
@@ -141,6 +140,8 @@ def _factory_default_validator(converters: dict[str, Callable[[Any], Any]]) -> A
     """Model validator converting the defaults of default_factory fields the caller omitted."""
 
     def convert_factory_defaults(self: BaseModel) -> BaseModel:
+        # Pydantic does not validate defaults, so a field missing from
+        # model_fields_set still holds its factory's raw output.
         for name, convert in converters.items():
             if name not in self.model_fields_set:
                 # Write to __dict__ to bypass validate_assignment and frozen models
@@ -171,8 +172,7 @@ def apply_function_to_model_tree(
     when the model is built. It returns a function mapping the old default to the new
     one, or None to keep the default as is. A ``default=`` is converted right away.
     A ``default_factory=`` is left in place, and a model validator converts its output
-    for every field the caller omitted; pydantic does not validate defaults, so a value
-    that did not come from the caller can only end up there through a default.
+    for every field the caller omitted.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
@@ -226,12 +226,8 @@ def apply_function_to_model_tree(
                 new_field = copy(field)
                 # Need to strip off metadata to trigger re-evaluation of the field
                 new_field.metadata = []
-                has_default = (
-                    field.default is not PydanticUndefined
-                    or field.default_factory is not None
-                )
                 convert = None
-                if make_default_converter is not None and has_default:
+                if make_default_converter is not None and not field.is_required():
                     convert = make_default_converter(field_type, new_type)
                 if convert is not None:
                     if field.default_factory is not None:
@@ -253,18 +249,20 @@ def apply_function_to_model_tree(
             if safe_issubclass(treeobj, RootModel):
                 model_config.pop("extra", None)
 
-            validators = {}
-            if factory_converters:
-                validators["_convert_factory_defaults"] = _factory_default_validator(
-                    factory_converters
-                )
-
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
                 model_config=(ConfigDict, model_config),
                 __base__=treeobj,
-                __validators__=validators,
+                __validators__=(
+                    {
+                        "_convert_factory_defaults": _factory_default_validator(
+                            factory_converters
+                        )
+                    }
+                    if factory_converters
+                    else None
+                ),
             )
 
         elif _is_annotated(treeobj):
