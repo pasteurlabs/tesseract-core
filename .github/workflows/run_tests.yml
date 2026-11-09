@@ -119,14 +119,15 @@ jobs:
             --timeout=300
 
   # Runs this SDK against older runtimes and older SDKs against this runtime,
-  # each served from its own environment (no Docker needed). Each release
-  # supports its own minor version and the three before it (see
-  # docs/content/reference/version-compatibility.md), so after a minor release,
-  # add it here and drop the oldest.
+  # each served from its own environment (no Docker needed), for the oldest
+  # supported release and the latest one.
+  # NOTE: The oldest supported version is raised by hand, only for a change that
+  # cannot keep it working. If raising it here, also do it in
+  # docs/content/reference/version-compatibility.md.
   tests-compat:
     strategy:
       matrix:
-        compat-version: ["1.13.0", "1.14.0", "1.15.0"]
+        compat-version: ["1.13.0", "latest"]
 
       fail-fast: false
 
@@ -155,11 +156,15 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
         run: |
+          compat_version="${{ matrix.compat-version }}"
+          if [ "$compat_version" == "latest" ]; then
+            compat_version=$(curl -fsSL https://pypi.org/pypi/tesseract-core/json | jq -r .info.version)
+          fi
           uv run --no-sync pytest \
             -o addopts="--durations=10" \
             -v \
             --timeout=300 \
-            --compat-version ${{ matrix.compat-version }} \
+            --compat-version "$compat_version" \
             tests/compat_tests
 
   get-e2e-matrix:
