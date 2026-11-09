@@ -241,3 +241,75 @@ def test_concurrent_calls_over_nixl(free_port, serve_in_subprocess):
 
             for i, y in results:
                 np.testing.assert_array_equal(y, np.full(256, 2.0 * i, np.float32))
+
+
+_CALLS_PER_CLIENT = 8
+
+
+def _client_main(url, client, barrier, result_q):
+    try:
+        import cupy
+
+        from tesseract_core.sdk.tesseract import Tesseract
+
+        cupy.cuda.Device(0).use()
+        remote = Tesseract.from_url(url).with_encoding(gpu_transport="nixl")
+        # Start calling together, so the clients' calls overlap on the server.
+        barrier.wait(timeout=_TIMEOUT)
+        for call in range(_CALLS_PER_CLIENT):
+            value = client * _CALLS_PER_CLIENT + call
+            x = cupy.full(256, value, dtype=cupy.float32)
+            y = remote.apply({"x": x})["y"].copy_to_host()
+            result_q.put(("CLIENT_OK", (value, y)))
+    except Exception:  # noqa: BLE001 -- report any worker failure to the parent
+        result_q.put(("CLIENT_ERROR", traceback.format_exc()))
+
+
+@requires_nixl
+def test_concurrent_calls_over_nixl_from_several_clients(
+    free_port, serve_in_subprocess
+):
+    """Concurrent calls from several client processes each get their own exports back.
+
+    Each client process has its own NIXL agent, so unlike the calls through one
+    client above, the server's reads from them do not take turns.
+    """
+    num_clients = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE)
+
+        server_env = {"TESSERACT_GPU_TRANSPORT": "nixl"}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            ctx = multiprocessing.get_context("spawn")
+            barrier = ctx.Barrier(num_clients)
+            result_q = ctx.Queue()
+            clients = [
+                ctx.Process(target=_client_main, args=(url, i, barrier, result_q))
+                for i in range(num_clients)
+            ]
+            for proc in clients:
+                proc.start()
+
+            results = []
+            try:
+                for _ in range(num_clients * _CALLS_PER_CLIENT):
+                    try:
+                        status, payload = result_q.get(timeout=_TIMEOUT)
+                    except queue_mod.Empty:
+                        raise AssertionError(
+                            "nixl client processes timed out"
+                        ) from None
+                    if status.endswith("ERROR"):
+                        raise AssertionError(f"{status}:\n{payload}")
+                    results.append(payload)
+            finally:
+                for proc in clients:
+                    proc.join(timeout=_TIMEOUT)
+                    if proc.is_alive():
+                        proc.terminate()
+                        proc.join(timeout=5)
+
+    for value, y in results:
+        np.testing.assert_array_equal(y, np.full(256, 2.0 * value, np.float32))
