@@ -156,7 +156,11 @@ def parse_requirements(
             # sure to keep it.
             remote_dependencies.append(line)
         elif _is_local_dependency(parsed_line.requirement):
-            local_dependencies.append(line)
+            # An editable install would point into the build stage, which the
+            # image does not keep, so the package is installed as a copy.
+            local_dependencies.append(
+                parsed_line.requirement if parsed_line.is_editable else line
+            )
         else:
             remote_dependencies.append(line)
     return local_dependencies, remote_dependencies
