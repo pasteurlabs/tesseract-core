@@ -89,7 +89,8 @@ $ pytest --always-run-endtoend tests/endtoend_tests
 ```
 
 The tests in `tests/compat_tests` check this SDK and runtime against a released
-version (see the [version compatibility policy](docs/content/reference/version-compatibility.md)).
+version (see the [version compatibility policy](docs/content/reference/version-compatibility.md));
+CI runs them against the oldest supported release and the latest one.
 They need `uv` and are skipped unless a version is given:
 
 ```console

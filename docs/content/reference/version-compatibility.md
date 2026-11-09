@@ -4,12 +4,12 @@ The Python SDK (`tesseract_core.sdk` and the `tesseract` CLI) and the runtime th
 
 ## Supported versions
 
-Each release supports the SDK and runtime of its own minor release and of the three minor releases before it, in both directions:
+Each release supports SDKs and runtimes back to the oldest supported version, currently **1.13**, in both directions:
 
-- The SDK works with Tesseracts served by any runtime in that range.
-- The runtime works with clients that use any SDK in that range.
+- The SDK works with Tesseracts served by any runtime from 1.13 to its own version.
+- The runtime works with clients that use any SDK from 1.13 to its own version.
 
-For example, release 1.16 supports runtimes and SDKs from 1.13 to 1.16. Patch releases do not change the range.
+The oldest supported version is raised by hand, only for a change that cannot keep it working, and the release notes announce it. CI tests every change against the oldest supported release and the latest one.
 
 Supported means that every endpoint returns the same results in every output format, and that asking an older counterpart for something it cannot do either fails with a clear error before the endpoint runs, or is listed under {ref}`reduced-features-with-older-runtimes`. Older combinations may still work, but nothing guarantees it.
 
