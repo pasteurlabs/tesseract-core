@@ -123,6 +123,18 @@ def test_Tesseract_from_url_adds_missing_scheme(url, expected):
     assert Tesseract.from_url(url)._client.url == expected
 
 
+@pytest.mark.parametrize("run_id", ["../escaped", "run.1"])
+def test_Tesseract_from_tesseract_api_rejects_an_invalid_run_id(
+    dummy_tesseract_module, tmp_path, run_id
+):
+    t = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, output_path=tmp_path / "out"
+    )
+    with pytest.raises(ValueError, match="Invalid run_id"):
+        t.apply({}, run_id=run_id)
+    assert not (tmp_path / "escaped").exists()
+
+
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
     all_endpoints = {
         "apply",
