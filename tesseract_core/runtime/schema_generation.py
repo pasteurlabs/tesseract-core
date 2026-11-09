@@ -397,15 +397,19 @@ def create_apply_schema(
     return ApplyInputSchema, ApplyOutputSchema
 
 
-# Validation context key that lets the abstract schema's array fields accept real
-# arrays. Only passed when converting defaults, so callers still cannot send real
-# arrays to abstract_eval.
-_CONVERT_DEFAULT_CONTEXT = "tesseract_convert_abstract_default"
+# Validation context that lets the abstract schema's array fields accept real
+# arrays, only passed when converting defaults. Pydantic wants string keys, so the
+# value is a private object: callers cannot reproduce it to send real arrays to
+# abstract_eval.
+_CONVERT_DEFAULT_SENTINEL = object()
+_CONVERT_DEFAULT_CONTEXT = {
+    "tesseract_convert_abstract_default": _CONVERT_DEFAULT_SENTINEL
+}
 
 
 def _array_default_to_shapedtype(value: Any, info: ValidationInfo) -> Any:
     """Before-validator replacing a real array by its ShapeDType, when converting a default."""
-    converting = info.context and info.context.get(_CONVERT_DEFAULT_CONTEXT)
+    converting = info.context == _CONVERT_DEFAULT_CONTEXT
     if converting and isinstance(value, np.ndarray | np.generic):
         return ShapeDType(shape=value.shape, dtype=str(value.dtype))
     return value
@@ -438,7 +442,7 @@ def _abstract_default_converter(
             real = real_adapter.validate_python(default)
             plain = real_adapter.dump_python(real, by_alias=True)
             return abstract_adapter.validate_python(
-                plain, context={_CONVERT_DEFAULT_CONTEXT: True}
+                plain, context=_CONVERT_DEFAULT_CONTEXT
             )
         except (ValidationError, PydanticSerializationError):
             return default
