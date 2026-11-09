@@ -265,6 +265,9 @@ def test_host_credential_rejects_disallowed_characters():
         {"host": "ok.com", "secret_id": "tok\x00", "username": "user"},
         {"host": "ok.com", "secret_id": "tok", "username": "u\x01ser"},
         {"host": "ok.com", "secret_id": "bad/id"},
+        {"host": "ok.com\n", "secret_id": "tok"},
+        {"host": "ok.com", "secret_id": "tok\n"},
+        {"host": "ok.com", "secret_id": "tok", "username": "user\n"},
     ):
         with pytest.raises(
             PydanticValidationError, match="contains disallowed characters"
