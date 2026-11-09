@@ -1285,32 +1285,23 @@ def test_resolve_gpu_transport_uses_cuda_ipc_when_it_works(
 
 
 @requires_cuda
-def test_resolve_gpu_transport_falls_back_when_cuda_ipc_does_not_work(
-    free_port, serve_in_subprocess, allow_device_host_copy
+def test_serve_fails_when_the_configured_transport_is_unusable(
+    free_port, serve_in_subprocess
 ):
-    """A server that offers cuda_ipc but cannot use it gets host copies instead.
+    """A server configured with a transport it cannot serve refuses to start.
 
-    Hiding the GPU from the server stands in for every reason the check can
-    fail, e.g. a server on another host or in another IPC namespace. A client
-    that asked for cuda_ipc gets an error rather than a silent host copy.
+    Hiding the GPU from the server stands in for every reason the transport
+    cannot work there (no visible device, no CUDA runtime, failed initialisation).
+    The configuration is explicit, so instead of coming up without it the server
+    exits while starting and reports why.
     """
-    from tesseract_core.sdk.tesseract import Tesseract
-
     with tempfile.TemporaryDirectory() as tmpdir:
         api_path = Path(tmpdir) / "tesseract_api.py"
         api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
 
         server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc", "CUDA_VISIBLE_DEVICES": ""}
-        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
-            remote = Tesseract.from_url(url)
-            with pytest.warns(UserWarning, match="copied to the host instead"):
-                transport = remote.resolve_gpu_transport()
-            assert transport == "none"
-
-            # CuPy refuses to convert implicitly, so this takes an explicit copy
-            x = cupy.arange(4, dtype=cupy.float32)
-            result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
-            np.testing.assert_allclose(result["y"], cupy.asnumpy(x) * 2.0, rtol=1e-6)
-
-            with pytest.raises(RuntimeError, match="does not work between"):
-                remote.with_encoding(gpu_transport="cuda_ipc").resolve_gpu_transport()
+        with (
+            pytest.raises(RuntimeError, match="cannot use a CUDA device"),
+            serve_in_subprocess(api_path, free_port, env=server_env),
+        ):
+            pass

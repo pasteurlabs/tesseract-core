@@ -977,7 +977,7 @@ def _extract_cli_config(
     base_dir: Path,
 ) -> tuple[str | None, list[str], str | None]:
     """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
-    cli_config = test_spec.get("cli_config", {})
+    cli_config = test_spec.get("cli_config") or {}
 
     if (input_path := cli_config.get("input_path")) and not Path(
         input_path
@@ -987,7 +987,7 @@ def _extract_cli_config(
     from tesseract_core.sdk.engine import _split_volume_spec
 
     volume_mounts = []
-    for vol_mount in cli_config.get("volume_mounts", []):
+    for vol_mount in cli_config.get("volume_mounts") or []:
         source = _split_volume_spec(vol_mount)[0]
         if not Path(source).is_absolute():
             volume_mounts.append(str(base_dir / vol_mount))

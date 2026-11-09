@@ -156,7 +156,11 @@ def parse_requirements(
             # sure to keep it.
             remote_dependencies.append(line)
         elif _is_local_dependency(parsed_line.requirement):
-            local_dependencies.append(line)
+            # An editable install would point into the build stage, which the
+            # image does not keep, so the package is installed as a copy.
+            local_dependencies.append(
+                parsed_line.requirement if parsed_line.is_editable else line
+            )
         else:
             remote_dependencies.append(line)
     return local_dependencies, remote_dependencies
@@ -286,6 +290,17 @@ def _split_local_dependency(line: str) -> tuple[str, str]:
     return path, match.group("extras") or ""
 
 
+def _split_marker(line: str) -> tuple[str, str]:
+    """Split a requirement line into its spec and environment marker.
+
+    Mirrors pip, which needs whitespace before the ``;`` only after a URL.
+    """
+    line = line.strip()
+    separator = "; " if line.startswith("file://") else ";"
+    spec, _, marker = line.partition(separator)
+    return spec.strip(), marker.strip()
+
+
 def _stage_local_dependency(
     line: str, src_dir: Path, local_requirements_path: Path
 ) -> str:
@@ -294,8 +309,9 @@ def _stage_local_dependency(
     The source path is resolved relative to ``src_dir`` (so ``.``/``..`` segments
     are collapsed) to derive a valid, unique destination name under
     ``local_requirements/``. Returns the install spec relative to the build
-    working directory, with any extras suffix preserved.
+    working directory, with any extras suffix and environment marker preserved.
     """
+    line, marker = _split_marker(line)
     path, extras = _split_local_dependency(line)
     resolved_src = (src_dir / path).resolve()
 
@@ -321,7 +337,8 @@ def _stage_local_dependency(
     else:
         copytree(resolved_src, dest, ignore=_ignore_pycache)
 
-    return f"./local_requirements/{dest_name}{extras}"
+    spec = f"./local_requirements/{dest_name}{extras}"
+    return f"{spec} ; {marker}" if marker else spec
 
 
 def get_runtime_dir() -> Path:
