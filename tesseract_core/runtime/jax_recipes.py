@@ -224,10 +224,34 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     # validates to a numpy scalar, which ``is_array`` accepts, so it stays
     # dynamic and keeps its gradient.
     out, vjp_func, cotangent_template = _apply_with_vjp_jit(apply_jit, inputs_dict)
+    _check_cacheable_outputs(out)
     _jax_vjp_cache.put(
         (apply_jit, _cache_key(inputs_dict)), (vjp_func, cotangent_template)
     )
     return out
+
+
+def _check_cacheable_outputs(tree: Any, path: tuple[str, ...] = ()) -> None:
+    """Raise if ``tree`` nests a container that the VJP cache cannot rebuild.
+
+    A cache hit rebuilds the cotangent with ``set_at_path``, which supports
+    dicts, lists, tuples and NamedTuples only.
+    """
+    if isinstance(tree, dict):
+        children = ((f"{{{k}}}" if path else str(k), v) for k, v in tree.items())
+    elif isinstance(tree, list | tuple):
+        children = ((f"[{i}]", v) for i, v in enumerate(tree))
+    elif jax.tree_util.treedef_is_leaf(jax.tree.structure(tree)):
+        return
+    else:
+        where = ".".join(path) or "the top level"
+        raise TypeError(
+            f"apply returned a {type(tree).__name__} at {where}. With the VJP cache "
+            "enabled, outputs may only nest dicts, lists, tuples and NamedTuples; "
+            "convert it to one of those, or disable the cache."
+        )
+    for key, child in children:
+        _check_cacheable_outputs(child, (*path, key))
 
 
 @eqx.filter_jit

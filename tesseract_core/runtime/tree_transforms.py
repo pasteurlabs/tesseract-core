@@ -140,8 +140,9 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
         if method in ("seq", "dict"):
             child = _set_recursive(tree[idx], path, value) if path else value
             if isinstance(tree, tuple):
-                # Tuples cannot be assigned to, so rebuild this one
-                return (*tree[:idx], child, *tree[idx + 1 :])
+                # Tuples cannot be assigned to, so rebuild this one, as the same type
+                items = (*tree[:idx], child, *tree[idx + 1 :])
+                return type(tree)(*items) if hasattr(tree, "_fields") else items
             tree[idx] = child
             return tree
         elif method == "getattr":
@@ -153,6 +154,8 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 child = (
                     _set_recursive(getattr(tree, key), path, value) if path else value
                 )
+                if isinstance(tree, tuple) and hasattr(tree, "_fields"):
+                    return tree._replace(**{key: child})
                 setattr(tree, key, child)
                 return tree
             else:
