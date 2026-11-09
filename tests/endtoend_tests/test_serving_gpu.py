@@ -103,9 +103,9 @@ def gpu_image_name(
 
 
 @pytest.fixture
-def nixl_image_name(gpu_image_name):
+def nixl_image_name(request, gpu_image_name):
     """The GPU example image whose requirements include NIXL."""
-    if "-gpu-torch" not in gpu_image_name:
+    if request.node.callspec.params["gpu_image_name"] != "_gpu_torch":
         pytest.skip("only the _gpu_torch example installs NIXL")
     return gpu_image_name
 
