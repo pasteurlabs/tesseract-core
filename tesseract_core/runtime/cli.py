@@ -38,6 +38,7 @@ from tesseract_core.runtime.core import (
     redirect_fd,
     use_utf8_stdio,
 )
+from tesseract_core.runtime.cuda.api import validate_gpu_transport_config
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
     read_from_path,
@@ -566,6 +567,8 @@ def serve(
         _exit_when_parent_closes(parent_pipe_fd)
 
     config = get_config()
+    # An unusable GPU transport is reported by serve() itself, which also covers
+    # servers started without the CLI.
     if config.debug:
         # The server is long-running, so a debugger can attach at any time.
         _start_debug_server(
@@ -594,6 +597,7 @@ def _create_user_defined_cli_command(
     OutputSchema = user_function.__annotations__.get("return", None)
 
     def _callback_wrapper(**kwargs: Any):
+        validate_gpu_transport_config()
         config = get_config()
         input_path = config.input_path
         output_path = config.output_path

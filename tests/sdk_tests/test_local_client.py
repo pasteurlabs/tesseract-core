@@ -32,6 +32,13 @@ from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
 pytestmark = pytest.mark.timeout(120)
 
 
+def _has_cuda_device() -> bool:
+    """Whether this machine exposes a CUDA device, as a spawned server sees it."""
+    from tesseract_core.runtime.cuda import api as cuda_api
+
+    return cuda_api.has_device()
+
+
 def _process_alive(pid: int) -> bool:
     """Whether `pid` still exists, without reaping or signalling it."""
     try:
@@ -239,14 +246,30 @@ def test_any_unreadable_log_does_not_mask_the_startup_failure(dummy_api_path):
         ),
     ],
 )
-def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, expected):
+def test_gpu_transport_reaches_child_and_client_alike(
+    dummy_api_path, monkeypatch, kwargs, expected
+):
     """Both ends have to agree, or inputs and outputs cross differently.
 
     The child reads it from its environment and the client from the spawn
     config, by two separate paths, so this pins that they resolve to the same
     thing under each way of setting it. Does not exercise the transport itself,
     which needs a GPU.
+
+    No child is started: one configured with cuda_ipc refuses to start without
+    a device, and both values are fixed before it would run anyway.
     """
+
+    class _NotStarted:
+        url = _DEAD_URL
+
+        def logs(self):
+            return b""
+
+        def remove(self, force=False):
+            pass
+
+    monkeypatch.setattr(local_client, "serve", lambda **kwargs: _NotStarted())
     with Tesseract.from_source(
         dummy_api_path, python_executable=sys.executable, **kwargs
     ) as tess:
@@ -263,7 +286,18 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
 
 @pytest.mark.parametrize(
     ("gpu_transport", "expected"),
-    [("none", ("none",)), ("cuda_ipc", ("none", "cuda_ipc"))],
+    [
+        ("none", ("none",)),
+        # A server configured with cuda_ipc only comes up where it can be used
+        # (the runtime validates the config at startup), so ask for a device.
+        pytest.param(
+            "cuda_ipc",
+            ("none", "cuda_ipc"),
+            marks=pytest.mark.skipif(
+                not _has_cuda_device(), reason="needs a CUDA device"
+            ),
+        ),
+    ],
 )
 def test_server_capabilities_reflect_the_server(
     dummy_api_path, gpu_transport, expected

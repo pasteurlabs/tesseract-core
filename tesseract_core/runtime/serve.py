@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .config import config_overrides_as_env, get_config
 from .core import create_endpoints
+from .cuda.api import validate_gpu_transport_config
 from .cuda.serving import (
     EXPORTS_DONE_HEADER,
     ResponseExports,
@@ -305,6 +306,9 @@ def serve(host: str, port: int, num_workers: int) -> None:
             f"gpu_transport={gpu_transport!r} cannot be served by more than one "
             f"worker (got num_workers={num_workers})."
         )
+    # Fail fast if the configured GPU transport cannot be served, rather than
+    # only telling the first client.
+    validate_gpu_transport_config()
     os.environ.update(config_overrides_as_env())
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",
