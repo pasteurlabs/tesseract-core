@@ -86,55 +86,6 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
-# Validation context key that lets the abstract schema's array fields accept real
-# arrays. Only passed when converting defaults, so callers still cannot send real
-# arrays to abstract_eval.
-_CONVERT_DEFAULT_CONTEXT = "tesseract_convert_abstract_default"
-
-
-def _array_default_to_shapedtype(value: Any, info: ValidationInfo) -> Any:
-    """Before-validator replacing a real array by its ShapeDType, when converting a default."""
-    converting = info.context and info.context.get(_CONVERT_DEFAULT_CONTEXT)
-    if converting and isinstance(value, np.ndarray | np.generic):
-        return ShapeDType(shape=value.shape, dtype=str(value.dtype))
-    return value
-
-
-def _abstract_default_converter(
-    old_type: Any, new_type: Any
-) -> Callable[[Any], Any] | None:
-    """Return a function turning a default of ``old_type`` into one of ``new_type``.
-
-    The default is validated against the original annotation, so it is cast to the
-    declared dtype (``[1, 2]`` on a ``Float64`` field becomes float64), and dumped
-    back to plain data, which turns model instances into dicts but keeps arrays.
-    Validating that against the abstract annotation, with the context that lets its
-    array fields accept arrays, replaces each array by its ShapeDType.
-    A default that fails validation is returned unchanged.
-
-    Returns None if ``new_type`` has no arrays to replace.
-    """
-    if new_type == old_type:
-        return None
-
-    # Built once per field and reused for every factory default, so no cache is
-    # needed (which would also require the annotations to be hashable).
-    real_adapter = TypeAdapter(old_type)
-    abstract_adapter = TypeAdapter(new_type)
-
-    def convert(default: Any) -> Any:
-        try:
-            real = real_adapter.validate_python(default)
-            plain = real_adapter.dump_python(real, by_alias=True)
-            return abstract_adapter.validate_python(
-                plain, context={_CONVERT_DEFAULT_CONTEXT: True}
-            )
-        except (ValidationError, PydanticSerializationError):
-            return default
-
-    return convert
-
-
 def _factory_default_validator(converters: dict[str, Callable[[Any], Any]]) -> Any:
     """Model validator converting the defaults of default_factory fields the caller omitted."""
 
@@ -444,6 +395,55 @@ def create_apply_schema(
         )
 
     return ApplyInputSchema, ApplyOutputSchema
+
+
+# Validation context key that lets the abstract schema's array fields accept real
+# arrays. Only passed when converting defaults, so callers still cannot send real
+# arrays to abstract_eval.
+_CONVERT_DEFAULT_CONTEXT = "tesseract_convert_abstract_default"
+
+
+def _array_default_to_shapedtype(value: Any, info: ValidationInfo) -> Any:
+    """Before-validator replacing a real array by its ShapeDType, when converting a default."""
+    converting = info.context and info.context.get(_CONVERT_DEFAULT_CONTEXT)
+    if converting and isinstance(value, np.ndarray | np.generic):
+        return ShapeDType(shape=value.shape, dtype=str(value.dtype))
+    return value
+
+
+def _abstract_default_converter(
+    old_type: Any, new_type: Any
+) -> Callable[[Any], Any] | None:
+    """Return a function turning a default of ``old_type`` into one of ``new_type``.
+
+    The default is validated against the original annotation, so it is cast to the
+    declared dtype (``[1, 2]`` on a ``Float64`` field becomes float64), and dumped
+    back to plain data, which turns model instances into dicts but keeps arrays.
+    Validating that against the abstract annotation, with the context that lets its
+    array fields accept arrays, replaces each array by its ShapeDType.
+    A default that fails validation is returned unchanged.
+
+    Returns None if ``new_type`` has no arrays to replace.
+    """
+    if new_type == old_type:
+        return None
+
+    # Built once per field and reused for every factory default, so no cache is
+    # needed (which would also require the annotations to be hashable).
+    real_adapter = TypeAdapter(old_type)
+    abstract_adapter = TypeAdapter(new_type)
+
+    def convert(default: Any) -> Any:
+        try:
+            real = real_adapter.validate_python(default)
+            plain = real_adapter.dump_python(real, by_alias=True)
+            return abstract_adapter.validate_python(
+                plain, context={_CONVERT_DEFAULT_CONTEXT: True}
+            )
+        except (ValidationError, PydanticSerializationError):
+            return default
+
+    return convert
 
 
 def create_abstract_eval_schema(
