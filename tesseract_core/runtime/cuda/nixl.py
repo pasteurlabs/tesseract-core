@@ -23,6 +23,7 @@ the other sends.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import ctypes
 import importlib
@@ -85,6 +86,14 @@ _PRODUCER_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = (
     weakref.WeakValueDictionary()
 )
 _PRODUCER_LOCKS_LOCK = threading.Lock()
+
+# The main agent's registrations of exported memory by (address, size, device),
+# and how many exports use each. Exports of the same memory share a registration,
+# since a consumer rejects metadata that describes one region with two different
+# keys (NIXL_ERR_NOT_ALLOWED), as happens when concurrent calls send one array.
+_EXPORTS: dict[tuple[int, int, int], Any] = {}
+_EXPORT_USERS: collections.Counter[tuple[int, int, int]] = collections.Counter()
+_EXPORTS_LOCK = threading.Lock()
 
 # Arrays of at least this many bytes are read in parallel (see _read_spans).
 # Smaller ones gain little from it and connect faster on the main agent.
@@ -225,26 +234,32 @@ class NixlExportGroup:
     """
 
     def __init__(self) -> None:
-        # (registration, source array) pairs.
-        self.exports: list[tuple[Any, Any]] = []
+        # (key into _EXPORTS, source array) pairs.
+        self.exports: list[tuple[tuple[int, int, int], Any]] = []
 
     def __len__(self) -> int:
         return len(self.exports)
 
     def release(self) -> None:
-        """Deregister the exported arrays and let go of them."""
+        """Let go of the exported arrays, deregistering those no other group uses."""
         exports, self.exports = self.exports, []
         if not exports:
             return
         agent = _get_main_agent()
-        for registration, _arr in exports:
-            # A server releases exports while answering later, unrelated
-            # requests, which must not fail over this. A failed deregistration
-            # only leaks the registration.
-            try:
-                agent.deregister_memory(registration)
-            except Exception:  # noqa: BLE001, S110
-                pass
+        with _EXPORTS_LOCK:
+            for key, _arr in exports:
+                _EXPORT_USERS[key] -= 1
+                if _EXPORT_USERS[key]:
+                    continue
+                del _EXPORT_USERS[key]
+                registration = _EXPORTS.pop(key)
+                # A server releases exports while answering later, unrelated
+                # requests, which must not fail over this. A failed
+                # deregistration only leaks the registration.
+                try:
+                    agent.deregister_memory(registration)
+                except Exception:  # noqa: BLE001, S110
+                    pass
 
 
 def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
@@ -257,10 +272,12 @@ def dump_nixl_arraydict(arr: Any, group: NixlExportGroup) -> ArrayDict:
         buffer = ":::"
     else:
         agent = _get_main_agent()
-        registration = agent.register_memory(
-            [(info.data_ptr, info.nbytes, info.device, "")], "VRAM"
-        )
-        group.exports.append((registration, arr))
+        key = (info.data_ptr, info.nbytes, info.device)
+        with _EXPORTS_LOCK:
+            if key not in _EXPORTS:
+                _EXPORTS[key] = agent.register_memory([(*key, "")], "VRAM")
+            _EXPORT_USERS[key] += 1
+        group.exports.append((key, arr))
 
         # The consumer reads the memory from another process, outside any stream
         # ordering on this side, so wait for the producer's kernels to finish

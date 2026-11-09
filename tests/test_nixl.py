@@ -244,6 +244,34 @@ def test_concurrent_calls_over_nixl(free_port, serve_in_subprocess):
                 np.testing.assert_array_equal(y, np.full(256, 2.0 * i, np.float32))
 
 
+@requires_nixl
+def test_concurrent_calls_sending_one_array_over_nixl(free_port, serve_in_subprocess):
+    """Concurrent calls can send the same device array."""
+    import cupy
+
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_DOUBLE_API_CODE)
+
+        server_env = {"TESSERACT_GPU_TRANSPORT": "nixl"}
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            remote = Tesseract.from_url(url).with_encoding(gpu_transport="nixl")
+            cupy.cuda.Device(0).use()
+            x = cupy.arange(256, dtype=cupy.float32)
+
+            def call(_):
+                cupy.cuda.Device(0).use()
+                return remote.apply({"x": x})["y"].copy_to_host()
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(call, range(32)))
+
+            for y in results:
+                np.testing.assert_array_equal(y, 2.0 * np.arange(256, dtype=np.float32))
+
+
 _CALLS_PER_CLIENT = 8
 
 

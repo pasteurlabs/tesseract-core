@@ -11,6 +11,7 @@ agent and the ``mocked_cuda`` runtime instead of a GPU and NIXL. The GPU tests i
 
 from __future__ import annotations
 
+import collections
 import sys
 import threading
 
@@ -101,6 +102,9 @@ def fake_agent(monkeypatch):
     agent = FakeNixlAgent()
     monkeypatch.setattr(cuda_nixl, "_MAIN_AGENT", agent)
     monkeypatch.setattr(cuda_nixl, "_PARALLEL_READ_AGENT", agent)
+    # Each test's fake agent starts without registrations.
+    monkeypatch.setattr(cuda_nixl, "_EXPORTS", {})
+    monkeypatch.setattr(cuda_nixl, "_EXPORT_USERS", collections.Counter())
     return agent
 
 
@@ -221,13 +225,36 @@ def test_dump_registers_syncs_and_keeps_the_array(mocked_cuda, fake_agent):
     # The array's own bytes are registered, and the array is kept until release.
     [registration] = fake_agent.registered
     assert registration.descs == [(0x4000, 24, 0, "")]
-    assert group.exports == [(registration, arr)]
+    assert [a for _key, a in group.exports] == [arr]
     # Producer kernels must finish before another process reads the memory.
     assert mocked_cuda.calls["sync"]
 
     group.release()
     assert fake_agent.deregistered == [registration]
     assert not group.exports
+
+
+def test_exports_of_one_array_share_a_registration(mocked_cuda, fake_agent):
+    """Concurrent calls sending one array must not register its memory twice."""
+    arr = FakeCudaArray((2, 3), data_ptr=0x4000)
+    first, second = cuda_nixl.NixlExportGroup(), cuda_nixl.NixlExportGroup()
+    # Twice in one message, as when one array is passed for two inputs, and
+    # once more in a concurrent message.
+    cuda_nixl.dump_nixl_arraydict(arr, first)
+    cuda_nixl.dump_nixl_arraydict(arr, first)
+    cuda_nixl.dump_nixl_arraydict(arr, second)
+
+    [registration] = fake_agent.registered
+    first.release()
+    assert fake_agent.deregistered == []
+    second.release()
+    assert fake_agent.deregistered == [registration]
+
+    # Once deregistered, the memory is registered afresh.
+    third = cuda_nixl.NixlExportGroup()
+    cuda_nixl.dump_nixl_arraydict(arr, third)
+    assert len(fake_agent.registered) == 2
+    third.release()
 
 
 def test_empty_array_crosses_without_nixl(mocked_cuda, monkeypatch):
