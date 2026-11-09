@@ -202,6 +202,66 @@ def test_abstract_eval_schema_array_default_factory():
     other = AbstractInputSchema.model_validate({"inputs": {}}).inputs
     assert other.n is not inputs.n
 
+    # Values the caller sets are left alone
+    inputs = AbstractInputSchema.model_validate(
+        {"inputs": {"y": {"shape": [5], "dtype": "float64"}}}
+    ).inputs
+    assert inputs.y == ShapeDType(shape=(5,), dtype="float64")
+
+
+@pytest.mark.parametrize("use_factory", [False, True])
+def test_abstract_eval_schema_nested_array_defaults(use_factory):
+    class Sub(BaseModel):
+        v: Array[(None,), Float32]
+
+    def default(value):
+        if use_factory:
+            return Field(default_factory=lambda: deepcopy(value))
+        return value
+
+    class Model(BaseModel):
+        seq: list[Array[(None,), Float64]] = default([[1, 2]])
+        opt: Array[(None,), Float64] | None = default([1, 2, 3])
+        mapping: dict[str, Array[(None,), Float64]] = default({"a": [1]})
+        sub: Sub = default(Sub(v=np.zeros(4, dtype=np.float32)))
+        none: Array[(None,), Float64] | None = default(None)
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+
+    assert inputs.model_dump() == {
+        # Cast to the declared dtype, not the dtype NumPy would infer
+        "seq": [{"shape": (2,), "dtype": "float64"}],
+        "opt": {"shape": (3,), "dtype": "float64"},
+        "mapping": {"a": {"shape": (1,), "dtype": "float64"}},
+        "sub": {"v": {"shape": (4,), "dtype": "float32"}},
+        "none": None,
+    }
+    # A model default becomes an instance of the abstract model
+    assert type(inputs.sub).__name__ == "AbstractEval_Sub"
+
+
+def test_abstract_eval_schema_advertises_abstract_defaults():
+    class Model(BaseModel):
+        y: Array[(2,), Float64] = [1, 2]
+        seq: list[Array[(None,), Float64]] = [[1, 2]]
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    props = AbstractInputSchema.model_json_schema()["$defs"]["AbstractEval_Model"][
+        "properties"
+    ]
+    assert props["y"]["default"] == {"shape": [2], "dtype": "float64"}
+    assert props["seq"]["default"] == [{"shape": [2], "dtype": "float64"}]
+
+
+def test_abstract_eval_schema_default_with_unhashable_metadata():
+    class Model(BaseModel):
+        y: Annotated[Array[(2,), Float64], {"unhashable": "metadata"}] = [1, 2]
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+    assert inputs.y == ShapeDType(shape=(2,), dtype="float64")
+
 
 def test_apply_function_to_model_tree_default_factory_takes_data():
     class Model(BaseModel):
@@ -209,11 +269,13 @@ def test_apply_function_to_model_tree_default_factory_takes_data():
         b: int = Field(default_factory=lambda data: data["a"] + 1)
 
     NewModel = apply_function_to_model_tree(
-        Model, lambda obj, _: obj, default_func=lambda _, default: default * 10
+        Model, lambda obj, _: obj, default_func=lambda _, __, default: default * 10
     )
     # a's default becomes 10; b's factory sees a=10 and its output is scaled too
     assert NewModel().model_dump() == {"a": 10, "b": 110}
     assert NewModel(a=2).model_dump() == {"a": 2, "b": 30}
+    # An explicitly set value is never passed to default_func
+    assert NewModel(b=5).model_dump() == {"a": 10, "b": 5}
 
 
 def test_create_jacobian_schema():

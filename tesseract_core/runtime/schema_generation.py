@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import functools
-import inspect
 import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -18,6 +17,7 @@ from typing import (
     get_origin,
 )
 
+import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -29,8 +29,8 @@ from pydantic import (
     ValidationInfo,
     create_model,
     field_validator,
+    model_validator,
 )
-from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
 from .schema_types import (
@@ -85,66 +85,82 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
-def _default_factory_takes_data(field: FieldInfo) -> bool:
-    """Whether a field's default_factory takes the validated data as an argument."""
-    # FieldInfo.default_factory_takes_validated_data is missing from pydantic 2.10,
-    # so fall back to the same check pydantic does internally.
-    takes_data = getattr(field, "default_factory_takes_validated_data", None)
-    if takes_data is not None:
-        return takes_data
-    try:
-        params = list(inspect.signature(field.default_factory).parameters.values())
-    except (ValueError, TypeError):
-        return False
-    return (
-        len(params) == 1
-        and params[0].kind
-        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        and params[0].default is inspect.Parameter.empty
-    )
-
-
-def _wrap_default_factory(
-    field: FieldInfo, default_func: Callable[[Any, Any], Any]
-) -> Callable[..., Any]:
-    """Wrap a field's default_factory so its output is passed through default_func.
-
-    The factory still runs once per instance, so mutable defaults stay unshared.
-    """
-    factory = field.default_factory
-    annotation = field.annotation
-
-    if _default_factory_takes_data(field):
-
-        def wrapped(data: dict[str, Any]) -> Any:
-            return default_func(annotation, factory(data))
-
-    else:
-
-        def wrapped() -> Any:
-            return default_func(annotation, factory())
-
-    return wrapped
-
-
 def validate_array_default(annotation: Any, default: Any) -> Any:
-    """Validate a field's default against its array annotation.
+    """Validate a field's default against its (real, non-abstract) annotation.
 
-    Returns the validated array, as the real schema would see it when the field is omitted.
+    Returns the default as the real schema would see it when the field is omitted,
+    e.g. a NumPy array for an ``Array`` field.
     Raises ``ValidationError`` if the default does not match the annotation.
     """
-    return _type_adapter(annotation).validate_python(default)
+    return _adapter_for(annotation).validate_python(default)
 
 
-def _replace_array_default_with_shapedtype(annotation: Any, default: Any) -> Any:
-    """Replace the default of an array field by a ShapeDType of the same shape and dtype."""
-    if not safe_issubclass(annotation, PydanticArrayAnnotation):
+def _adapter_for(annotation: Any) -> TypeAdapter:
+    """Cached TypeAdapter for ``annotation``, or an uncached one if it is unhashable.
+
+    Field annotations can carry arbitrary ``Annotated`` metadata, such as a dict.
+    """
+    try:
+        return _type_adapter(annotation)
+    except TypeError:
+        return TypeAdapter(annotation)
+
+
+def _to_shape_dtype_tree(value: Any) -> Any:
+    """Replace every array in a validated value by its shape and dtype.
+
+    Models become plain dicts, so the result can be validated against the
+    corresponding abstract model.
+    """
+    if isinstance(value, np.ndarray | np.generic):
+        return {"shape": value.shape, "dtype": str(value.dtype)}
+    if isinstance(value, RootModel):
+        return _to_shape_dtype_tree(value.root)
+    if isinstance(value, BaseModel):
+        return {
+            name: _to_shape_dtype_tree(getattr(value, name))
+            for name in type(value).model_fields
+        }
+    if isinstance(value, dict):
+        return {key: _to_shape_dtype_tree(val) for key, val in value.items()}
+    if isinstance(value, list | tuple):
+        return type(value)(_to_shape_dtype_tree(val) for val in value)
+    return value
+
+
+def _abstract_default(old_type: Any, new_type: Any, default: Any) -> Any:
+    """Turn a field's default into its abstract counterpart, with ShapeDType for arrays.
+
+    The default is validated against the original annotation, so it is cast to the
+    declared dtype (``[1, 2]`` on a ``Float64`` field becomes float64), then against
+    the abstract one. A default that fails either step is returned unchanged.
+    """
+    if new_type == old_type:
+        # No arrays anywhere in this field's type, so nothing to replace
         return default
     try:
-        arr = validate_array_default(annotation, default)
+        real = _adapter_for(old_type).validate_python(default)
+        return _adapter_for(new_type).validate_python(_to_shape_dtype_tree(real))
     except ValidationError:
         return default
-    return ShapeDType(shape=arr.shape, dtype=str(arr.dtype))
+
+
+def _factory_default_validator(
+    factory_fields: dict[str, tuple[Any, Any]],
+    default_func: Callable[[Any, Any, Any], Any],
+) -> Any:
+    """Model validator applying default_func to default_factory fields the caller omitted."""
+
+    def apply_default_func(self: BaseModel) -> BaseModel:
+        for name, (old_type, new_type) in factory_fields.items():
+            if name not in self.model_fields_set:
+                # Write to __dict__ to bypass validate_assignment and frozen models
+                self.__dict__[name] = default_func(
+                    old_type, new_type, self.__dict__[name]
+                )
+        return self
+
+    return model_validator(mode="after")(apply_default_func)
 
 
 def apply_function_to_model_tree(
@@ -152,7 +168,7 @@ def apply_function_to_model_tree(
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
-    default_func: Callable[[Any, Any], Any] | None = None,
+    default_func: Callable[[Any, Any, Any], Any] | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -162,8 +178,12 @@ def apply_function_to_model_tree(
     in the model tree (as a list of field names). It should return the new type annotation
     for the field, or None to remove the field from the model.
 
-    If given, default_func is called with the type annotation and default value of every
-    field that has a default, and should return the default to use in the new model.
+    If given, default_func is called as ``default_func(old_type, new_type, default)``
+    for every field that has a default, and should return the default to use in the
+    new model. A ``default=`` is replaced when the model is built. A ``default_factory=``
+    is left in place, and a model validator applies default_func to its output for every
+    field the caller omitted; pydantic does not validate defaults, so a value that did
+    not come from the caller can only end up there through a default.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
@@ -201,6 +221,8 @@ def apply_function_to_model_tree(
             seen_models.add(id(treeobj))
 
             new_fields = {}
+            # Fields with a default_factory, as (old_type, new_type)
+            factory_fields = {}
 
             for field_name, field in treeobj.model_fields.items():
                 field_type = field.annotation
@@ -218,12 +240,10 @@ def apply_function_to_model_tree(
                 if default_func is not None:
                     if field.default is not PydanticUndefined:
                         new_field.default = default_func(
-                            field.annotation, field.default
+                            field_type, new_type, field.default
                         )
                     elif field.default_factory is not None:
-                        new_field.default_factory = _wrap_default_factory(
-                            field, default_func
-                        )
+                        factory_fields[field_name] = (field_type, new_type)
 
                 new_fields[field_name] = (new_type, new_field)
 
@@ -239,11 +259,18 @@ def apply_function_to_model_tree(
             if safe_issubclass(treeobj, RootModel):
                 model_config.pop("extra", None)
 
+            validators = {}
+            if factory_fields:
+                validators["_apply_default_func_to_factory_defaults"] = (
+                    _factory_default_validator(factory_fields, default_func)
+                )
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
                 model_config=(ConfigDict, model_config),
                 __base__=treeobj,
+                __validators__=validators,
             )
 
         elif _is_annotated(treeobj):
@@ -447,7 +474,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=_replace_array_default_with_shapedtype,
+        default_func=_abstract_default,
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
@@ -455,7 +482,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=_replace_array_default_with_shapedtype,
+        default_func=_abstract_default,
     )
 
     class AbstractInputSchema(BaseModel):
