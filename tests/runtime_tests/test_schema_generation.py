@@ -269,12 +269,14 @@ def test_apply_function_to_model_tree_default_factory_takes_data():
         b: int = Field(default_factory=lambda data: data["a"] + 1)
 
     NewModel = apply_function_to_model_tree(
-        Model, lambda obj, _: obj, default_func=lambda _, __, default: default * 10
+        Model,
+        lambda obj, _: obj,
+        make_default_converter=lambda _, __: lambda default: default * 10,
     )
     # a's default becomes 10; b's factory sees a=10 and its output is scaled too
     assert NewModel().model_dump() == {"a": 10, "b": 110}
     assert NewModel(a=2).model_dump() == {"a": 2, "b": 30}
-    # An explicitly set value is never passed to default_func
+    # An explicitly set value is never converted
     assert NewModel(b=5).model_dump() == {"a": 10, "b": 5}
 
 

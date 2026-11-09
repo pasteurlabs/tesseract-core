@@ -85,27 +85,6 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
-def validate_array_default(annotation: Any, default: Any) -> Any:
-    """Validate a field's default against its (real, non-abstract) annotation.
-
-    Returns the default as the real schema would see it when the field is omitted,
-    e.g. a NumPy array for an ``Array`` field.
-    Raises ``ValidationError`` if the default does not match the annotation.
-    """
-    return _adapter_for(annotation).validate_python(default)
-
-
-def _adapter_for(annotation: Any) -> TypeAdapter:
-    """Cached TypeAdapter for ``annotation``, or an uncached one if it is unhashable.
-
-    Field annotations can carry arbitrary ``Annotated`` metadata, such as a dict.
-    """
-    try:
-        return _type_adapter(annotation)
-    except TypeError:
-        return TypeAdapter(annotation)
-
-
 def _to_shape_dtype_tree(value: Any) -> Any:
     """Replace every array in a validated value by its shape and dtype.
 
@@ -128,39 +107,47 @@ def _to_shape_dtype_tree(value: Any) -> Any:
     return value
 
 
-def _abstract_default(old_type: Any, new_type: Any, default: Any) -> Any:
-    """Turn a field's default into its abstract counterpart, with ShapeDType for arrays.
+def _abstract_default_converter(
+    old_type: Any, new_type: Any
+) -> Callable[[Any], Any] | None:
+    """Return a function turning a default of ``old_type`` into one of ``new_type``.
 
     The default is validated against the original annotation, so it is cast to the
-    declared dtype (``[1, 2]`` on a ``Float64`` field becomes float64), then against
-    the abstract one. A default that fails either step is returned unchanged.
+    declared dtype (``[1, 2]`` on a ``Float64`` field becomes float64), every array
+    in it is replaced by its shape and dtype, and the result is validated against
+    the abstract annotation. A default that fails validation is returned unchanged.
+
+    Returns None if ``new_type`` has no arrays to replace. Both TypeAdapters are built
+    here, once per field, so converting a default per request does not rebuild them,
+    and annotations need not be hashable as they would for a cache.
     """
     if new_type == old_type:
-        # No arrays anywhere in this field's type, so nothing to replace
-        return default
-    try:
-        real = _adapter_for(old_type).validate_python(default)
-        return _adapter_for(new_type).validate_python(_to_shape_dtype_tree(real))
-    except ValidationError:
-        return default
+        return None
+
+    real_adapter = TypeAdapter(old_type)
+    abstract_adapter = TypeAdapter(new_type)
+
+    def convert(default: Any) -> Any:
+        try:
+            real = real_adapter.validate_python(default)
+            return abstract_adapter.validate_python(_to_shape_dtype_tree(real))
+        except ValidationError:
+            return default
+
+    return convert
 
 
-def _factory_default_validator(
-    factory_fields: dict[str, tuple[Any, Any]],
-    default_func: Callable[[Any, Any, Any], Any],
-) -> Any:
-    """Model validator applying default_func to default_factory fields the caller omitted."""
+def _factory_default_validator(converters: dict[str, Callable[[Any], Any]]) -> Any:
+    """Model validator converting the defaults of default_factory fields the caller omitted."""
 
-    def apply_default_func(self: BaseModel) -> BaseModel:
-        for name, (old_type, new_type) in factory_fields.items():
+    def convert_factory_defaults(self: BaseModel) -> BaseModel:
+        for name, convert in converters.items():
             if name not in self.model_fields_set:
                 # Write to __dict__ to bypass validate_assignment and frozen models
-                self.__dict__[name] = default_func(
-                    old_type, new_type, self.__dict__[name]
-                )
+                self.__dict__[name] = convert(self.__dict__[name])
         return self
 
-    return model_validator(mode="after")(apply_default_func)
+    return model_validator(mode="after")(convert_factory_defaults)
 
 
 def apply_function_to_model_tree(
@@ -168,7 +155,8 @@ def apply_function_to_model_tree(
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
-    default_func: Callable[[Any, Any, Any], Any] | None = None,
+    make_default_converter: Callable[[Any, Any], Callable[[Any], Any] | None]
+    | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -178,12 +166,13 @@ def apply_function_to_model_tree(
     in the model tree (as a list of field names). It should return the new type annotation
     for the field, or None to remove the field from the model.
 
-    If given, default_func is called as ``default_func(old_type, new_type, default)``
-    for every field that has a default, and should return the default to use in the
-    new model. A ``default=`` is replaced when the model is built. A ``default_factory=``
-    is left in place, and a model validator applies default_func to its output for every
-    field the caller omitted; pydantic does not validate defaults, so a value that did
-    not come from the caller can only end up there through a default.
+    If given, make_default_converter is called as
+    ``make_default_converter(old_type, new_type)`` for every field that has a default,
+    when the model is built. It returns a function mapping the old default to the new
+    one, or None to keep the default as is. A ``default=`` is converted right away.
+    A ``default_factory=`` is left in place, and a model validator converts its output
+    for every field the caller omitted; pydantic does not validate defaults, so a value
+    that did not come from the caller can only end up there through a default.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
@@ -221,8 +210,8 @@ def apply_function_to_model_tree(
             seen_models.add(id(treeobj))
 
             new_fields = {}
-            # Fields with a default_factory, as (old_type, new_type)
-            factory_fields = {}
+            # Converters for the defaults of default_factory fields, by field name
+            factory_converters = {}
 
             for field_name, field in treeobj.model_fields.items():
                 field_type = field.annotation
@@ -237,13 +226,18 @@ def apply_function_to_model_tree(
                 new_field = copy(field)
                 # Need to strip off metadata to trigger re-evaluation of the field
                 new_field.metadata = []
-                if default_func is not None:
-                    if field.default is not PydanticUndefined:
-                        new_field.default = default_func(
-                            field_type, new_type, field.default
-                        )
-                    elif field.default_factory is not None:
-                        factory_fields[field_name] = (field_type, new_type)
+                has_default = (
+                    field.default is not PydanticUndefined
+                    or field.default_factory is not None
+                )
+                convert = None
+                if make_default_converter is not None and has_default:
+                    convert = make_default_converter(field_type, new_type)
+                if convert is not None:
+                    if field.default_factory is not None:
+                        factory_converters[field_name] = convert
+                    else:
+                        new_field.default = convert(field.default)
 
                 new_fields[field_name] = (new_type, new_field)
 
@@ -260,9 +254,9 @@ def apply_function_to_model_tree(
                 model_config.pop("extra", None)
 
             validators = {}
-            if factory_fields:
-                validators["_apply_default_func_to_factory_defaults"] = (
-                    _factory_default_validator(factory_fields, default_func)
+            if factory_converters:
+                validators["_convert_factory_defaults"] = _factory_default_validator(
+                    factory_converters
                 )
 
             return create_model(
@@ -474,7 +468,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=_abstract_default,
+        make_default_converter=_abstract_default_converter,
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
@@ -482,7 +476,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=_abstract_default,
+        make_default_converter=_abstract_default_converter,
     )
 
     class AbstractInputSchema(BaseModel):
