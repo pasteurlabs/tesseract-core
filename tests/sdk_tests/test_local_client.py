@@ -1520,3 +1520,51 @@ def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):
         assert tess.health()["status"] == "ok"
 
     assert not (dummy_tesseract_package / venv_provision._MANAGED_VENV_NAME).exists()
+
+
+class _StopAfterPythonChosen(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    "build_config, warns",
+    [
+        (TesseractBuildConfig(), True),
+        (
+            TesseractBuildConfig.model_validate(
+                {"requirements": {"provider": "uv-pip", "python_version": "3.11"}}
+            ),
+            False,
+        ),
+        (
+            TesseractBuildConfig.model_validate(
+                {"requirements": {"provider": "uv-pip", "python_version": "3.13"}}
+            ),
+            False,
+        ),
+        (TesseractBuildConfig(inherit_base_image_packages=True), False),
+    ],
+)
+def test_building_on_the_default_python_warns_it_will_change(
+    tmp_path, monkeypatch, caplog, build_config, warns
+):
+    """from_source warns only when it falls back to the default image's Python."""
+
+    def stop(*args, **kwargs):
+        raise _StopAfterPythonChosen
+
+    monkeypatch.setattr(venv_provision, "_create_venv", stop)
+    with (
+        caplog.at_level(logging.WARNING, logger="tesseract"),
+        pytest.raises(_StopAfterPythonChosen),
+    ):
+        venv_provision._build_pip_venv(tmp_path / "env", build_config, None)
+
+    warned = [
+        r for r in caplog.records if "python_version is not set" in r.getMessage()
+    ]
+    assert bool(warned) is warns
+    if warns:
+        message = warned[0].getMessage()
+        assert f"Python {DEFAULT_BASE_IMAGE_PYTHON}" in message
+        assert "`python_version` field" in message
