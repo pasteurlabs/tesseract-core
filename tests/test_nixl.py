@@ -37,14 +37,15 @@ try:
     from tesseract_core.runtime.cuda.nixl import _import_nixl_api
 
     _import_nixl_api()
-    _NIXL = True
-except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
-    _NIXL = False
+    _NIXL_ERROR = None
+except Exception as exc:  # noqa: BLE001 -- capability probe; failure modes vary by host
+    _NIXL_ERROR = f"{type(exc).__name__}: {exc}"
 
 pytestmark = pytest.mark.gpu
 
 requires_nixl = pytest.mark.skipif(
-    not (_CUPY and _NIXL), reason="requires CuPy and NIXL"
+    not _CUPY or _NIXL_ERROR is not None,
+    reason=f"requires CuPy and NIXL (NIXL: {_NIXL_ERROR})",
 )
 
 _TIMEOUT = 120

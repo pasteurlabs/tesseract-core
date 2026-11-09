@@ -456,6 +456,7 @@ jobs:
             -o addopts="--durations=10" \
             -v \
             -m gpu \
+            -rs \
             --always-run-endtoend \
             --timeout=300 \
             --cov-report=term-missing:skip-covered \

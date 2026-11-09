@@ -51,13 +51,13 @@ try:
     from tesseract_core.runtime.cuda.nixl import _import_nixl_api
 
     _import_nixl_api()
-    _NIXL_AVAILABLE = True
-except Exception:  # noqa: BLE001 -- capability probe; failure modes vary by host
-    _NIXL_AVAILABLE = False
+    _NIXL_ERROR = None
+except Exception as exc:  # noqa: BLE001 -- capability probe; failure modes vary by host
+    _NIXL_ERROR = f"{type(exc).__name__}: {exc}"
 
 requires_nixl = pytest.mark.skipif(
-    not (_CUDA_AVAILABLE and _NIXL_AVAILABLE),
-    reason="CUDA + CuPy + NIXL not available on host",
+    not _CUDA_AVAILABLE or _NIXL_ERROR is not None,
+    reason=f"CUDA + CuPy + NIXL not available on host ({_NIXL_ERROR})",
 )
 
 
