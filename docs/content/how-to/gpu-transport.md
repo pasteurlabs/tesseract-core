@@ -361,13 +361,10 @@ uses `nixl` when the server offers it and the transfer check passes, and prefers
 NIXL is not a dependency of tesseract-core. Install it on both sides, in the
 client environment and in the Tesseract's requirements. NIXL ships one build per
 CUDA major version, `nixl-cu12` and `nixl-cu13`, and the runtime imports the one
-that matches the CUDA runtime library (libcudart) it loads. That library comes
-from a pip wheel when one is installed, such as the one PyTorch brings, and from
-a system CUDA install otherwise.
+that matches the loaded CUDA runtime library (libcudart).
 
-NIXL's wheels depend on PyTorch, so install a PyTorch build for the same CUDA
-major from the PyTorch wheel index. Otherwise the installer may pick a PyTorch
-build for a different CUDA version, whose libcudart the runtime then loads. In
+NIXL's wheels depend on PyTorch, and to avoid mismatches you should manually
+install a PyTorch build for the same CUDA version as NIXL. For example, in
 `tesseract_requirements.txt`:
 
 ```
