@@ -169,11 +169,10 @@ class PipRequirements(BaseModel):
         description=(
             "Python version to use for the Tesseract's environment (e.g., '3.12'), "
             "installed via uv if needed. "
-            "When unset, a container image built on the default base image uses "
-            f"Python {DEFAULT_BASE_IMAGE_PYTHON}, and one built on a custom "
-            "``base_image`` uses that image's system Python. "
-            f"``Tesseract.from_source`` uses Python {DEFAULT_BASE_IMAGE_PYTHON} "
-            "to match the default base image."
+            "When unset, images built on the default base image and "
+            f"``Tesseract.from_source`` use Python {DEFAULT_BASE_IMAGE_PYTHON}, "
+            "and images built on a custom ``base_image`` use that image's system "
+            "Python."
         ),
     )
     requirements_file: StrictStr = Field(
