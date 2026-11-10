@@ -237,6 +237,26 @@ def _get_current_backend() -> BaseBackend:
         ) from exc
 
 
+class _SinkRoutedStream:
+    """Stands in for ``sys.stdout`` or ``sys.stderr`` while a log sink is active.
+
+    The thread running the sink gets the original stream, and every other
+    thread gets the redirected one.
+    """
+
+    def __init__(
+        self, redirected: Any, original: Any, in_sink: threading.local
+    ) -> None:
+        self._redirected = redirected
+        self._original = original
+        self._in_sink = in_sink
+
+    def __getattr__(self, name: str) -> Any:
+        if getattr(self._in_sink, "active", False):
+            return getattr(self._original, name)
+        return getattr(self._redirected, name)
+
+
 @contextmanager
 def redirect_stdio(
     logfile: str | Path,
@@ -300,14 +320,23 @@ def redirect_stdio(
 
         if log_sink is not None:
             # Wrap the user sink so it writes to the *original* stdout/stderr,
-            # preventing infinite recursion when the sink itself prints.
+            # preventing infinite recursion when the sink itself prints. Only
+            # the thread running the sink is rerouted: the code being logged
+            # keeps printing meanwhile, and its output belongs in the log.
+            in_sink = threading.local()
+
             def safe_sink(msg: str) -> None:
-                old_stdout, old_stderr = sys.stdout, sys.stderr
-                sys.stdout, sys.stderr = orig_stdout_file, orig_stderr_file
+                in_sink.active = True
                 try:
                     log_sink(msg)
                 finally:
-                    sys.stdout, sys.stderr = old_stdout, old_stderr
+                    in_sink.active = False
+
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            sys.stdout = _SinkRoutedStream(old_stdout, orig_stdout_file, in_sink)
+            sys.stderr = _SinkRoutedStream(old_stderr, orig_stderr_file, in_sink)
+            stack.callback(setattr, sys, "stderr", old_stderr)
+            stack.callback(setattr, sys, "stdout", old_stdout)
 
             streamer = LogStreamer(logfile, safe_sink)
             streamer.start()

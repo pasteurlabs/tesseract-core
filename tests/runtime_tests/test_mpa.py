@@ -6,7 +6,9 @@
 import csv
 import json
 import os
+import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -134,6 +136,33 @@ def test_concurrent_runs_do_not_clobber_stdio(tmp_path):
         f"run failures: {failures!r}\n"
         f"stdio was left pointing elsewhere: {before} -> {after}"
     )
+
+
+def test_output_printed_while_the_log_sink_runs_goes_to_the_log(tmp_path):
+    """The log sink may print without feeding the log, but others' output stays in it."""
+    lines = 200
+    received = []
+
+    def sink(line):
+        # Prints like a user's sink would, which must not end up in the log.
+        print(f"sink got: {line}")
+        received.append(line)
+        (tmp_path / f"{line}.seen").touch()
+
+    logfile = tmp_path / "tesseract.log"
+    with mpa.redirect_stdio(logfile, log_sink=sink):
+        for index in range(lines):
+            print(f"line-{index}", file=sys.stderr, flush=True)
+            # Print the next line as soon as the sink has seen this one, while
+            # it may still be running.
+            deadline = time.monotonic() + 10
+            while not (tmp_path / f"line-{index}.seen").exists():
+                assert time.monotonic() < deadline, f"the sink never got line-{index}"
+                time.sleep(0.001)
+
+    expected = [f"line-{index}" for index in range(lines)]
+    assert logfile.read_text().splitlines() == expected
+    assert received == expected
 
 
 def test_file_backend_default():
