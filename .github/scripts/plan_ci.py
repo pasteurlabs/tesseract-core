@@ -101,9 +101,7 @@ def _matches(paths: Iterable[str], patterns: list[str]) -> list[str]:
 
 def _list_dirs(path: Path) -> list[str]:
     return sorted(
-        p.name
-        for p in Path(path).iterdir()
-        if p.is_dir() and not p.name.startswith("_")
+        p.name for p in path.iterdir() if p.is_dir() and not p.name.startswith("_")
     )
 
 
@@ -192,7 +190,6 @@ def main() -> None:
         help="File with the pull request's changed paths, one per line. "
         "If missing, the changed files are treated as unknown.",
     )
-    parser.add_argument("--repo-root", type=Path, default=Path("."))
     args = parser.parse_args()
 
     labels = _read_lines(args.labels) if args.labels else []
@@ -201,7 +198,7 @@ def main() -> None:
         if args.changed_files and args.changed_files.exists()
         else None
     )
-    outputs, reasons = plan(args.event, labels, changed_files, args.repo_root)
+    outputs, reasons = plan(args.event, labels, changed_files, Path("."))
 
     output_text = "".join(f"{key}={value}\n" for key, value in outputs.items())
     summary_text = _summary(outputs, reasons)

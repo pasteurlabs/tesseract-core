@@ -48,9 +48,9 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           gh pr view "$PR_NUMBER" --repo "$REPO" --json labels --jq '.labels[].name' > "$RUNNER_TEMP/labels.txt"
-          # If the diff can't be listed (e.g. it is very large), plan_ci.py runs the full matrix.
-          gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only > "$RUNNER_TEMP/changed_files.txt" \
-            || rm -f "$RUNNER_TEMP/changed_files.txt"
+          # If the files can't be listed, plan_ci.py runs the full matrix.
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' \
+            > "$RUNNER_TEMP/changed_files.txt" || rm -f "$RUNNER_TEMP/changed_files.txt"
 
       - name: Plan jobs
         id: plan
