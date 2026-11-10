@@ -22,8 +22,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
-
 from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE
 from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
@@ -141,7 +139,7 @@ def _expected_stamp(build_config: Any, requirements_file: Path | None) -> str:
     provider = build_config.requirements.provider
     settings = {
         "provider": provider,
-        "python_version": _build_python_version(build_config, requirements_file)
+        "python_version": _build_python_version(build_config)
         if provider == "uv-pip"
         else None,
         "inherit_base_image_packages": build_config.inherit_base_image_packages,
@@ -212,51 +210,19 @@ def _local_directories(requirements_file: Path) -> list[str]:
     return specs
 
 
-def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
-    """A PEP 751 lockfile's top-level `requires-python`, if any.
-
-    The key is optional, but an unreadable file or invalid value raises.
-    """
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # Python 3.10; pip is an SDK dependency.
-        from pip._vendor import tomli as tomllib
-
-    try:
-        with lockfile.open("rb") as handle:
-            declared = tomllib.load(handle).get("requires-python")
-    except (OSError, ValueError) as e:
-        raise UserError(f"Could not read {lockfile}: {e}") from e
-
-    if declared is None:
-        return None
-    try:
-        return SpecifierSet(declared)
-    except (InvalidSpecifier, TypeError) as e:
-        raise UserError(
-            f"{lockfile.name} has an invalid requires-python: {declared!r}"
-        ) from e
-
-
-def _build_python_version(
-    build_config: Any, requirements_file: Path | None
-) -> str | None:
+def _build_python_version(build_config: Any) -> str | None:
     """The Python to build a uv-pip environment on, as a `uv venv --python` request.
 
     Whatever a container build would use: the declared ``python_version``, else
-    the default base image's Python. A lockfile whose ``requires-python``
-    excludes that gets its range instead. None (for
-    ``inherit_base_image_packages``) leaves the choice to uv.
+    the default base image's Python. As in a container build, a lockfile's
+    ``requires-python`` does not change it; a lockfile that excludes it fails to
+    install. None (for ``inherit_base_image_packages``) leaves the choice to uv.
     """
     declared = build_config.effective_python_version
     if declared is not None:
         return declared
     if build_config.inherit_base_image_packages:
         return None
-    if requirements_file is not None and build_config.requirements.is_pylock:
-        wanted = _pylock_requires_python(requirements_file)
-        if wanted is not None and f"{DEFAULT_BASE_IMAGE_PYTHON}.0" not in wanted:
-            return str(wanted)
     return DEFAULT_BASE_IMAGE_PYTHON
 
 
@@ -330,7 +296,7 @@ def _build_pip_venv(
 ) -> Path:
     """Build a uv environment, following ``build_pip_venv.sh``."""
     env = build_config.build_env
-    python_version = _build_python_version(build_config, requirements_file)
+    python_version = _build_python_version(build_config)
     if (
         build_config.effective_python_version is None
         and python_version == DEFAULT_BASE_IMAGE_PYTHON
