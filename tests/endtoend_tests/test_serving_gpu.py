@@ -110,14 +110,6 @@ def nixl_image_name(request, gpu_image_name):
     return gpu_image_name
 
 
-def _forbid_host_copy_env() -> dict[str, str]:
-    """Container env that makes implicit device-to-host copies raise.
-
-    Returns a fresh dict because serving mutates the ``environment`` it is given.
-    """
-    return {"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"}
-
-
 @contextmanager
 def _serve_cuda_ipc(image_name: str):
     """Serve a GPU example with gpu_transport='cuda_ipc' and host copies forbidden."""
@@ -126,7 +118,7 @@ def _serve_cuda_ipc(image_name: str):
         gpus=["all"],
         output_format="json+base64",
         runtime_config={"gpu_transport": "cuda_ipc"},
-        environment=_forbid_host_copy_env(),
+        environment={"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"},
     ) as t:
         yield t
 
@@ -290,7 +282,7 @@ def test_serve_nixl_roundtrip(nixl_image_name):
         nixl_image_name,
         gpus=["all"],
         gpu_transport="nixl",
-        environment=_forbid_host_copy_env(),
+        environment={"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"},
     ) as t:
         assert t.resolve_gpu_transport() == "nixl"
         assert Tesseract.from_url(t._client.url).resolve_gpu_transport() == "nixl"
