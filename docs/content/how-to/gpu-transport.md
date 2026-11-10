@@ -339,6 +339,52 @@ in practice this is for clients that already work with CUDA.
 :::
 ::::
 
+(nixl-transport)=
+
+## Transfer across hosts with `nixl` (experimental)
+
+The experimental `nixl` transport passes GPU arrays by reference like
+`cuda_ipc`, and also works when the client and the Tesseract run on different
+machines. It is built on NVIDIA's [NIXL](https://github.com/ai-dynamo/nixl)
+library, which moves the bytes through CUDA IPC or shared memory on one host and
+through UCX between hosts, over RDMA where the hardware supports it. Enable it
+with `gpu_transport="nixl"` wherever this page uses `cuda_ipc`. A container
+serving `nixl` runs on the host network, because NIXL advertises the container's
+own network address to the client. A client created with `Tesseract.from_url`
+uses `nixl` when the server offers it and the transfer check passes, and prefers
+`cuda_ipc` if both work.
+
+(install-nixl)=
+
+### Install NIXL
+
+NIXL is not a dependency of tesseract-core. Install it on both sides, in the
+client environment and in the Tesseract's requirements. NIXL ships one build per
+CUDA major version, `nixl-cu12` and `nixl-cu13`, and the runtime imports the one
+that matches the CUDA runtime library (libcudart) it loads. That library comes
+from a pip wheel when one is installed, such as the one PyTorch brings, and from
+a system CUDA install otherwise.
+
+NIXL's wheels depend on PyTorch, so install a PyTorch build for the same CUDA
+major from the PyTorch wheel index. Otherwise the installer may pick a PyTorch
+build for a different CUDA version, whose libcudart the runtime then loads. In
+`tesseract_requirements.txt`:
+
+```
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch
+nixl-cu12
+```
+
+In a client environment, install PyTorch first:
+
+```bash
+$ pip install torch --index-url https://download.pytorch.org/whl/cu126
+$ pip install nixl-cu12
+```
+
+For CUDA 13, use the `cu130` index and `nixl-cu13`.
+
 (gpu-transport-troubleshooting)=
 
 ## Troubleshooting

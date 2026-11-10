@@ -52,6 +52,11 @@ from tesseract_core.runtime.cuda.arrays import (
 )
 from tesseract_core.runtime.device_transport import DeviceTransport
 
+_INSTALL_DOCS_URL = (
+    "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+    "content/how-to/gpu-transport/#install-nixl"
+)
+
 # ---------------------------------------------------------------------------
 # Lazy NIXL agents
 # ---------------------------------------------------------------------------
@@ -131,7 +136,9 @@ def _import_nixl_api() -> Any:
     if loaded is not None:
         return loaded
 
-    build = f"nixl_cu{cuda_api.runtime_version() // 1000}"
+    version = cuda_api.runtime_version()
+    major, minor = version // 1000, version % 1000 // 10
+    build = f"nixl_cu{major}"
     try:
         return importlib.import_module(f"{build}._api")
     except ModuleNotFoundError as exc:
@@ -139,10 +146,12 @@ def _import_nixl_api() -> Any:
             raise
         package = build.replace("_", "-")
         raise RuntimeError(
-            "The 'nixl' GPU transport requires NIXL, which is not installed in "
-            f"the Python environment at {sys.prefix}. Install the build for its "
-            f"CUDA runtime with `pip install {package}` (Linux only). For a "
-            f"Tesseract, add {package} to tesseract_requirements.txt and rebuild."
+            f"The 'nixl' GPU transport could not find the NIXL build for CUDA "
+            f"{major}.{minor} (loaded from {cuda_api.runtime_library_path()}). "
+            f"Install it in the Python environment at {sys.prefix} with "
+            f"`pip install {package}` (Linux only), or for a Tesseract, add "
+            f"{package} to tesseract_requirements.txt and rebuild. See "
+            f"{_INSTALL_DOCS_URL}"
         ) from exc
 
 

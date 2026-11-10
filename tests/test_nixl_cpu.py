@@ -470,11 +470,18 @@ def test_metadata_must_describe_the_named_producer(fake_agent):
 def test_missing_nixl_names_the_matching_build(monkeypatch):
     # No NIXL build exists for this CUDA runtime, so importing it fails as if
     # it were not installed.
-    monkeypatch.setattr(cuda_nixl.cuda_api, "runtime_version", lambda: 99000)
-    monkeypatch.setattr(cuda_nixl.cuda_api, "runtime_library_path", lambda: "")
+    monkeypatch.setattr(cuda_nixl.cuda_api, "runtime_version", lambda: 99020)
+    monkeypatch.setattr(
+        cuda_nixl.cuda_api, "runtime_library_path", lambda: "/env/libcudart.so.99"
+    )
     monkeypatch.setattr(cuda_nixl.ctypes, "CDLL", lambda *args, **kwargs: None)
     monkeypatch.delitem(sys.modules, "nixl._api", raising=False)
     monkeypatch.setattr(cuda_nixl, "_MAIN_AGENT", None)
 
-    with pytest.raises(RuntimeError, match=r"pip install nixl-cu99"):
+    with pytest.raises(RuntimeError) as exc_info:
         cuda_nixl._get_main_agent()
+    message = str(exc_info.value)
+    assert "CUDA 99.2" in message
+    assert "/env/libcudart.so.99" in message
+    assert "pip install nixl-cu99" in message
+    assert "#install-nixl" in message
