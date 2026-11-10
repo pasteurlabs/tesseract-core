@@ -26,6 +26,7 @@ from .file_interactions import (
     available_compressions,
     available_formats,
     available_gpu_transports,
+    check_run_id,
     join_paths,
     output_to_bytes,
 )
@@ -202,6 +203,10 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
             if run_id is None:
                 run_id = str(uuid.uuid4())
+            try:
+                check_run_id(run_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             output_path = config.output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
@@ -269,8 +274,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
 
-        # Skip test endpoint unless in debug mode
-        if endpoint_name == "test" and not config.debug:
+        # Skip testing endpoints unless in debug mode
+        if endpoint_name in ("test", "check_gradients") and not config.debug:
             continue
 
         wrapped_endpoint = wrap_endpoint(endpoint_func)
