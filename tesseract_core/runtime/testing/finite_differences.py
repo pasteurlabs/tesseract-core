@@ -783,7 +783,9 @@ def check_gradients(
 
     if eps_for:
         if isinstance(eps, Mapping):
-            raise ValueError(f"eps_for cannot be combined with a dict-valued eps (got eps={eps}).")
+            raise ValueError(
+                f"eps_for cannot be combined with a dict-valued eps (got eps={eps})."
+            )
         unknown = [path for path in eps_for if path not in input_paths]
         if unknown:
             raise ValueError(
