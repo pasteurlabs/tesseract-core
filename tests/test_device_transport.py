@@ -63,28 +63,34 @@ def test_get_transport_rejects_unknown():
         get_transport("does_not_exist")
 
 
-# Threads import different runtime submodules at once, then look up a built-in
-# transport, as concurrent first calls from a fresh client process do.
-_CONCURRENT_IMPORTS_CODE = textwrap.dedent(
+# Threads make the SDK's first GPU calls at once, each importing a different
+# runtime submodule, then look up a built-in transport, as a client process does
+# when it sends GPU arrays from a thread pool.
+_CONCURRENT_FIRST_CALLS_CODE = textwrap.dedent(
     """
-    import importlib
+    import sys
     import threading
 
-    modules = ["cuda.ipc", "array_encoding", "device_transport", "cuda.check",
-               "file_interactions", "config"]
-    barrier = threading.Barrier(2 * len(modules))
+    from tesseract_core.sdk import tesseract as sdk
+
+    assert "tesseract_core.runtime" not in sys.modules
+    first_calls = [
+        lambda: sdk._get_device_transport("cuda_ipc"),
+        sdk._import_cuda_ipc,
+        lambda: sdk._import_runtime("cuda.check", "The 'cuda_ipc' GPU transport"),
+    ]
+    barrier = threading.Barrier(4 * len(first_calls))
     errors = []
 
     def first_call(i):
         barrier.wait()
-        importlib.import_module("tesseract_core.runtime." + modules[i % len(modules)])
-        registry = importlib.import_module("tesseract_core.runtime.device_transport")
         try:
-            registry.get_transport("cuda_ipc")
-        except KeyError as exc:
-            errors.append(str(exc))
+            first_calls[i % len(first_calls)]()
+            sdk._get_device_transport("cuda_ipc")
+        except Exception as exc:
+            errors.append(repr(exc))
 
-    threads = [threading.Thread(target=first_call, args=(i,)) for i in range(2 * len(modules))]
+    threads = [threading.Thread(target=first_call, args=(i,)) for i in range(4 * len(first_calls))]
     for t in threads:
         t.start()
     for t in threads:
@@ -94,14 +100,14 @@ _CONCURRENT_IMPORTS_CODE = textwrap.dedent(
 )
 
 
-def test_builtin_transports_are_found_during_concurrent_first_imports():
+def test_builtin_transports_are_found_during_concurrent_first_calls():
     """A built-in transport is found even while another thread imports the runtime.
 
     Each run needs a fresh interpreter, so that the runtime is not imported yet.
     """
     for _ in range(3):
         result = subprocess.run(
-            [sys.executable, "-c", _CONCURRENT_IMPORTS_CODE],
+            [sys.executable, "-c", _CONCURRENT_FIRST_CALLS_CODE],
             check=False,
             capture_output=True,
             text=True,

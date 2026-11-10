@@ -1251,6 +1251,12 @@ def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any
 def _import_runtime(module: str, feature: str) -> ModuleType:
     """Import ``tesseract_core.runtime.<module>``, or explain that ``feature`` needs the runtime extra."""
     try:
+        # Import the package before the submodule. The package imports all its
+        # submodules, and a thread that imports a submodule first holds that
+        # submodule's import lock while it waits for the package. So first calls
+        # on several threads at once could deadlock, which Python breaks by
+        # raising in one of them.
+        importlib.import_module("tesseract_core.runtime")
         return importlib.import_module(f"tesseract_core.runtime.{module}")
     except ImportError as exc:
         raise ImportError(
