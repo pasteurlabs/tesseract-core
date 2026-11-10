@@ -111,6 +111,7 @@ def _run_process(
 
     stdout_lines: list[bytes] = []
     stderr_lines: list[bytes] = []
+    stdout_thread = stderr_thread = None
 
     try:
         stdout_thread = threading.Thread(
@@ -125,21 +126,25 @@ def _run_process(
                 args=(proc.stderr, stderr_lines, stream_stderr),
             )
             stderr_thread.start()
-        else:
-            stderr_thread = None
 
         proc.wait()
         stdout_thread.join()
         if stderr_thread is not None:
             stderr_thread.join()
 
-    except (KeyboardInterrupt, Exception):
+    except BaseException:
+        # Not just Exception: whatever interrupts the wait (Ctrl+C, a test
+        # timeout) must not leave the process running.
         proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        # Let the readers drain the pipes before they are closed under them.
+        for thread in (stdout_thread, stderr_thread):
+            if thread is not None:
+                thread.join(timeout=5)
         raise
     finally:
         if proc.stdout:
