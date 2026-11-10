@@ -16,7 +16,7 @@ from jinja2.exceptions import TemplateNotFound
 
 from tesseract_core.sdk import docker_client, engine, serving
 from tesseract_core.sdk.api_parse import (
-    DEFAULT_BASE_IMAGE_PYTHON,
+    DEFAULT_PYTHON,
     TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
@@ -61,7 +61,7 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     [
         # Neither set: the default image's Python is pinned, so it doesn't follow
         # the default image if that changes.
-        ({}, DEFAULT_BASE_IMAGE_PYTHON),
+        ({}, DEFAULT_PYTHON),
         # A custom base image keeps using its own system Python...
         ({"base_image": "ubuntu:24.04"}, None),
         # ...even when it names the current default explicitly.

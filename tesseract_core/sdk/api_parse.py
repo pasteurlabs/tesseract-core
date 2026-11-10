@@ -148,12 +148,12 @@ class HostCredential(BaseModel):
         return value
 
 
-# The Python of the default `build_config.base_image` (debian:bookworm-slim is
-# Debian 12, which ships 3.11 for its whole lifetime). Builds that set neither
-# base_image nor python_version get this version pinned, rather than whatever
-# the default image ships, so changing the default image cannot change their
-# Python. `Tesseract.from_source` builds on it too.
-DEFAULT_BASE_IMAGE_PYTHON = "3.11"
+# The Python used when `python_version` is unset, by builds on the default
+# `build_config.base_image` and by `Tesseract.from_source`. It matches the default
+# image's own Python (debian:bookworm-slim is Debian 12, which ships 3.11 for its
+# whole lifetime), but is pinned so that changing the default image cannot change
+# their Python.
+DEFAULT_PYTHON = "3.11"
 
 # Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
 # ``pylock.prod.toml``.
@@ -170,7 +170,7 @@ class PipRequirements(BaseModel):
             "Python version to use for the Tesseract's environment (e.g., '3.12'), "
             "installed via uv if needed. "
             "When unset, images built on the default base image and "
-            f"``Tesseract.from_source`` use Python {DEFAULT_BASE_IMAGE_PYTHON}, "
+            f"``Tesseract.from_source`` use Python {DEFAULT_PYTHON}, "
             "and images built on a custom ``base_image`` use that image's system "
             "Python."
         ),
@@ -325,7 +325,7 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         """Python version a container build installs, or None to use the base image's.
 
         The declared ``python_version``; else, for a build on the default base
-        image, :data:`DEFAULT_BASE_IMAGE_PYTHON`, so its Python does not follow the
+        image, :data:`DEFAULT_PYTHON`, so its Python does not follow the
         default image when that changes. ``inherit_base_image_packages`` needs the
         base image's own Python, and conda pins Python in its environment file.
         """
@@ -336,7 +336,7 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             and not self.inherit_base_image_packages
             and "base_image" not in self.model_fields_set
         ):
-            return DEFAULT_BASE_IMAGE_PYTHON
+            return DEFAULT_PYTHON
         return None
 
     @property
