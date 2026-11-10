@@ -158,6 +158,19 @@ $ git rebase main
 $ git push --force
 ```
 
+### What CI runs on a pull request
+
+Pull requests run a fast subset of the test suite on every push. When a
+maintainer adds the pull request to the merge queue, the full matrix runs
+(GPU, demos, macOS, ARM, Podman, more Python versions), and the pull request
+only merges if it passes.
+
+Pull requests that touch `demo/` also run the demos, and ones that touch the
+GPU code paths also run the GPU tests. Changes to dependencies or to the test
+workflow run the full matrix right away. To run the full matrix on any pull
+request, a maintainer can add the `ci:full` label and re-run the
+"Run test suite" workflow.
+
 ### Commit and pull request messages guidelines
 
 We follow the [Conventional
