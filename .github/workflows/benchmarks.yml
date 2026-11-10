@@ -16,8 +16,8 @@ permissions:
 
 jobs:
   # Decides whether a PR is benchmarked: it is if it changes a file whose code
-  # runs inside a timed benchmark, or if it has the `benchmark` label. To
-  # benchmark any other PR, add the label and re-run the workflow. A re-run
+  # runs inside a timed benchmark, or if it has the `ci:benchmark` or `ci:full`
+  # label. To benchmark any other PR, add a label and re-run the workflow. A re-run
   # reuses the original event payload, so the labels are looked up live, and
   # the paths are checked here because a `paths:` filter would keep the re-run
   # from starting at all. A `labeled` trigger would let adding any label cancel
@@ -46,8 +46,8 @@ jobs:
           fi
 
           labels=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')
-          if grep -qx benchmark <<< "$labels"; then
-            echo "::notice::The PR has the benchmark label"
+          if grep -qxE 'ci:benchmark|ci:full' <<< "$labels"; then
+            echo "::notice::The PR has the ci:benchmark or ci:full label"
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -95,7 +95,7 @@ jobs:
             done
           done <<< "$files"
 
-          echo "::notice::No benchmarked files changed. To benchmark anyway, add the benchmark label and re-run this workflow."
+          echo "::notice::No benchmarked files changed. To benchmark anyway, add the ci:benchmark label and re-run this workflow."
           echo "run=false" >> "$GITHUB_OUTPUT"
 
   benchmark:
