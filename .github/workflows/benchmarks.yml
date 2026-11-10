@@ -15,12 +15,13 @@ permissions:
   contents: read
 
 jobs:
-  # Decides whether a PR is benchmarked: it is if it changes a file that runs
-  # inside a timed benchmark, or if it has the `benchmark` label. This happens
-  # at run time instead of through `paths:` and a `labeled` trigger, so that
-  # "add the label, then re-run the workflow" works on any PR. A re-run reuses
-  # the original event payload, so the labels have to be looked up live, and a
-  # `paths:` filter would keep the re-run from starting at all.
+  # Decides whether a PR is benchmarked: it is if it changes a file whose code
+  # runs inside a timed benchmark, or if it has the `benchmark` label. To
+  # benchmark any other PR, add the label and re-run the workflow. A re-run
+  # reuses the original event payload, so the labels are looked up live, and
+  # the paths are checked here because a `paths:` filter would keep the re-run
+  # from starting at all. A `labeled` trigger would let adding any label cancel
+  # a running benchmark through the concurrency group.
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -20,9 +20,9 @@ NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.
 # Default array sizes when --array-sizes is not specified. Size 0 is an empty
 # array, exercising the full encode/decode and request path with an empty buffer,
 # so it measures the fixed per-request floor. At 1,000,000 float64 elements
-# (8 MB), the per-byte cost dominates in every mode that copies the array. Sizes
-# in between mix the two regimes, so they add run time but little independent
-# information.
+# (8 MB), the per-byte cost is at least as large as the fixed cost in every mode
+# that copies the array. Sizes in between mix the two regimes, so they add run
+# time but little independent information.
 DEFAULT_ARRAY_SIZES = [0, 1_000_000]
 
 
