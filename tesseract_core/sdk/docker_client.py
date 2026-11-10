@@ -133,8 +133,8 @@ def _run_process(
             stderr_thread.join()
 
     except BaseException:
-        # Not just Exception: whatever interrupts the wait (Ctrl+C, a test
-        # timeout) must not leave the process running.
+        # Catch everything, so that whatever interrupts the wait (Ctrl+C, a
+        # test timeout) doesn't leave the process running.
         proc.terminate()
         try:
             proc.wait(timeout=5)

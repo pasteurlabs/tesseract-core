@@ -321,8 +321,8 @@ def redirect_stdio(
         if log_sink is not None:
             # Wrap the user sink so it writes to the *original* stdout/stderr,
             # preventing infinite recursion when the sink itself prints. Only
-            # the thread running the sink is rerouted: the code being logged
-            # keeps printing meanwhile, and its output belongs in the log.
+            # the thread running the sink is rerouted, because the code being
+            # logged keeps printing meanwhile and its output belongs in the log.
             in_sink = threading.local()
 
             def safe_sink(msg: str) -> None:
