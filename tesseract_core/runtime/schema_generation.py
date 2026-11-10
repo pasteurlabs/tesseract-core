@@ -160,7 +160,6 @@ def apply_function_to_model_tree(
             seen_models.add(id(treeobj))
 
             new_fields = {}
-            # Converters for the defaults of default_factory fields, by field name
             factory_converters = {}
 
             for field_name, field in treeobj.model_fields.items():
@@ -199,20 +198,17 @@ def apply_function_to_model_tree(
             if safe_issubclass(treeobj, RootModel):
                 model_config.pop("extra", None)
 
+            validators = None
+            if factory_converters:
+                validator = _factory_default_validator(factory_converters)
+                validators = {"_convert_factory_defaults": validator}
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
                 model_config=(ConfigDict, model_config),
                 __base__=treeobj,
-                __validators__=(
-                    {
-                        "_convert_factory_defaults": _factory_default_validator(
-                            factory_converters
-                        )
-                    }
-                    if factory_converters
-                    else None
-                ),
+                __validators__=validators,
             )
 
         elif _is_annotated(treeobj):
@@ -401,15 +397,14 @@ def create_apply_schema(
 # arrays, only passed when converting defaults. Pydantic wants string keys, so the
 # value is a private object: callers cannot reproduce it to send real arrays to
 # abstract_eval.
+_CONVERT_DEFAULT_KEY = "tesseract_convert_abstract_default"
 _CONVERT_DEFAULT_SENTINEL = object()
-_CONVERT_DEFAULT_CONTEXT = {
-    "tesseract_convert_abstract_default": _CONVERT_DEFAULT_SENTINEL
-}
 
 
 def _array_default_to_shapedtype(value: Any, info: ValidationInfo) -> Any:
     """Before-validator replacing a real array by its ShapeDType, when converting a default."""
-    converting = info.context == _CONVERT_DEFAULT_CONTEXT
+    context = info.context or {}
+    converting = context.get(_CONVERT_DEFAULT_KEY) is _CONVERT_DEFAULT_SENTINEL
     if converting and isinstance(value, np.ndarray | np.generic):
         return ShapeDType(shape=value.shape, dtype=str(value.dtype))
     return value
@@ -432,8 +427,7 @@ def _abstract_default_converter(
     if new_type == old_type:
         return None
 
-    # Built once per field and reused for every factory default, so no cache is
-    # needed (which would also require the annotations to be hashable).
+    # Built once per field, not cached: annotations may be unhashable
     real_adapter = TypeAdapter(old_type)
     abstract_adapter = TypeAdapter(new_type)
 
@@ -442,7 +436,7 @@ def _abstract_default_converter(
             real = real_adapter.validate_python(default)
             plain = real_adapter.dump_python(real, by_alias=True)
             return abstract_adapter.validate_python(
-                plain, context=_CONVERT_DEFAULT_CONTEXT
+                plain, context={_CONVERT_DEFAULT_KEY: _CONVERT_DEFAULT_SENTINEL}
             )
         except (ValidationError, PydanticSerializationError):
             return default
