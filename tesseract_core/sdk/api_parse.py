@@ -324,10 +324,10 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
     def image_python_version(self) -> str | None:
         """Python version a container build installs, or None to use the base image's.
 
-        The declared ``python_version``; else, for a build on the default base
-        image, :data:`DEFAULT_PYTHON`, so its Python does not follow the
-        default image when that changes. ``inherit_base_image_packages`` needs the
-        base image's own Python, and conda pins Python in its environment file.
+        Returns ``python_version`` if declared, otherwise for a build on the default
+        base image, :data:`DEFAULT_PYTHON`. ``inherit_base_image_packages``
+        needs the base image's own Python, and conda pins Python in its environment
+        file.
         """
         if self.effective_python_version is not None:
             return self.effective_python_version
