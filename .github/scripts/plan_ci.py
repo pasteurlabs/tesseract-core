@@ -21,6 +21,7 @@ import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
+from typing import NamedTuple
 
 FULL_LABEL = "ci:full"
 
@@ -54,10 +55,21 @@ NUM_EXAMPLE_SHARDS = 6
 ARM_ONLY_EXAMPLES = ["pyvista-arm64"]
 
 
+class PythonVersions(NamedTuple):
+    """The Python versions CI tests with, passed in from the workflow."""
+
+    oldest: str
+    latest: str
+    # For jobs that need a single version, such as the end-to-end test host.
+    default: str
+
+
 def _base_job(
     os_name: str, python: str, deps: str = "latest", typeguard: bool = False
 ) -> dict:
+    label = f"{os_name}, {python}, {deps}" + (", typeguard" if typeguard else "")
     return {
+        "label": label,
         "os": os_name,
         "python-version": python,
         "runtime-deps": deps,
@@ -65,34 +77,56 @@ def _base_job(
     }
 
 
-# Test with the oldest and latest supported Python versions.
-# NOTE: If bumping the minimum Python version here, also update
-# `requires-python` in pyproject.toml and the other workflows.
-#
-# Typeguard breaks coverage's branch mapping (gh#691), so one job runs with
-# typeguard and without coverage.
-BASE_FAST = [
-    _base_job("ubuntu-latest", "3.10", deps="oldest"),
-    _base_job("ubuntu-latest", "3.15", typeguard=True),
-    _base_job("windows-latest", "3.15"),
-]
-BASE_FULL_ONLY = [
-    _base_job("ubuntu-latest", "3.10"),
-    _base_job("macos-latest", "3.10"),
-    _base_job("macos-latest", "3.15"),
-    _base_job("windows-latest", "3.10"),
-]
+def _base_jobs(python: PythonVersions) -> tuple[list[dict], list[dict]]:
+    """Return the fast and full-only unit test jobs.
+
+    They test the oldest and latest supported Python versions. Typeguard breaks
+    coverage's branch mapping (gh#691), so one job runs with typeguard and
+    without coverage.
+    """
+    fast = [
+        _base_job("ubuntu-latest", python.oldest, deps="oldest"),
+        _base_job("ubuntu-latest", python.latest, typeguard=True),
+        _base_job("windows-latest", python.latest),
+    ]
+    full_only = [
+        _base_job("ubuntu-latest", python.oldest),
+        _base_job("macos-latest", python.oldest),
+        _base_job("macos-latest", python.latest),
+        _base_job("windows-latest", python.oldest),
+    ]
+    return fast, full_only
 
 
 def _e2e_job(
-    name: str, arch: str = "x64", engine: str = "docker", examples: Iterable[str] = ()
+    name: str,
+    python: str,
+    arch: str = "x64",
+    engine: str = "docker",
+    examples: Iterable[str] = (),
 ) -> dict:
     return {
+        "label": f"{name}, {arch}, {engine}",
         "name": name,
+        "python-version": python,
         "arch": arch,
         "docker-engine": engine,
         "examples": " ".join(examples),
     }
+
+
+def _pip_install_jobs(python: PythonVersions) -> list[dict]:
+    return [
+        {"os": os_name, "python-version": version, "dependencies": "pinned"}
+        for os_name in ["ubuntu-latest", "macos-latest"]
+        for version in [python.oldest, python.latest]
+    ] + [
+        {
+            "os": "ubuntu-latest",
+            "python-version": python.latest,
+            "dependencies": "latest",
+        }
+    ]
 
 
 def _matches(paths: Iterable[str], patterns: list[str]) -> list[str]:
@@ -106,7 +140,11 @@ def _list_dirs(path: Path) -> list[str]:
 
 
 def plan(
-    event: str, labels: list[str], changed_files: list[str] | None, repo_root: Path
+    event: str,
+    labels: list[str],
+    changed_files: list[str] | None,
+    python: PythonVersions,
+    repo_root: Path,
 ) -> tuple[dict[str, str], list[str]]:
     """Return (outputs, reasons) for the given event.
 
@@ -132,20 +170,25 @@ def plan(
         e for e in _list_dirs(repo_root / "examples") if e not in ARM_ONLY_EXAMPLES
     ]
     shards = [examples[i::NUM_EXAMPLE_SHARDS] for i in range(NUM_EXAMPLE_SHARDS)]
-    e2e = [_e2e_job("base")] + [
-        _e2e_job(f"examples-{i + 1}", examples=shard)
+    e2e = [_e2e_job("base", python.default)] + [
+        _e2e_job(f"examples-{i + 1}", python.default, examples=shard)
         for i, shard in enumerate(shards)
         if shard
     ]
-    base = list(BASE_FAST)
+    base, base_full_only = _base_jobs(python)
     if full:
-        base += BASE_FULL_ONLY
+        base += base_full_only
         e2e += [
             # Test on arm to ensure compatibility with Apple M1 chips
             # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-            _e2e_job("base", arch="arm"),
-            _e2e_job("examples-arm", arch="arm", examples=ARM_ONLY_EXAMPLES),
-            _e2e_job("base", engine="podman"),
+            _e2e_job("base", python.default, arch="arm"),
+            _e2e_job(
+                "examples-arm",
+                python.default,
+                arch="arm",
+                examples=ARM_ONLY_EXAMPLES,
+            ),
+            _e2e_job("base", python.default, engine="podman"),
         ]
 
     outputs = {
@@ -154,6 +197,7 @@ def plan(
         "run-gpu": json.dumps(run_gpu),
         "base-matrix": json.dumps(base),
         "e2e-matrix": json.dumps(e2e),
+        "pip-install-matrix": json.dumps(_pip_install_jobs(python)),
         "demos": json.dumps(_list_dirs(repo_root / "demo")),
     }
     return outputs, reasons
@@ -182,6 +226,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--event", required=True, help="GitHub event name")
     parser.add_argument(
+        "--python-oldest", required=True, help="Oldest supported Python version"
+    )
+    parser.add_argument(
+        "--python-latest", required=True, help="Latest supported Python version"
+    )
+    parser.add_argument(
+        "--python-default",
+        required=True,
+        help="Python version for jobs that test a single version",
+    )
+    parser.add_argument(
         "--labels", type=Path, help="File with the pull request's labels, one per line"
     )
     parser.add_argument(
@@ -198,7 +253,12 @@ def main() -> None:
         if args.changed_files and args.changed_files.exists()
         else None
     )
-    outputs, reasons = plan(args.event, labels, changed_files, Path("."))
+    python = PythonVersions(
+        oldest=args.python_oldest,
+        latest=args.python_latest,
+        default=args.python_default,
+    )
+    outputs, reasons = plan(args.event, labels, changed_files, python, Path("."))
 
     output_text = "".join(f"{key}={value}\n" for key, value in outputs.items())
     summary_text = _summary(outputs, reasons)

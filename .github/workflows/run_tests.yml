@@ -17,6 +17,14 @@ concurrency:
 env:
   TESSERACT_TEST_KEEP_IMAGES: "1"
 
+  # The Python versions to test with. NOTE: If bumping the oldest version, also
+  # update `requires-python` in pyproject.toml, ruff's `target-version`, and the
+  # other workflows.
+  PYTHON_OLDEST: "3.10"
+  PYTHON_LATEST: "3.15"
+  # For jobs that test a single version, such as the end-to-end test host
+  PYTHON_DEFAULT: "3.14"
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -32,6 +40,7 @@ jobs:
       run-gpu: ${{ steps.plan.outputs.run-gpu }}
       base-matrix: ${{ steps.plan.outputs.base-matrix }}
       e2e-matrix: ${{ steps.plan.outputs.e2e-matrix }}
+      pip-install-matrix: ${{ steps.plan.outputs.pip-install-matrix }}
       demos: ${{ steps.plan.outputs.demos }}
 
     steps:
@@ -49,15 +58,23 @@ jobs:
         run: |
           gh pr view "$PR_NUMBER" --repo "$REPO" --json labels --jq '.labels[].name' > "$RUNNER_TEMP/labels.txt"
           # If the files can't be listed, plan_ci.py runs the full matrix.
-          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' \
-            > "$RUNNER_TEMP/changed_files.txt" || rm -f "$RUNNER_TEMP/changed_files.txt"
+          if ! gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' \
+            > "$RUNNER_TEMP/changed_files.txt"; then
+            echo "::warning::Could not list the changed files, so the full matrix runs."
+            rm -f "$RUNNER_TEMP/changed_files.txt"
+          fi
 
       - name: Plan jobs
         id: plan
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          args=(--event "$EVENT")
+          args=(
+            --event "$EVENT"
+            --python-oldest "$PYTHON_OLDEST"
+            --python-latest "$PYTHON_LATEST"
+            --python-default "$PYTHON_DEFAULT"
+          )
           if [ "$EVENT" == "pull_request" ]; then
             args+=(--labels "$RUNNER_TEMP/labels.txt" --changed-files "$RUNNER_TEMP/changed_files.txt")
           fi
@@ -66,7 +83,7 @@ jobs:
   tests-base:
     needs: [plan]
 
-    name: tests-base (${{ matrix.os }}, ${{ matrix.python-version }}, ${{ matrix.runtime-deps }}${{ matrix.typeguard && ', typeguard' || '' }})
+    name: tests-base (${{ matrix.label }})
 
     strategy:
       matrix:
@@ -102,8 +119,9 @@ jobs:
             uv sync --python ${{ matrix.python-version }} --extra dev --frozen
           fi
 
-      # Enforces typeguard's runtime type checks (enabled via addopts in
-      # pyproject.toml). This is where type annotations are validated in CI.
+      # Typeguard breaks coverage's branch mapping (gh#691), so one job runs the
+      # suite with typeguard (enabled via addopts in pyproject.toml) and without
+      # coverage. This is where type annotations are validated in CI.
       - name: Run test suite with typeguard
         if: matrix.typeguard
         env:
@@ -141,13 +159,12 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           flags: base-${{ matrix.os }}-py${{ matrix.python-version }}-${{ matrix.runtime-deps }}
-          override_branch: ${{ github.event_name == 'merge_group' && 'main' || '' }}
           fail_ci_if_error: true
 
   tests-e2e:
     needs: [plan]
 
-    name: tests-e2e (${{ matrix.name }}, ${{ matrix.arch }}, ${{ matrix.docker-engine }})
+    name: tests-e2e (${{ matrix.label }})
 
     strategy:
       matrix:
@@ -171,7 +188,7 @@ jobs:
       - uses: conda-incubator/setup-miniconda@v4
         with:
           auto-update-conda: true
-          python-version: "3.14"
+          python-version: ${{ matrix.python-version }}
           channels: defaults
 
       - name: Set up uv
@@ -198,7 +215,8 @@ jobs:
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
 
-      # Build the examples here so their layers are cached before the tests run.
+      # The example tests are split into shards (see plan_ci.py). Build this
+      # shard's examples here so their layers are cached before the tests run.
       # test_unit_tesseract_endtoend builds the same examples inside the timed
       # test body, and a cold build (pulling the base image plus installing the
       # runtime) can otherwise exceed the per-test --timeout=300. Warming the
@@ -251,7 +269,6 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           flags: e2e-${{ matrix.name }}-${{ matrix.arch }}-${{ matrix.docker-engine }}
-          override_branch: ${{ github.event_name == 'merge_group' && 'main' || '' }}
           fail_ci_if_error: true
 
   tests-demos:
@@ -262,9 +279,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        # test with oldest supported Python version only (for slow tests)
-        python-version: ["3.10"]
-
         demo: ${{ fromJson(needs.plan.outputs.demos) }}
 
       fail-fast: false
@@ -281,10 +295,11 @@ jobs:
         with:
           enable-cache: true
 
+      # Test with the oldest supported Python version only (for slow tests)
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ env.PYTHON_OLDEST }}
 
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
@@ -362,7 +377,7 @@ jobs:
       - name: Install package
         run: |
           cp production.uv.lock uv.lock
-          uv sync --python 3.12 --extra dev --frozen
+          uv sync --python "$PYTHON_DEFAULT" --extra dev --frozen
 
       # cupy/torch/jax with CUDA support are not declared dependencies (they are
       # only needed to *produce* GPU arrays in the tests); install builds for the
@@ -436,7 +451,6 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           flags: gpu-cuda${{ matrix.cuda.major }}
-          override_branch: ${{ github.event_name == 'merge_group' && 'main' || '' }}
           fail_ci_if_error: true
 
   tests-pip-install:
@@ -449,19 +463,7 @@ jobs:
 
     strategy:
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-        python-version:
-          - "3.10"
-          - "3.15"
-        dependencies:
-          - "pinned"
-
-        include:
-          - os: ubuntu-latest
-            python-version: "3.15"
-            dependencies: "latest"
+        include: ${{ fromJson(needs.plan.outputs.pip-install-matrix) }}
 
       fail-fast: false
 
