@@ -2,10 +2,6 @@ name: Benchmarks
 
 on:
   pull_request:
-    paths:
-      - "tesseract_core/**"
-      - "benchmarks/**"
-      - ".github/workflows/benchmarks.yml"
 
   push:
     branches:
@@ -19,9 +15,98 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether a PR is benchmarked: it is if it changes a file that runs
+  # inside a timed benchmark, or if it has the `benchmark` label. This happens
+  # at run time instead of through `paths:` and a `labeled` trigger, so that
+  # "add the label, then re-run the workflow" works on any PR. A re-run reuses
+  # the original event payload, so the labels have to be looked up live, and a
+  # `paths:` filter would keep the re-run from starting at all.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+
+    steps:
+      - name: Decide whether to benchmark
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          labels=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')
+          if grep -qx benchmark <<< "$labels"; then
+            echo "::notice::The PR has the benchmark label"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Files whose code runs inside a timed benchmark: array encoding,
+          # schema validation, the in-process, subprocess and HTTP clients, the
+          # HTTP server and its per-request wrappers, the shared-memory binref
+          # paths, and what goes into the benchmarked container image and
+          # environment. `*` also matches across `/`.
+          patterns=(
+            ".github/workflows/benchmarks.yml"
+            "benchmarks/*"
+            "production.uv.lock"
+            "tesseract_core/runtime/app_http.py"
+            "tesseract_core/runtime/array_encoding.py"
+            "tesseract_core/runtime/config.py"
+            "tesseract_core/runtime/core.py"
+            "tesseract_core/runtime/experimental/binref_passthrough.py"
+            "tesseract_core/runtime/file_interactions.py"
+            "tesseract_core/runtime/logs.py"
+            "tesseract_core/runtime/meta/*"
+            "tesseract_core/runtime/mpa.py"
+            "tesseract_core/runtime/profiler.py"
+            "tesseract_core/runtime/schema_types.py"
+            "tesseract_core/runtime/serve.py"
+            "tesseract_core/runtime/tree_transforms.py"
+            "tesseract_core/sdk/binref.py"
+            "tesseract_core/sdk/local_client.py"
+            "tesseract_core/sdk/serving.py"
+            "tesseract_core/sdk/tesseract.py"
+            "tesseract_core/sdk/templates/Dockerfile.base"
+            "tesseract_core/sdk/templates/build_pip_venv.sh"
+            "tesseract_core/sdk/templates/entrypoint.sh"
+          )
+
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')
+          while IFS= read -r file; do
+            for pattern in "${patterns[@]}"; do
+              # shellcheck disable=SC2053  # unquoted on purpose, to glob-match
+              if [[ $file == $pattern ]]; then
+                echo "::notice::$file changed, running benchmarks"
+                echo "run=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+          done <<< "$files"
+
+          echo "::notice::No benchmarked files changed. To benchmark anyway, add the benchmark label and re-run this workflow."
+          echo "run=false" >> "$GITHUB_OUTPUT"
+
   benchmark:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+
+    env:
+      # PRs run the suite this many times per side (see "Run benchmarks").
+      # Pushes to main run it once, for the trend record.
+      PASSES: ${{ github.event_name == 'pull_request' && 3 || 1 }}
 
     steps:
       - name: Set up Git repository
@@ -44,11 +129,6 @@ jobs:
       - name: Install package
         run: uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
 
-      - name: Run benchmarks on current commit
-        run: |
-          uv run --no-sync pytest benchmarks/ \
-            --benchmark-json current_benchmarks.json
-
       - name: Check out baseline branch
         if: github.event_name == 'pull_request'
         uses: actions/checkout@v7
@@ -69,23 +149,44 @@ jobs:
         run: |
           cp -r ../benchmarks/* benchmarks/
 
-      - name: Run benchmarks on baseline
-        if: github.event_name == 'pull_request'
-        id: baseline
-        working-directory: baseline
+      # A benchmark's median can shift between two runs of the same code by
+      # more than the notable threshold, so one run per side can't tell a change
+      # from noise. Each side runs $PASSES times instead, each pass in a fresh
+      # process, in the order B C C B B C so that drift over the job affects
+      # both sides alike. compare_benchmarks.py then flags a benchmark only if
+      # all current passes differ from all baseline passes.
+      #
+      # The CLI benchmark is skipped: every call starts a container, so it
+      # mostly times Docker, and its rounds take seconds each. It stays in the
+      # suite for the plots in the docs.
+      - name: Run benchmarks
+        id: run
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          rc=0
-          uv run --no-sync pytest benchmarks/ \
-            --benchmark-json baseline_benchmarks.json \
-            || rc=$?
+          args=(-k "not containerized_cli")
+          has_baseline=$([ "$EVENT_NAME" = "pull_request" ] && echo true || echo false)
 
-          if [ "$rc" != "0" ]; then
-            echo "::warning::Baseline benchmark run failed, skipping comparison"
-            echo "has_baseline=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          for i in $(seq "$PASSES"); do
+            if [ $((i % 2)) = 1 ]; then order="baseline current"; else order="current baseline"; fi
+            for side in $order; do
+              echo "::group::Pass $i ($side)"
+              if [ "$side" = "current" ]; then
+                uv run --no-sync pytest benchmarks/ "${args[@]}" \
+                  --benchmark-json "current_benchmarks_$i.json"
+              elif [ "$has_baseline" = "true" ]; then
+                if ! (cd baseline && uv run --no-sync pytest benchmarks/ "${args[@]}" \
+                    --benchmark-json "../baseline_benchmarks_$i.json"); then
+                  echo "::warning::Baseline benchmark run failed, skipping comparison"
+                  has_baseline=false
+                  rm -f baseline_benchmarks_*.json
+                fi
+              fi
+              echo "::endgroup::"
+            done
+          done
 
-          echo "has_baseline=true" >> $GITHUB_OUTPUT
+          echo "has_baseline=$has_baseline" >> "$GITHUB_OUTPUT"
 
       # Secrets are withheld from `pull_request` runs on fork PRs, so the comment
       # is posted by the privileged `Benchmark Report` workflow instead.
@@ -93,15 +194,16 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HAS_BASELINE: ${{ steps.run.outputs.has_baseline }}
         run: |
-          baseline_flag=""
-          if [ "${{ steps.baseline.outputs.has_baseline }}" = "true" ]; then
-            baseline_flag="--baseline baseline/baseline_benchmarks.json"
+          baseline_args=()
+          if [ "$HAS_BASELINE" = "true" ]; then
+            baseline_args=(--baseline baseline_benchmarks_*.json)
           fi
 
           python benchmarks/compare_benchmarks.py \
-            $baseline_flag \
-            --current current_benchmarks.json \
+            "${baseline_args[@]}" \
+            --current current_benchmarks_*.json \
             --pr-number "$PR_NUMBER" \
             --output benchmark_report.md
 
@@ -111,8 +213,8 @@ jobs:
         with:
           name: benchmark-results
           path: |
-            current_benchmarks.json
-            baseline/baseline_benchmarks.json
+            current_benchmarks_*.json
+            baseline_benchmarks_*.json
             benchmark_report.md
           if-no-files-found: ignore
           retention-days: 30
