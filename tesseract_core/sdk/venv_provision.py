@@ -22,6 +22,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+
 from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE
 from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
@@ -210,13 +212,58 @@ def _local_directories(requirements_file: Path) -> list[str]:
     return specs
 
 
+def _check_lockfile_python(lockfile: Path, python_executable: Path) -> None:
+    """Raise if a PEP 751 lockfile's ``requires-python`` excludes the interpreter.
+
+    The uv pinned for container builds refuses such a lockfile itself, but older
+    uv installs it anyway, so check here rather than rely on the uv on PATH.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10; pip is an SDK dependency.
+        from pip._vendor import tomli as tomllib
+
+    try:
+        with lockfile.open("rb") as handle:
+            declared = tomllib.load(handle).get("requires-python")
+    except (OSError, ValueError) as e:
+        raise UserError(f"Could not read {lockfile}: {e}") from e
+    if declared is None:
+        return
+    try:
+        allowed = SpecifierSet(declared)
+    except (InvalidSpecifier, TypeError) as e:
+        raise UserError(
+            f"{lockfile.name} has an invalid requires-python: {declared!r}"
+        ) from e
+
+    version = subprocess.run(
+        [
+            str(python_executable),
+            "-c",
+            "import platform; print(platform.python_version())",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if not allowed.contains(version, prereleases=True):
+        # Worded like uv's own error, which a container build reports.
+        raise UserError(
+            f"The requested interpreter resolved to Python {version}, which is "
+            f"incompatible with {lockfile.name}'s Python requirement: `{declared}`. "
+            "Set `build_config.requirements.python_version` in tesseract_config.yaml "
+            "to a version it allows."
+        )
+
+
 def _build_python_version(build_config: Any) -> str | None:
     """The Python to build a uv-pip environment on, as a `uv venv --python` request.
 
     Whatever a container build would use: the declared ``python_version``, else
     the default base image's Python. As in a container build, a lockfile's
-    ``requires-python`` does not change it; a lockfile that excludes it fails to
-    install. None (for ``inherit_base_image_packages``) leaves the choice to uv.
+    ``requires-python`` does not change it; see :func:`_check_lockfile_python`.
+    None (for ``inherit_base_image_packages``) leaves the choice to uv.
     """
     declared = build_config.effective_python_version
     if declared is not None:
@@ -308,6 +355,8 @@ def _build_pip_venv(
         system_site_packages=build_config.inherit_base_image_packages,
         env=env,
     )
+    if requirements_file is not None and build_config.requirements.is_pylock:
+        _check_lockfile_python(requirements_file, python_executable)
     if requirements_file is not None:
         try:
             # `-r` handles flat files and PEP 751 lockfiles alike, as in

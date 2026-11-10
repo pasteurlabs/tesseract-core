@@ -1151,6 +1151,65 @@ def test_a_lockfile_python_range_is_not_used(dummy_tesseract_package, lockfile):
     )
 
 
+@pytest.mark.parametrize(
+    "lockfile, ok",
+    [
+        ('lock-version = "1.0"\nrequires-python = ">=3"\n', True),
+        ('lock-version = "1.0"\n', True),
+        ('lock-version = "1.0"\nrequires-python = "<3"\n', False),
+    ],
+)
+def test_a_lockfile_must_allow_the_interpreter(tmp_path, lockfile, ok):
+    """A lockfile whose requires-python excludes the interpreter fails, as in uv."""
+    (tmp_path / "pylock.toml").write_text(lockfile)
+
+    def check():
+        venv_provision._check_lockfile_python(
+            tmp_path / "pylock.toml", Path(sys.executable)
+        )
+
+    if ok:
+        check()
+    else:
+        with pytest.raises(UserError, match=r"incompatible with pylock\.toml's"):
+            check()
+
+
+@pytest.mark.parametrize(
+    "content",
+    ['lock-version = "1.0"\nrequires-python = "not a range"\n', "lock-version = [\n"],
+)
+def test_a_broken_lockfile_is_reported(tmp_path, content):
+    """A lockfile that cannot be read fails loudly rather than being skipped."""
+    (tmp_path / "pylock.toml").write_text(content)
+    with pytest.raises(UserError, match=r"pylock\.toml"):
+        venv_provision._check_lockfile_python(
+            tmp_path / "pylock.toml", Path(sys.executable)
+        )
+
+
+def test_a_lockfile_excluding_the_default_python_fails(dummy_tesseract_package):
+    """from_source refuses a conflicting lockfile instead of building on 3.11 anyway.
+
+    Older uv would install it regardless, so this must not depend on uv's version.
+    """
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "locked"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        "    requirements_file: pylock.toml\n"
+    )
+    (dummy_tesseract_package / "pylock.toml").write_text(
+        'lock-version = "1.0"\nrequires-python = ">=3.12"\n'
+    )
+
+    with pytest.raises(UserError, match=r"Python 3\.11\.\d+, which is incompatible"):
+        venv_provision.resolve_python_executable(
+            dummy_tesseract_package / "tesseract_api.py"
+        )
+
+
 def test_changing_the_python_version_invalidates_the_stamp(dummy_tesseract_package):
     """Build settings are part of the stamp, not just the requirements file."""
     api_path = dummy_tesseract_package / "tesseract_api.py"
