@@ -698,6 +698,7 @@ def check_gradients(
     max_evals: int = 1000,
     max_output_samples: int | None = None,
     eps: float | Mapping[str, float] = 1e-4,
+    eps_for: Mapping[str, float] | None = None,
     rtol: float = 0.1,
     seed: int | None = None,
     show_progress: bool = True,
@@ -721,6 +722,8 @@ def check_gradients(
             differentiated input; a mapping gives one step per input path,
             which is what inputs of differing magnitude need, and must name
             every path being checked.
+        eps_for: Step sizes for some input paths, overriding a float ``eps``
+            for those paths only. Every other path uses ``eps``.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
         show_progress: Whether to show a progress bar.
@@ -778,6 +781,17 @@ def check_gradients(
     if not output_paths:
         output_paths = diff_outputs
 
+    if eps_for:
+        if isinstance(eps, Mapping):
+            raise ValueError("eps_for cannot be combined with a mapping eps")
+        unknown = [path for path in eps_for if path not in input_paths]
+        if unknown:
+            raise ValueError(
+                f"eps_for names input path(s) that are not being checked: "
+                f"{', '.join(unknown)}"
+            )
+        eps = {path: eps_for.get(path, eps) for path in input_paths}
+
     if isinstance(eps, Mapping):
         missing = [path for path in input_paths if path not in eps]
         if missing:
@@ -818,33 +832,6 @@ def check_gradients(
             show_progress=show_progress,
         )
         yield endpoint, failures, num_evals
-
-
-class _EpsMap(Mapping):
-    """Per-input eps mapping that falls back to a global default.
-
-    Explicit overrides are returned for their paths; every other path
-    resolves to ``default``. Iteration yields only the explicit override
-    paths so that unknown-path validation can still catch typos, while
-    ``__contains__`` reports every path as present so no path is ever
-    treated as missing.
-    """
-
-    def __init__(self, overrides: Mapping[str, float], default: float) -> None:
-        self._overrides = dict(overrides)
-        self._default = default
-
-    def __getitem__(self, path: str) -> float:
-        return self._overrides.get(path, self._default)
-
-    def __contains__(self, path: object) -> bool:
-        return True
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._overrides)
-
-    def __len__(self) -> int:
-        return len(self._overrides)
 
 
 class CheckGradientsSpec(BaseModel):
@@ -944,7 +931,8 @@ def run_gradient_check(
         endpoints=spec.endpoints,
         max_evals=spec.max_evals,
         max_output_samples=spec.max_output_samples,
-        eps=_EpsMap(spec.eps_for, spec.eps) if spec.eps_for else spec.eps,
+        eps=spec.eps,
+        eps_for=spec.eps_for,
         rtol=spec.rtol,
         seed=seed,
         show_progress=show_progress,
