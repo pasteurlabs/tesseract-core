@@ -966,8 +966,9 @@ class Tesseract:
 
         Args:
             inputs: a dictionary with the inputs.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1013,8 +1014,9 @@ class Tesseract:
             inputs: a dictionary with the inputs.
             jac_inputs: Inputs with respect to which derivatives will be calculated.
             jac_outputs: Outputs which will be differentiated.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1047,8 +1049,9 @@ class Tesseract:
             jvp_inputs: Inputs with respect to which derivatives will be calculated.
             jvp_outputs: Outputs which will be differentiated.
             tangent_vector: Element of the tangent space to multiply with the Jacobian.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1088,8 +1091,9 @@ class Tesseract:
             vjp_inputs: Inputs with respect to which derivatives will be calculated.
             vjp_outputs: Outputs which will be differentiated.
             cotangent_vector: Element of the cotangent space to multiply with the Jacobian.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -2042,8 +2046,9 @@ class HTTPClient:
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
             stream_logs: If True, stream logs to stdout. If a callable, stream
                     logs to that callable.
             encoding: The encoding to request. None, or a field left as None,
@@ -2157,7 +2162,7 @@ class LocalClient:
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
-            run_id: a string to identify the run.
+            run_id: a string to identify the run, made of letters, digits, '-' and '_'.
             stream_logs: If True, stream logs to stdout. If a callable, stream logs to that callable.
             encoding: Ignored, since arrays are passed in memory. Accepted so
                 both clients can be called the same way.
@@ -2174,7 +2179,7 @@ class LocalClient:
             override_config,
             snapshot_config,
         )
-        from tesseract_core.runtime.file_interactions import join_paths
+        from tesseract_core.runtime.file_interactions import check_run_id, join_paths
         from tesseract_core.runtime.mpa import start_run
         from tesseract_core.runtime.profiler import Profiler
 
@@ -2185,6 +2190,7 @@ class LocalClient:
         # Set up run directory for logging
         if run_id is None:
             run_id = str(uuid.uuid4())
+        check_run_id(run_id)
         rundir = join_paths(str(self._output_path), f"run_{run_id}")
 
         # Determine log sink from stream_logs parameter
