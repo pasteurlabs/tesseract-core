@@ -163,13 +163,7 @@ def _spread_pct(medians: list[float]) -> float | None:
 def _compute_comparison(
     name: str, baseline: dict[str, list[float]], current: dict[str, list[float]]
 ) -> dict:
-    """Compute comparison metrics for a single benchmark.
-
-    ``baseline`` and ``current`` map names to per-pass medians. A change is
-    notable only if every current pass is beyond every baseline pass by more
-    than the threshold, so a single outlier pass on either side cannot produce
-    a flag.
-    """
+    """Compare one benchmark, given each side's per-pass medians by name."""
     base = baseline.get(name)
     curr = current.get(name)
     spreads = [_spread_pct(medians) for medians in (base, curr) if medians]
@@ -229,18 +223,6 @@ _TABLE_HEADER = [
     "| Benchmark | Baseline | Current | Change | Spread | Status |",
     "|-----------|----------|---------|--------|--------|--------|",
 ]
-
-_COLUMN_NOTE = (
-    "Times are the median over passes of each pass's median. Spread is the "
-    "range of the per-pass medians on the noisier side, relative to its median."
-)
-
-
-def _passes_description(num_baseline: int, num_current: int) -> str:
-    """Describe how many passes each side ran."""
-    if num_baseline == num_current:
-        return f"{num_current} pass{'es' if num_current != 1 else ''} per side"
-    return f"{num_baseline} baseline and {num_current} current passes"
 
 
 def _generate_current_only_report(
@@ -366,10 +348,12 @@ def generate_report(
         lines.append(_format_comparison_row(comp))
 
     method_note = (
-        f"Ran {_passes_description(len(baseline_passes), len(current_passes))}, "
-        "alternating between baseline and current. A benchmark is flagged only "
-        "if every current pass differs from every baseline pass by more than "
-        f"{NOTABLE_THRESHOLD_PCT}% in the same direction. {_COLUMN_NOTE}"
+        f"Ran {len(baseline_passes)} baseline and {len(current_passes)} current "
+        "passes, alternating between the two. A benchmark is flagged only if "
+        "every current pass differs from every baseline pass by more than "
+        f"{NOTABLE_THRESHOLD_PCT}% in the same direction. Times are the median "
+        "over passes of each pass's median. Spread is the range of the per-pass "
+        "medians on the noisier side, relative to its median."
     )
     lines.extend(
         [

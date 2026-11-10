@@ -15,13 +15,12 @@ permissions:
   contents: read
 
 jobs:
-  # Decides whether a PR is benchmarked: it is if it changes a file whose code
-  # runs inside a timed benchmark, or if it has the `ci:benchmark` or `ci:full`
-  # label. To benchmark any other PR, add a label and re-run the workflow. A re-run
-  # reuses the original event payload, so the labels are looked up live, and
-  # the paths are checked here because a `paths:` filter would keep the re-run
-  # from starting at all. A `labeled` trigger would let adding any label cancel
-  # a running benchmark through the concurrency group.
+  # Benchmarks a PR if it changes a file whose code runs inside a timed
+  # benchmark, or if it has the `ci:benchmark` or `ci:full` label. To benchmark
+  # any other PR, add a label and re-run the workflow. Labels and paths are
+  # checked here at run time because a re-run reuses the original event payload
+  # and a `paths:` filter would keep it from starting. A `labeled` trigger would
+  # let any new label cancel a running benchmark through the concurrency group.
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -150,14 +149,11 @@ jobs:
         run: |
           cp -r ../benchmarks/* benchmarks/
 
-      # A benchmark's median can shift between two runs of the same code by
-      # more than the notable threshold, so one run per side can't tell a change
-      # from noise. Each side runs $PASSES times instead, each pass in a fresh
-      # process, in the order B C C B B C so that drift over the job affects
-      # both sides alike. compare_benchmarks.py then flags a benchmark only if
-      # all current passes differ from all baseline passes.
+      # Each side runs $PASSES times, each pass in a fresh process, in the order
+      # B C C B B C so that drift over the job affects both sides alike.
+      # compare_benchmarks.py explains how the passes are compared.
       #
-      # The CLI benchmark is skipped: every call starts a container, so it
+      # The CLI benchmark is skipped. Every call starts a container, so it
       # mostly times Docker, and its rounds take seconds each. It stays in the
       # suite for the plots in the docs.
       - name: Run benchmarks
