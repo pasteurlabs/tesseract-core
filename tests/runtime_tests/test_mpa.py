@@ -263,6 +263,15 @@ def test_mlflow_non_http_scheme_raises_error():
         mpa.MLflowBackend()
 
 
+@pytest.mark.parametrize("uri", ["localhost:5000", "mlflow.example.com:5000/prefix"])
+def test_mlflow_host_port_uri_defaults_to_https(mocker, uri):
+    """A host:port URI gets the default scheme instead of its host being taken for one."""
+    update_config(mlflow_tracking_uri=uri)
+    get = mocker.patch.object(mpa.requests, "get")
+    mpa.MLflowBackend()
+    assert get.call_args.args[0] == f"https://{uri}"
+
+
 def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
     """Test passing a dict with basic tags."""
     kwargs = {"tags": {"env": "prod", "team": "ml"}}

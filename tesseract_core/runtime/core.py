@@ -105,12 +105,16 @@ def load_module_from_path(path: Path | str) -> ModuleType:
         raise ImportError(f"Could not load module from {path}")
 
     module = importlib.util.module_from_spec(spec)
+    prev_pythonpath = os.environ.get("PYTHONPATH")
 
     try:
         sys.path.append(str(module_dir))
 
-        # Also update PYTHONPATH in the environment so it propagates to subprocesses
-        os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+        # Let subprocesses import from module_dir, without leaking the rest of sys.path
+        pythonpath = [str(module_dir)]
+        if prev_pythonpath:
+            pythonpath.append(prev_pythonpath)
+        os.environ["PYTHONPATH"] = os.pathsep.join(pythonpath)
 
         # Register in sys.modules so functions can be pickled for multiprocessing.
         # This allows pickle to find the module via func.__module__.
@@ -120,10 +124,13 @@ def load_module_from_path(path: Path | str) -> ModuleType:
 
         spec.loader.exec_module(module)
     except Exception as exc:
-        # Restore sys.path on failure
+        # Restore sys.path and PYTHONPATH on failure
         if str(module_dir) in sys.path:
             sys.path.remove(str(module_dir))
-        os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+        if prev_pythonpath is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = prev_pythonpath
         sys.modules.pop(module_name, None)
         raise ImportError(f"Could not load module from {path}") from exc
     return module

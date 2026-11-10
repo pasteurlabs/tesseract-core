@@ -4,3 +4,5 @@
 # separate file only because the matrix overrides requirements_file uniformly
 # across the GPU examples.
 jax[cuda13]
+# Imported by tesseract_core.runtime.jax_recipes (as_jax_array).
+equinox

@@ -4,6 +4,8 @@ on:
   # run on PRs for validation
   pull_request:
 
+  merge_group:
+
 jobs:
   test-docs:
     runs-on: ubuntu-latest
@@ -41,8 +43,9 @@ jobs:
           # Point "View on GitHub" links at the PR head commit so a link to a
           # brand-new example resolves instead of 404ing against main. The head
           # commit (not GITHUB_HEAD_REF) is used because a fork PR's branch does
-          # not exist in this repo; see docs/conf.py.
-          DOCS_GIT_REF: ${{ github.event.pull_request.head.sha }}
+          # not exist in this repo; see docs/conf.py. Merge queue runs have no
+          # PR payload, so they use the queue's test commit (github.sha).
+          DOCS_GIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           export SPHINXOPTS="-W"  # treat warnings as errors
           # dirhtml matches the production build (see .readthedocs.yaml)
@@ -51,7 +54,7 @@ jobs:
       - name: Check links
         working-directory: docs
         env:
-          DOCS_GIT_REF: ${{ github.event.pull_request.head.sha }}
+          DOCS_GIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         # Catches broken links that -W cannot, in particular asset paths inside
         # raw HTML, which Sphinx emits verbatim without resolving. Known false
         # positives (bot-blocked hosts, JS-generated anchors) are configured via

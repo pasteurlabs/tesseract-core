@@ -38,6 +38,7 @@ from tesseract_core.runtime.core import (
     redirect_fd,
     use_utf8_stdio,
 )
+from tesseract_core.runtime.cuda.api import validate_gpu_transport_config
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
     read_from_path,
@@ -516,6 +517,8 @@ def serve(
         _exit_when_parent_closes(parent_pipe_fd)
 
     config = get_config()
+    # An unusable GPU transport is reported by serve() itself, which also covers
+    # servers started without the CLI.
     if config.debug:
         # The server is long-running, so a debugger can attach at any time.
         _start_debug_server(
@@ -544,6 +547,7 @@ def _create_user_defined_cli_command(
     OutputSchema = user_function.__annotations__.get("return", None)
 
     def _callback_wrapper(**kwargs: Any):
+        validate_gpu_transport_config()
         config = get_config()
         input_path = config.input_path
         output_path = config.output_path
@@ -682,6 +686,27 @@ def _configure_required_file_load() -> None:
         tesseract_core.runtime.experimental.SKIP_REQUIRED_FILE_CHECK = True
 
 
+def _apply_global_options() -> None:
+    """Apply the global config options in argv before any command is registered.
+
+    Typer only parses them when the app runs, which is after the Tesseract API
+    has been imported and the debugger would have to be attached.
+    """
+    command = typer.main.get_command(app)
+    try:
+        ctx = command.make_context(
+            "tesseract-runtime",
+            sys.argv[1:],
+            resilient_parsing=True,
+            auto_envvar_prefix="TESSERACT_RUNTIME",
+        )
+    except Exception:  # noqa: BLE001 - reported by the later parse
+        # Malformed options raise Click's exceptions, which Typer vendors under
+        # a private module, so they can't be caught by name.
+        return
+    main_callback(**ctx.params)
+
+
 def main() -> None:
     """Entrypoint for the command line interface."""
     use_utf8_stdio()
@@ -704,6 +729,7 @@ def main() -> None:
             sys.exit(1)
 
         _configure_required_file_load()
+        _apply_global_options()
 
         # Attach the debugger before the Tesseract API is imported below (during
         # command registration) so module-level code can be debugged too. The

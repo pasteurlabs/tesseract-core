@@ -436,7 +436,10 @@ def init(
     """Initialize a new Tesseract API module."""
     recipe: str = _enum_to_val(recipe)
     logger.info(f"Initializing Tesseract {name} in directory: {target_dir}")
-    engine.init_api(target_dir, name, recipe=recipe)
+    try:
+        engine.init_api(target_dir, name, recipe=recipe)
+    except FileExistsError as e:
+        raise UserError(f"Cannot initialize Tesseract: {e}") from e
 
 
 def _validate_port(port: str | None) -> str | None:
@@ -445,12 +448,11 @@ def _validate_port(port: str | None) -> str | None:
         return None
 
     port = port.strip()
-    if "-" in port:
-        start, end = port.split("-")
-    else:
-        start = end = port
-
     try:
+        if "-" in port:
+            start, end = port.split("-")
+        else:
+            start = end = port
         start, end = int(start), int(end)
     except ValueError as ex:
         raise typer.BadParameter(
@@ -975,7 +977,7 @@ def _extract_cli_config(
     base_dir: Path,
 ) -> tuple[str | None, list[str], str | None]:
     """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
-    cli_config = test_spec.get("cli_config", {})
+    cli_config = test_spec.get("cli_config") or {}
 
     if (input_path := cli_config.get("input_path")) and not Path(
         input_path
@@ -985,7 +987,7 @@ def _extract_cli_config(
     from tesseract_core.sdk.engine import _split_volume_spec
 
     volume_mounts = []
-    for vol_mount in cli_config.get("volume_mounts", []):
+    for vol_mount in cli_config.get("volume_mounts") or []:
         source = _split_volume_spec(vol_mount)[0]
         if not Path(source).is_absolute():
             volume_mounts.append(str(base_dir / vol_mount))

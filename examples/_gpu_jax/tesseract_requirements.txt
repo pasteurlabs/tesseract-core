@@ -6,3 +6,5 @@
 # back to CPU, so both matrix legs use cuda13 here (see the sibling
 # tesseract_requirements_cuda13.txt).
 jax[cuda13]
+# Imported by tesseract_core.runtime.jax_recipes (as_jax_array).
+equinox

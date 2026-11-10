@@ -125,6 +125,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ../how-to/deploy.md
 ../how-to/check-gradients.md
 ../how-to/fast-local-runs.md
+../how-to/gpu-transport.md
 ../how-to/debugging.md
 ```
 

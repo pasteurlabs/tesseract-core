@@ -140,7 +140,7 @@ class HostCredential(BaseModel):
     @classmethod
     def _allowed_characters(cls, value: str, info: "ValidationInfo") -> str:
         pattern = _HOST_CREDENTIAL_ALLOWED[info.field_name]
-        if not pattern.match(value):
+        if not pattern.fullmatch(value):
             raise ValueError(
                 f"{info.field_name} contains disallowed characters "
                 f"(must match {pattern.pattern}, got {value!r})"
@@ -225,7 +225,8 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         "debian:bookworm-slim",
         description=(
             "Base Docker image for the build. Must be Debian-based. "
-            "Only applies to container images."
+            "Only applies to container images. The default will change to "
+            "debian:trixie-slim (Python 3.13); set this explicitly to choose."
         ),
     )
     target_platform: StrictStr = Field(

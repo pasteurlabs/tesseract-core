@@ -7,6 +7,7 @@ Test a couple of edge cases and failure modes regarding schema validation and AD
 """
 
 import io
+import os
 import sys
 from collections.abc import Sequence
 from types import ModuleType
@@ -16,7 +17,11 @@ import pytest
 from pydantic import BaseModel, ValidationError, computed_field
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.core import create_endpoints, use_utf8_stdio
+from tesseract_core.runtime.core import (
+    create_endpoints,
+    load_module_from_path,
+    use_utf8_stdio,
+)
 from tesseract_core.runtime.tree_transforms import get_at_path
 
 
@@ -473,3 +478,19 @@ def test_use_utf8_stdio(monkeypatch):
     use_utf8_stdio()
     assert sys.stdout.encoding == sys.stderr.encoding == "utf-8"
     print("\N{GREEK SMALL LETTER RHO}")
+
+
+@pytest.mark.parametrize("outer_pythonpath", [None, "/opt/elsewhere"])
+def test_load_module_from_path_restores_pythonpath_on_failure(
+    tmp_path, monkeypatch, outer_pythonpath
+):
+    if outer_pythonpath is None:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+    else:
+        monkeypatch.setenv("PYTHONPATH", outer_pythonpath)
+    api_file = tmp_path / "tesseract_api.py"
+    api_file.write_text("raise RuntimeError('broken')\n")
+
+    with pytest.raises(ImportError):
+        load_module_from_path(api_file)
+    assert os.environ.get("PYTHONPATH") == outer_pythonpath

@@ -5,6 +5,13 @@ sd_hide_title: true
 html_class: landing-page
 og:title: "Tesseract — Universal components for differentiable scientific computing"
 og:description: "Optimize, calibrate, and train through solvers in any language or framework. Tesseract wraps any software behind a typed interface with derivative endpoints, runs it in its own process, and hands it to jax.grad or torch.autograd as a single differentiable operation. Open source."
+og:image: _static/social-card.png
+og:image:alt: Tesseract logo
+og:image:width: "1200"
+og:image:height: "630"
+myst:
+  html_meta:
+    twitter:card: summary_large_image
 ---
 
 # Tesseract

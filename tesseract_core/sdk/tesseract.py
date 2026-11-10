@@ -966,8 +966,9 @@ class Tesseract:
 
         Args:
             inputs: a dictionary with the inputs.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1013,8 +1014,9 @@ class Tesseract:
             inputs: a dictionary with the inputs.
             jac_inputs: Inputs with respect to which derivatives will be calculated.
             jac_outputs: Outputs which will be differentiated.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1047,8 +1049,9 @@ class Tesseract:
             jvp_inputs: Inputs with respect to which derivatives will be calculated.
             jvp_outputs: Outputs which will be differentiated.
             tangent_vector: Element of the tangent space to multiply with the Jacobian.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1088,8 +1091,9 @@ class Tesseract:
             vjp_inputs: Inputs with respect to which derivatives will be calculated.
             vjp_outputs: Outputs which will be differentiated.
             cotangent_vector: Element of the cotangent space to multiply with the Jacobian.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -2039,10 +2043,10 @@ class HTTPClient:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
                 data = from_json(response.content)
-            except requests.JSONDecodeError:
+            except ValueError:
                 # Is not a Pydantic error
                 data = {}
-            if "detail" in data:
+            if isinstance(data, dict) and isinstance(data.get("detail"), list):
                 errors = []
                 for e in data["detail"]:
                     error = InitErrorDetails(
@@ -2118,8 +2122,9 @@ class HTTPClient:
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
             stream_logs: If True, stream logs to stdout. If a callable, stream
                     logs to that callable.
             encoding: The encoding to request. None, or a field left as None,
@@ -2233,7 +2238,7 @@ class LocalClient:
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
-            run_id: a string to identify the run.
+            run_id: a string to identify the run, made of letters, digits, '-' and '_'.
             stream_logs: If True, stream logs to stdout. If a callable, stream logs to that callable.
             encoding: Ignored, since arrays are passed in memory. Accepted so
                 both clients can be called the same way.
@@ -2250,7 +2255,7 @@ class LocalClient:
             override_config,
             snapshot_config,
         )
-        from tesseract_core.runtime.file_interactions import join_paths
+        from tesseract_core.runtime.file_interactions import check_run_id, join_paths
         from tesseract_core.runtime.mpa import start_run
         from tesseract_core.runtime.profiler import Profiler
 
@@ -2258,14 +2263,10 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        if InputSchema is not None:
-            parsed_payload = InputSchema.model_validate(payload)
-        else:
-            parsed_payload = None
-
         # Set up run directory for logging
         if run_id is None:
             run_id = str(uuid.uuid4())
+        check_run_id(run_id)
         rundir = join_paths(str(self._output_path), f"run_{run_id}")
 
         # Determine log sink from stream_logs parameter
@@ -2281,10 +2282,17 @@ class LocalClient:
             )
 
         # Run under this instance's own config rather than whatever the global
-        # happens to be. Any update_config() the endpoint makes is captured back
-        # into the snapshot afterwards, so it persists to later calls (matching
-        # the containerized case).
+        # happens to be. This includes schema validation, which resolves
+        # InputPath / OutputPath against the configured input / output paths.
+        # Any update_config() the endpoint makes is captured back into the
+        # snapshot afterwards, so it persists to later calls (matching the
+        # containerized case).
         with override_config(self._config_snapshot):
+            if InputSchema is not None:
+                parsed_payload = InputSchema.model_validate(payload)
+            else:
+                parsed_payload = None
+
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
 
@@ -2309,11 +2317,13 @@ class LocalClient:
             finally:
                 self._config_snapshot = snapshot_config()
 
-        if OutputSchema is not None:
-            # Validate via schema, then dump to stay consistent with other clients
-            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
-                result = OutputSchema.model_validate(result).model_dump()
-            else:
-                result = TypeAdapter(OutputSchema).validate_python(result)
+            if OutputSchema is not None:
+                # Validate via schema, then dump to stay consistent with other clients
+                if isinstance(OutputSchema, type) and issubclass(
+                    OutputSchema, BaseModel
+                ):
+                    result = OutputSchema.model_validate(result).model_dump()
+                else:
+                    result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result

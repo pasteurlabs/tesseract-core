@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .config import config_overrides_as_env, get_config
 from .core import create_endpoints
+from .cuda.api import validate_gpu_transport_config
 from .cuda.serving import (
     EXPORTS_DONE_HEADER,
     ResponseExports,
@@ -25,6 +26,7 @@ from .file_interactions import (
     available_compressions,
     available_formats,
     available_gpu_transports,
+    check_run_id,
     join_paths,
     output_to_bytes,
 )
@@ -201,6 +203,10 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
             if run_id is None:
                 run_id = str(uuid.uuid4())
+            try:
+                check_run_id(run_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             output_path = config.output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
@@ -305,6 +311,9 @@ def serve(host: str, port: int, num_workers: int) -> None:
             f"gpu_transport={gpu_transport!r} cannot be served by more than one "
             f"worker (got num_workers={num_workers})."
         )
+    # Fail fast if the configured GPU transport cannot be served, rather than
+    # only telling the first client.
+    validate_gpu_transport_config()
     os.environ.update(config_overrides_as_env())
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",

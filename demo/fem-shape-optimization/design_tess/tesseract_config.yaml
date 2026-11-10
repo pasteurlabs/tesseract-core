@@ -8,4 +8,8 @@ description: |
   Has a VJP endpoint defined that uses finite differences under the hood.
 
 build_config:
+  requirements:
+    provider: uv-pip
+    python_version: "3.14"
+
   target_platform: "linux/x86_64"
