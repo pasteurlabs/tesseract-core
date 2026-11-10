@@ -139,7 +139,7 @@ def test_concurrent_runs_do_not_clobber_stdio(tmp_path):
 
 
 def test_output_printed_while_the_log_sink_runs_goes_to_the_log(tmp_path):
-    """The log sink may print without feeding the log, but others' output stays in it."""
+    """Output printed while the log sink runs goes to the log, but the sink's own prints don't."""
     lines = 200
     received = []
 
