@@ -7,3 +7,6 @@
 # the CUDA IPC export.
 --extra-index-url https://download.pytorch.org/whl/cu126
 torch
+# NIXL for the nixl GPU transport tests. Its wheel depends on torch, which
+# the line above already satisfies with a build of the same CUDA major.
+nixl-cu12
