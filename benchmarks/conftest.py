@@ -36,6 +36,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "docker: requires Docker")
+    config.addinivalue_line("markers", "slow: skipped in CI benchmark runs")
 
 
 @pytest.fixture(autouse=True)

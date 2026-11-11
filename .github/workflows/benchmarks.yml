@@ -2,6 +2,7 @@ name: Benchmarks
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
   push:
     branches:
@@ -15,91 +16,52 @@ permissions:
   contents: read
 
 jobs:
-  # Benchmarks a PR if it changes a file whose code runs inside a timed
-  # benchmark, or if it has the `ci:benchmark` or `ci:full` label. To benchmark
-  # any other PR, add a label and re-run the workflow. Labels and paths are
-  # checked here at run time because a re-run reuses the original event payload
-  # and a `paths:` filter would keep it from starting. A `labeled` trigger would
-  # let any new label cancel a running benchmark through the concurrency group.
-  gate:
+  # Benchmarks a PR if it changes a file under tesseract_core/ or benchmarks/,
+  # or if it has the `ci:benchmark` or `ci:full` label. Paths are checked here
+  # instead of with a `paths:` filter, which would also keep a label from
+  # triggering the workflow on a PR that changes none of them.
+  check-trigger:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
     outputs:
-      run: ${{ steps.decide.outputs.run }}
+      run: ${{ steps.check.outputs.run }}
 
     steps:
-      - name: Decide whether to benchmark
-        id: decide
+      - name: Check labels and changed files
+        id: check
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:benchmark') || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
+          if [ "$IS_PR" != "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          labels=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')
-          if grep -qxE 'ci:benchmark|ci:full' <<< "$labels"; then
+          if [ "$HAS_LABEL" = "true" ]; then
             echo "::notice::The PR has the ci:benchmark or ci:full label"
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Files whose code runs inside a timed benchmark: array encoding,
-          # schema validation, the in-process, subprocess and HTTP clients, the
-          # HTTP server and its per-request wrappers, the shared-memory binref
-          # paths, and what goes into the benchmarked container image and
-          # environment. `*` also matches across `/`.
-          patterns=(
-            ".github/workflows/benchmarks.yml"
-            "benchmarks/*"
-            "production.uv.lock"
-            "tesseract_core/runtime/app_http.py"
-            "tesseract_core/runtime/array_encoding.py"
-            "tesseract_core/runtime/config.py"
-            "tesseract_core/runtime/core.py"
-            "tesseract_core/runtime/experimental/binref_passthrough.py"
-            "tesseract_core/runtime/file_interactions.py"
-            "tesseract_core/runtime/logs.py"
-            "tesseract_core/runtime/meta/*"
-            "tesseract_core/runtime/mpa.py"
-            "tesseract_core/runtime/profiler.py"
-            "tesseract_core/runtime/schema_types.py"
-            "tesseract_core/runtime/serve.py"
-            "tesseract_core/runtime/tree_transforms.py"
-            "tesseract_core/sdk/binref.py"
-            "tesseract_core/sdk/local_client.py"
-            "tesseract_core/sdk/serving.py"
-            "tesseract_core/sdk/tesseract.py"
-            "tesseract_core/sdk/templates/Dockerfile.base"
-            "tesseract_core/sdk/templates/build_pip_venv.sh"
-            "tesseract_core/sdk/templates/entrypoint.sh"
-          )
-
           files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')
-          while IFS= read -r file; do
-            for pattern in "${patterns[@]}"; do
-              # shellcheck disable=SC2053  # unquoted on purpose, to glob-match
-              if [[ $file == $pattern ]]; then
-                echo "::notice::$file changed, running benchmarks"
-                echo "run=true" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-            done
-          done <<< "$files"
+          if grep -qE '^(tesseract_core/|benchmarks/|\.github/workflows/benchmarks\.yml$)' <<< "$files"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-          echo "::notice::No benchmarked files changed. To benchmark anyway, add the ci:benchmark label and re-run this workflow."
+          echo "::notice::No benchmarked files changed. To benchmark anyway, add the ci:benchmark label."
           echo "run=false" >> "$GITHUB_OUTPUT"
 
   benchmark:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
+    needs: check-trigger
+    if: needs.check-trigger.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -152,16 +114,12 @@ jobs:
       # Each side runs $PASSES times, each pass in a fresh process, in the order
       # B C C B B C so that drift over the job affects both sides alike.
       # compare_benchmarks.py explains how the passes are compared.
-      #
-      # The CLI benchmark is skipped. Every call starts a container, so it
-      # mostly times Docker, and its rounds take seconds each. It stays in the
-      # suite for the plots in the docs.
       - name: Run benchmarks
         id: run
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          args=(-k "not containerized_cli")
+          args=(-m "not slow")
           has_baseline=$([ "$EVENT_NAME" = "pull_request" ] && echo true || echo false)
 
           for i in $(seq "$PASSES"); do
