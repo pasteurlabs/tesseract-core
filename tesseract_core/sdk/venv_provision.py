@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE
 from .api_parse import ValidationError, get_config
@@ -212,6 +213,31 @@ def _local_directories(requirements_file: Path) -> list[str]:
     return specs
 
 
+def _interpreter_version(python_executable: Path) -> Version:
+    """The full version of a Python interpreter, e.g. 3.11.13."""
+    # -I and -S keep environment variables, the user site and .pth files from
+    # running anything that could print to stdout; platform needs neither.
+    result = subprocess.run(
+        [
+            str(python_executable),
+            "-I",
+            "-S",
+            "-c",
+            "import platform; print(platform.python_version())",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        return Version(result.stdout.strip())
+    except InvalidVersion:
+        output = (result.stderr or result.stdout).strip()
+        raise RuntimeError(
+            f"Could not determine the version of {python_executable}:\n{output}"
+        ) from None
+
+
 def _check_lockfile_python(lockfile: Path, python_executable: Path) -> None:
     """Raise if a PEP 751 lockfile's ``requires-python`` excludes the interpreter.
 
@@ -237,16 +263,7 @@ def _check_lockfile_python(lockfile: Path, python_executable: Path) -> None:
             f"{lockfile.name} has an invalid requires-python: {declared!r}"
         ) from e
 
-    version = subprocess.run(
-        [
-            str(python_executable),
-            "-c",
-            "import platform; print(platform.python_version())",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    version = _interpreter_version(python_executable)
     if not allowed.contains(version, prereleases=True):
         # Worded like uv's own error, which a container build reports.
         raise UserError(
@@ -261,9 +278,8 @@ def _build_python_version(build_config: Any) -> str | None:
     """The Python to build a uv-pip environment on, as a `uv venv --python` request.
 
     Whatever a container build would use: the declared ``python_version``, else
-    the default base image's Python. As in a container build, a lockfile's
-    ``requires-python`` does not change it; see :func:`_check_lockfile_python`.
-    None (for ``inherit_base_image_packages``) leaves the choice to uv.
+    the default base image's Python. None (for ``inherit_base_image_packages``)
+    leaves the choice to uv.
     """
     declared = build_config.effective_python_version
     if declared is not None:

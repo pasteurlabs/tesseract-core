@@ -1188,6 +1188,15 @@ def test_a_broken_lockfile_is_reported(tmp_path, content):
         )
 
 
+def test_an_unreadable_interpreter_version_is_reported(monkeypatch):
+    """Output that is not a version fails clearly instead of being compared."""
+    noisy = subprocess.CompletedProcess([], 0, stdout="hello from a .pth\n3.11.13\n")
+    monkeypatch.setattr(venv_provision.subprocess, "run", lambda *a, **k: noisy)
+
+    with pytest.raises(RuntimeError, match="Could not determine the version"):
+        venv_provision._interpreter_version(Path(sys.executable))
+
+
 def test_a_lockfile_excluding_the_default_python_fails(dummy_tesseract_package):
     """from_source refuses a conflicting lockfile instead of building on 3.11 anyway.
 
