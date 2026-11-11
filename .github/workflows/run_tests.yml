@@ -119,15 +119,13 @@ jobs:
             --timeout=300
 
   # Runs this SDK against older runtimes and older SDKs against this runtime,
-  # each served from its own environment (no Docker needed), for the oldest
-  # supported release and the latest one.
-  # NOTE: The oldest supported version is raised by hand, only for a change that
-  # cannot keep it working. If raising it here, also do it in
-  # docs/content/reference/version-compatibility.md.
+  # each served from its own environment (no Docker needed). "oldest" is
+  # tesseract_core.__oldest_supported_version__, "latest" the newest
+  # tesseract-core release on PyPI.
   tests-compat:
     strategy:
       matrix:
-        compat-version: ["1.13.0", "latest"]
+        compat-version: ["oldest", "latest"]
 
       fail-fast: false
 
@@ -157,7 +155,9 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         run: |
           compat_version="${{ matrix.compat-version }}"
-          if [ "$compat_version" == "latest" ]; then
+          if [ "$compat_version" == "oldest" ]; then
+            compat_version=$(uv run --no-sync python -c "import tesseract_core; print(tesseract_core.__oldest_supported_version__)")
+          elif [ "$compat_version" == "latest" ]; then
             compat_version=$(curl -fsSL https://pypi.org/pypi/tesseract-core/json | jq -r .info.version)
           fi
           uv run --no-sync pytest \

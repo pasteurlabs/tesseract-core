@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Test this SDK and runtime against released ones.
 
-See docs/content/reference/version-compatibility.md for the policy this checks.
+The oldest supported version is ``tesseract_core.__oldest_supported_version__``.
 
 Skipped unless versions are given, e.g. ``pytest tests/compat_tests
 --compat-version 1.13.0``. Each test runs in one direction: this SDK against an
