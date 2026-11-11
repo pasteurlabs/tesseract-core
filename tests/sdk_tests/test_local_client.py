@@ -27,7 +27,7 @@ from tesseract_core.sdk import local_client, serving, venv_provision
 from tesseract_core.sdk.api_parse import TesseractBuildConfig
 from tesseract_core.sdk.exceptions import UserError
 from tesseract_core.sdk.tesseract import RequestedEncoding
-from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
+from tesseract_core.sdk.venv_provision import DEFAULT_PYTHON
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -1096,12 +1096,12 @@ def test_a_removed_interpreter_is_not_trusted(example_copy):
 
 
 def test_default_python_tracks_the_default_base_image():
-    """Changing the default base image means updating DEFAULT_BASE_IMAGE_PYTHON."""
+    """Changing the default base image means updating DEFAULT_PYTHON."""
     assert (
         TesseractBuildConfig.model_fields["base_image"].default
         == "debian:bookworm-slim"
-    ), "update DEFAULT_BASE_IMAGE_PYTHON to the new base image's Python"
-    assert DEFAULT_BASE_IMAGE_PYTHON == "3.11"
+    ), "update DEFAULT_PYTHON to the new base image's Python"
+    assert DEFAULT_PYTHON == "3.11"
 
 
 def test_undeclared_python_matches_the_build(example_copy):
@@ -1114,10 +1114,7 @@ def test_undeclared_python_matches_the_build(example_copy):
     for name in ("univariate", "localpackage"):
         api_path = example_copy(name)
         build_config, _ = venv_provision._declared_requirements(api_path)
-        assert (
-            venv_provision._build_python_version(build_config)
-            == DEFAULT_BASE_IMAGE_PYTHON
-        )
+        assert venv_provision._build_python_version(build_config) == DEFAULT_PYTHON
 
 
 @pytest.mark.parametrize(
@@ -1146,9 +1143,7 @@ def test_a_lockfile_python_range_is_not_used(dummy_tesseract_package, lockfile):
         dummy_tesseract_package / "tesseract_api.py"
     )
 
-    assert venv_provision._build_python_version(build_config) == (
-        DEFAULT_BASE_IMAGE_PYTHON
-    )
+    assert venv_provision._build_python_version(build_config) == (DEFAULT_PYTHON)
 
 
 @pytest.mark.parametrize(
@@ -1628,5 +1623,5 @@ def test_building_on_the_default_python_warns_it_will_change(
     assert bool(warned) is warns
     if warns:
         message = warned[0].getMessage()
-        assert f"Python {DEFAULT_BASE_IMAGE_PYTHON}" in message
+        assert f"Python {DEFAULT_PYTHON}" in message
         assert "`python_version` field" in message

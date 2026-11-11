@@ -26,7 +26,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE
-from .api_parse import ValidationError, get_config
+from .api_parse import DEFAULT_PYTHON, ValidationError, get_config
 from .config import get_config as get_sdk_config
 from .engine import (
     _split_local_dependency,
@@ -47,11 +47,6 @@ SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 # PIP_* settings (index urls etc.) are honoured.
 _SCRUBBED_INSTALL_VARS = ("PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_USER")
 
-
-# The Python in the default `build_config.base_image`, which `tesseract build`
-# uses when no python_version is set. debian:bookworm-slim is Debian 12, which
-# ships 3.11 for its whole lifetime; a test fails if the default image changes.
-DEFAULT_BASE_IMAGE_PYTHON = "3.11"
 
 # Deliberately not `.venv`: that one is the user's, and we neither read nor write it.
 _MANAGED_VENV_NAME = ".tesseract-venv"
@@ -286,7 +281,7 @@ def _build_python_version(build_config: Any) -> str | None:
         return declared
     if build_config.inherit_base_image_packages:
         return None
-    return DEFAULT_BASE_IMAGE_PYTHON
+    return DEFAULT_PYTHON
 
 
 def _warn_about_default_python() -> None:
@@ -299,7 +294,7 @@ def _warn_about_default_python() -> None:
     """
     logger.warning(
         f"build_config.requirements.python_version is not set, so this environment "
-        f"is built on Python {DEFAULT_BASE_IMAGE_PYTHON}, the Python of the default "
+        f"is built on Python {DEFAULT_PYTHON}, the Python of the default "
         f"base image. That will change to Python 3.13 in the first minor release "
         f"after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To pin, set it with "
         f"the `python_version` field in tesseract_config.yaml."
@@ -362,7 +357,7 @@ def _build_pip_venv(
     python_version = _build_python_version(build_config)
     if (
         build_config.effective_python_version is None
-        and python_version == DEFAULT_BASE_IMAGE_PYTHON
+        and python_version == DEFAULT_PYTHON
     ):
         _warn_about_default_python()
     python_executable = _create_venv(
