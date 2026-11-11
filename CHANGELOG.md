@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.15.1] - 2026-11-06
+## [1.16.0] - 2026-11-11
+
+### Features
+
+- *(runtime)* Expose an array field's declared dtype in its schema (#898)
+- *(sdk)* Warn that the default base image will change (#905)
+- Added gpu-transport CLI parameter (#927)
+- Add check_gradients endpoint and Tesseract.check_gradients (#912)
+- Add an experimental nixl GPU transport that keeps GPU arrays on the device across hosts (#723)
+- *(sdk)* Pin Python 3.11 for container builds on the default base image (#908)
 
 ### Bug Fixes
 
@@ -30,6 +39,16 @@ All notable changes to this project will be documented in this file.
 - Use a valid dtype in the univariate examples' abstract_eval (#897)
 - *(sdk)* Include the end port of a --port range (#892)
 - Show a clean error when tesseract init would overwrite files (#896)
+- *(sdk)* Create missing parents of --build-dir (#895)
+- *(runtime)* Add https:// to a host:port MLflow URI (#893)
+- *(sdk)* Reject a trailing newline in host credentials (#894)
+- *(sdk)* Keep the environment marker of a local requirement in tesseract build (#918)
+- *(sdk)* Accept a null cli_config in a test spec for tesseract run test (#919)
+- *(runtime)* Keep NamedTuples and reject other output containers in the JAX VJP cache (#886)
+- *(runtime)* Only advertise GPU transports the runtime can use (#882)
+- *(sdk)* Stage an editable local requirement (-e ./pkg) in tesseract build (#916)
+- *(runtime)* [**breaking**] Accept only letters, digits, '-' and '_' in a run_id (#915)
+- *(sdk)* Don't let a lockfile's requires-python change from_source's Python (#931)
 
 ### Documentation
 
