@@ -10,7 +10,7 @@ import os
 import signal
 import sys
 import threading
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
@@ -49,7 +49,8 @@ from tesseract_core.runtime.profiler import Profiler
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
 from tesseract_core.runtime.testing.finite_differences import (
-    check_gradients as check_gradients_,
+    CheckGradientsSpec,
+    run_gradient_check,
 )
 
 # typer >= 0.26 vendors its own click (and drops the click dependency), so the
@@ -133,35 +134,8 @@ def _parse_payload(value: Any) -> dict[str, Any]:
     return from_json(value)
 
 
-class _EpsMap(Mapping):
-    """Per-input eps mapping that falls back to a global default.
-
-    Explicit overrides are returned for their paths; every other path
-    resolves to ``default``. Iteration yields only the explicit override
-    paths so that unknown-path validation can still catch typos, while
-    ``__contains__`` reports every path as present so no path is ever
-    treated as missing.
-    """
-
-    def __init__(self, overrides: Mapping[str, float], default: float) -> None:
-        self._overrides = dict(overrides)
-        self._default = default
-
-    def __getitem__(self, path: str) -> float:
-        return self._overrides.get(path, self._default)
-
-    def __contains__(self, path: object) -> bool:
-        return True
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._overrides)
-
-    def __len__(self) -> int:
-        return len(self._overrides)
-
-
-def _parse_eps_for(values: list[str], default: float) -> _EpsMap:
-    """Parse ``--eps-for PATH=VALUE`` options into a per-input eps mapping."""
+def _parse_eps_for(values: list[str]) -> dict[str, float]:
+    """Parse ``--eps-for PATH=VALUE`` options into per-input step sizes."""
     overrides: dict[str, float] = {}
     for item in values:
         path, sep, raw = item.partition("=")
@@ -175,7 +149,7 @@ def _parse_eps_for(values: list[str], default: float) -> _EpsMap:
             raise BadParameter(
                 f"Invalid --eps-for step size for {path!r}: {raw!r} is not a number."
             ) from e
-    return _EpsMap(overrides, default)
+    return overrides
 
 
 def make_callback() -> Callable:
@@ -474,52 +448,28 @@ def check_gradients(
     api_module = get_tesseract_api()
     inputs = _parse_payload(payload)
 
-    eps_arg: float | Mapping[str, float] = eps
-    if eps_for:
-        eps_arg = _parse_eps_for(eps_for, default=eps)
-
-    result_iter = check_gradients_(
-        api_module,
-        inputs,
-        base_dir=Path(config.input_path) if config.input_path else None,
+    spec = CheckGradientsSpec(
+        payload=inputs,
         input_paths=input_paths,
         output_paths=output_paths,
         endpoints=endpoints,
+        eps=eps,
+        eps_for=_parse_eps_for(eps_for) if eps_for else None,
+        rtol=rtol,
         max_evals=max_evals,
         max_output_samples=max_output_samples,
-        eps=eps_arg,
-        rtol=rtol,
+        max_failures=max_failures,
         seed=seed,
+    )
+    result = run_gradient_check(
+        api_module,
+        spec,
+        base_dir=Path(config.input_path) if config.input_path else None,
         show_progress=show_progress,
     )
 
-    failed = False
-    for endpoint, failures, num_evals in result_iter:
-        if not failures:
-            typer.echo(
-                f"✅ Gradient check for {endpoint} passed ✅ ({len(failures)} failures / {num_evals} checks)"
-            )
-        else:
-            failed = True
-            typer.echo()
-            typer.echo(
-                f"⚠️ Gradient check for {endpoint} failed ⚠️ ({len(failures)} failures / {num_evals} checks)"
-            )
-            printed_failures = min(len(failures), max_failures)
-            typer.echo(f"First {printed_failures} failures:")
-            for failure in failures[:printed_failures]:
-                typer.echo(
-                    f"  Input path: '{failure.in_path}', Output path: '{failure.out_path}', Index: {failure.idx}"
-                )
-                if failure.exception:
-                    typer.echo(f"  Encountered exception: {failure.exception}")
-                else:
-                    typer.echo(f"  {endpoint} value: {failure.grad_val}")
-                    typer.echo(f"  Finite difference value: {failure.ref_val}")
-                typer.echo()
-
-    if failed:
-        typer.echo("❌ Some gradient checks failed ❌")
+    typer.echo(result.message)
+    if result.status == "failed":
         sys.exit(1)
 
 
@@ -701,6 +651,9 @@ def _add_user_commands_to_cli(app: typer.Typer, out_stream: io.IOBase | None) ->
     endpoints.append(openapi_schema)
 
     for func in endpoints:
+        # Has a hand-written command with friendlier options (see check_gradients above)
+        if func.__name__ == "check_gradients":
+            continue
         _create_user_defined_cli_command(app, func, out_stream)
 
 

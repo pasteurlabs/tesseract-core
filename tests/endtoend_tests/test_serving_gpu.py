@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""End-to-end GPU tests for serving Tesseracts with the CUDA IPC output format.
+"""End-to-end GPU tests for serving Tesseracts with the GPU transports.
 
 Unlike ``tests/test_cuda_ipc.py`` (which drives the encode/decode functions
 in-process), these tests build a real GPU Tesseract image, serve it in a
@@ -9,6 +9,11 @@ container with ``--gpus all`` and ``--ipc=host``, and round-trip device memory
 across the process/container boundary via a genuine ``cudaIpcMemHandle_t``. One
 image is built per GPU array framework (CuPy, JAX, PyTorch) so the export path
 is covered against the device arrays each framework returns.
+
+The ``nixl`` transport is tested against the PyTorch image only, the one whose
+requirements include NIXL. NIXL's wheel depends on torch, which the other
+images would have to pull in from PyPI in a build that may not match their
+CUDA major. The host also needs NIXL for these tests.
 
 Requires a physical CUDA GPU and Docker with the NVIDIA container runtime. CuPy
 is used only as a convenient GPU-availability probe on the host; the decoded
@@ -40,6 +45,19 @@ except Exception:  # noqa: BLE001 -- CuPy/CUDA probe; failure modes vary by host
 
 requires_cuda = pytest.mark.skipif(
     not _CUDA_AVAILABLE, reason="CUDA + CuPy not available on host"
+)
+
+try:
+    from tesseract_core.runtime.cuda.nixl import _import_nixl_api
+
+    _import_nixl_api()
+    _NIXL_ERROR = None
+except Exception as exc:  # noqa: BLE001 -- capability probe; failure modes vary by host
+    _NIXL_ERROR = f"{type(exc).__name__}: {exc}"
+
+requires_nixl = pytest.mark.skipif(
+    not _CUDA_AVAILABLE or _NIXL_ERROR is not None,
+    reason=f"CUDA + CuPy + NIXL not available on host ({_NIXL_ERROR})",
 )
 
 
@@ -84,12 +102,12 @@ def gpu_image_name(
     return image_tag
 
 
-def _forbid_host_copy_env() -> dict[str, str]:
-    """Container env that makes implicit device-to-host copies raise.
-
-    Returns a fresh dict because serving mutates the ``environment`` it is given.
-    """
-    return {"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"}
+@pytest.fixture
+def nixl_image_name(request, gpu_image_name):
+    """The GPU example image whose requirements include NIXL."""
+    if request.node.callspec.params["gpu_image_name"] != "_gpu_torch":
+        pytest.skip("only the _gpu_torch example installs NIXL")
+    return gpu_image_name
 
 
 @contextmanager
@@ -100,17 +118,17 @@ def _serve_cuda_ipc(image_name: str):
         gpus=["all"],
         output_format="json+base64",
         runtime_config={"gpu_transport": "cuda_ipc"},
-        environment=_forbid_host_copy_env(),
+        environment={"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"},
     ) as t:
         yield t
 
 
 def _assert_device_result(got, expected: np.ndarray) -> None:
-    """Assert a cuda_ipc result is a float32 device array holding ``expected``."""
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+    """Assert a GPU transport's result is a float32 device array holding ``expected``."""
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
 
-    assert isinstance(got, IpcDeviceArray), (
-        f"expected a device array from cuda_ipc, got {type(got)}"
+    assert isinstance(got, DeviceArray), (
+        f"expected a device array from the GPU transport, got {type(got)}"
     )
     assert got.dtype == np.float32
     np.testing.assert_allclose(got.copy_to_host(), expected, rtol=1e-5, atol=1e-5)
@@ -247,3 +265,30 @@ def test_serve_fails_when_the_configured_transport_is_unusable(gpu_image_name):
         ),
     ):
         pass
+
+
+@requires_nixl
+def test_serve_nixl_roundtrip(nixl_image_name):
+    """GPU arrays cross into and out of a served Tesseract over nixl.
+
+    The inputs are CuPy arrays, so the container reads them over NIXL too, with
+    host copies forbidden on its side. The larger array is big enough for nixl
+    to split its reads into parallel ones. Both this client and a plain
+    ``from_url`` one, which requests no transport, resolve to nixl.
+    """
+    import cupy
+
+    with Tesseract.from_image(
+        nixl_image_name,
+        gpus=["all"],
+        gpu_transport="nixl",
+        environment={"TESSERACT_FORBID_DEVICE_HOST_COPY": "1"},
+    ) as t:
+        assert t.resolve_gpu_transport() == "nixl"
+        assert Tesseract.from_url(t._client.url).resolve_gpu_transport() == "nixl"
+
+        for n in (4, 5_000_000):
+            a = cupy.arange(n, dtype=cupy.float32)
+            b = cupy.ones(n, dtype=cupy.float32)
+            result = t.apply({"a": a, "b": b, "s": 3.0})
+            _assert_device_result(result["result"], 3.0 * cupy.asnumpy(a) + 1.0)

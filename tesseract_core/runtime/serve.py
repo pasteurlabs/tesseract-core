@@ -274,8 +274,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
 
-        # Skip test endpoint unless in debug mode
-        if endpoint_name == "test" and not config.debug:
+        # Skip testing endpoints unless in debug mode
+        if endpoint_name in ("test", "check_gradients") and not config.debug:
             continue
 
         wrapped_endpoint = wrap_endpoint(endpoint_func)
