@@ -76,7 +76,7 @@ _CONCURRENT_FIRST_CALLS_CODE = textwrap.dedent(
     assert "tesseract_core.runtime" not in sys.modules
     first_calls = [
         lambda: sdk._get_device_transport("cuda_ipc"),
-        sdk._import_cuda_ipc,
+        sdk._import_cuda_arrays,
         lambda: sdk._import_runtime("cuda.check", "The 'cuda_ipc' GPU transport"),
     ]
     barrier = threading.Barrier(4 * len(first_calls))
