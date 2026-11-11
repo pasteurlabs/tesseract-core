@@ -36,6 +36,23 @@ $ tesseract run my-tesseract check-gradients '{"inputs": {"x": [1.0, 2.0, 3.0]}}
 
 The command exits with a non-zero status if any check fails, so either form can run as a CI step.
 
+(check-gradients-python)=
+
+## Check from Python
+
+`Tesseract.check_gradients` runs the same check and raises an `AssertionError` with the report if any gradient disagrees, so it fits straight into a pytest test:
+
+```python
+from tesseract_core import Tesseract
+
+
+def test_gradients():
+    with Tesseract.from_source("path/to/tesseract_api.py") as t:
+        t.check_gradients({"x": [1.0, 2.0, 3.0]}, eps=1e-3, seed=0)
+```
+
+It takes the options described below as keyword arguments, with `eps_for` as a dict such as `eps_for={"pressure": 1e2}`. The check runs inside the Tesseract's own process, as an endpoint which is only served in [debug mode](debug-mode).
+
 ## What it compares
 
 For each sampled element of each differentiable input, the check perturbs that element by `±eps`, calls `apply` on both sides, and takes the central difference. That gives one column of the Jacobian, the sensitivity of every differentiable output to that input element. The same column is then computed from the endpoint under test:
@@ -62,6 +79,7 @@ First 2 failures:
   Finite difference value: [0.        3.9982796 0.       ]
 
 ❌ Some gradient checks failed ❌
+To sample the same indices again, rerun with seed 3735928559.
 ```
 
 Each failure names the input path, the output path, and the input index that was perturbed. Both arrays hold the sensitivity of every output element to that input element. A constant ratio between them, 1.5 in this case, usually points to a missing or extra factor. A sign flip points to a negated term, and agreement in some columns but not others points to a coupling or indexing mistake.
@@ -91,11 +109,11 @@ A useful habit is to rerun a failing check with the step ten times larger and te
 
 - `--input-paths` and `--output-paths` restrict the check to some differentiable fields, which helps when `apply` is expensive or when you are working on one output.
 - `--endpoints` checks only the endpoints you name, for example `--endpoints vector_jacobian_product`.
-- `--seed` makes the sampled indices reproducible, so a failure can be rerun exactly.
+- `--seed` makes the sampled indices reproducible. Without it, a random seed is drawn and printed when a check fails, so a failure can still be rerun exactly.
 - `--max-failures` (default `10`) controls how many failures are printed per endpoint.
 
 ## Limitations
 
 - Finite differences are approximations, so a pass is evidence that the gradient is right and not proof. Functions with kinks, branches, or discontinuities near the checked point can fail even when the endpoint returns the correct one-sided or subgradient.
-- The check runs in the Tesseract's own process and environment. It cannot yet be pointed at a Tesseract that someone else serves over HTTP.
+- The check runs in the Tesseract's own process and environment, so a Tesseract served over HTTP can only be checked if it runs in debug mode.
 - `apply` is called twice per sampled input element, for each differentiable output and each endpoint checked. For an expensive solver, start with a small `--max-evals` and a few targeted `--input-paths`.

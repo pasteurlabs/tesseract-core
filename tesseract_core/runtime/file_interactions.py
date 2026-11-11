@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -32,7 +33,7 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
-gpu_transport_type = Literal["none", "cuda_ipc"]
+gpu_transport_type = Literal["none", "cuda_ipc", "nixl"]
 
 # Compressions for array buffers. Disabled compression is ``None`` in the config
 # and in array payloads, and ``"none"`` in an Accept header.
@@ -183,6 +184,20 @@ def get_filesize(path: PathLike) -> int:
             return f.tell()
     except FileNotFoundError:
         return 0
+
+
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def check_run_id(run_id: str) -> None:
+    """Raise a ValueError unless the run ID uses only letters, digits, '-' and '_'.
+
+    The run ID names a directory in the output path, so nothing else is allowed.
+    """
+    if not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError(
+            f"Invalid run_id {run_id!r}: use only letters, digits, '-' and '_'."
+        )
 
 
 def join_paths(base: PathLike, other: PathLike) -> str:

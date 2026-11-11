@@ -25,7 +25,9 @@ from packaging.requirements import Requirement
 from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
+from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE, NEXT_DEFAULT_BASE_IMAGE
 from .api_parse import (
+    TesseractBuildConfig,
     TesseractConfig,
     get_config,
     validate_tesseract_api,
@@ -154,7 +156,11 @@ def parse_requirements(
             # sure to keep it.
             remote_dependencies.append(line)
         elif _is_local_dependency(parsed_line.requirement):
-            local_dependencies.append(line)
+            # An editable install would point into the build stage, which the
+            # image does not keep, so the package is installed as a copy.
+            local_dependencies.append(
+                parsed_line.requirement if parsed_line.is_editable else line
+            )
         else:
             remote_dependencies.append(line)
     return local_dependencies, remote_dependencies
@@ -284,6 +290,17 @@ def _split_local_dependency(line: str) -> tuple[str, str]:
     return path, match.group("extras") or ""
 
 
+def _split_marker(line: str) -> tuple[str, str]:
+    """Split a requirement line into its spec and environment marker.
+
+    Mirrors pip, which needs whitespace before the ``;`` only after a URL.
+    """
+    line = line.strip()
+    separator = "; " if line.startswith("file://") else ";"
+    spec, _, marker = line.partition(separator)
+    return spec.strip(), marker.strip()
+
+
 def _stage_local_dependency(
     line: str, src_dir: Path, local_requirements_path: Path
 ) -> str:
@@ -292,8 +309,9 @@ def _stage_local_dependency(
     The source path is resolved relative to ``src_dir`` (so ``.``/``..`` segments
     are collapsed) to derive a valid, unique destination name under
     ``local_requirements/``. Returns the install spec relative to the build
-    working directory, with any extras suffix preserved.
+    working directory, with any extras suffix and environment marker preserved.
     """
+    line, marker = _split_marker(line)
     path, extras = _split_local_dependency(line)
     resolved_src = (src_dir / path).resolve()
 
@@ -319,7 +337,8 @@ def _stage_local_dependency(
     else:
         copytree(resolved_src, dest, ignore=_ignore_pycache)
 
-    return f"./local_requirements/{dest_name}{extras}"
+    spec = f"./local_requirements/{dest_name}{extras}"
+    return f"{spec} ; {marker}" if marker else spec
 
 
 def get_runtime_dir() -> Path:
@@ -683,6 +702,24 @@ def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) 
             ) from parsed_error
 
 
+def _warn_about_default_base_image(build_config: TesseractBuildConfig) -> None:
+    """Warn a build relying on the implicit default base image that it will change.
+
+    Scheduled in tesseract_core/_deprecations.py (DEFAULT_BASE_IMAGE_CHANGE).
+    """
+    if "base_image" in build_config.model_fields_set:
+        return
+    current = build_config.base_image
+    logger.warning(
+        f"build_config.base_image is not set, so this Tesseract builds on the "
+        f"default {current} (Debian 12, Python 3.11). The default will change to "
+        f"{NEXT_DEFAULT_BASE_IMAGE} (Debian 13, Python 3.13) in the first minor "
+        f"release after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To pin, set it with "
+        f"the `base_image` field in tesseract_config.yaml. {current} keeps the "
+        f"current image, {NEXT_DEFAULT_BASE_IMAGE} switches now."
+    )
+
+
 def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
@@ -743,6 +780,8 @@ def build_tesseract(
                 else:
                     c = getattr(c, k)
 
+    _warn_about_default_base_image(config.build_config)
+
     image_name = config.name
     if image_tag:
         tags = [f"{image_name}:{image_tag}"]
@@ -759,7 +798,7 @@ def build_tesseract(
         keep_build_dir = bool(generate_only)
     else:
         build_dir = Path(build_dir)
-        build_dir.mkdir(exist_ok=True)
+        build_dir.mkdir(parents=True, exist_ok=True)
         keep_build_dir = True
 
     # Build secrets are supplied generically on the command line and mounted into
@@ -1025,7 +1064,9 @@ def serve(
         output_format: Output format to use for the results.
         gpu_transport: GPU transport the served Tesseract accepts besides ``none``,
             which copies GPU arrays to the host. ``cuda_ipc`` passes them by
-            reference and requires ``gpus`` and a shared IPC namespace. Responses
+            reference and requires ``gpus`` and a shared IPC namespace. ``nixl``
+            passes them by reference via NIXL, also across hosts, requires
+            ``gpus``, and runs the container on the host network. Responses
             only use it for requests that ask for it. Anything but ``none`` needs
             ``num_workers=1``. An explicit value (including ``none``) wins over a
             ``gpu_transport`` in ``runtime_config``, and leaving it unset
@@ -1083,6 +1124,35 @@ def serve(
         environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
     else:
         environment.setdefault("TESSERACT_GPU_TRANSPORT", "none")
+    gpu_transport = environment["TESSERACT_GPU_TRANSPORT"]
+
+    if gpu_transport not in ("none", "cuda_ipc", "nixl"):
+        raise ValueError(
+            f"Unknown gpu_transport {gpu_transport!r}. "
+            "Supported values: 'none', 'cuda_ipc', 'nixl'."
+        )
+    if gpu_transport != "none":
+        if num_workers > 1:
+            raise ValueError(
+                f"gpu_transport={gpu_transport!r} cannot be served by more than "
+                f"one worker (got num_workers={num_workers})."
+            )
+        if not gpus:
+            raise ValueError(
+                f"gpu_transport={gpu_transport!r} requires GPU access, but no "
+                "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
+            )
+
+    # nixl's UCX agent advertises its own network address to the client, and an
+    # address inside a container's network namespace is unreachable from
+    # outside it, so the container uses the host network.
+    if gpu_transport == "nixl":
+        if network not in (None, "host"):
+            raise ValueError(
+                f"gpu_transport='nixl' requires host networking, but "
+                f"network={network!r} was requested."
+            )
+        network = "host"
 
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the
@@ -1177,28 +1247,10 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
-        if gpu_transport != "none" and num_workers > 1:
-            raise ValueError(
-                f"gpu_transport={gpu_transport!r} cannot be served by more than "
-                f"one worker (got num_workers={num_workers})."
-            )
-
-        # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
-        # between host and container. Wire both up whenever it is selected (the
-        # only reason to enable it is IPC).
-        if gpu_transport == "cuda_ipc":
-            if not gpus:
-                raise ValueError(
-                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
-                    "were requested. Pass gpus=['all'] or specific GPU IDs."
-                )
-            extra_args.extend(["--ipc=host"])
-        elif gpu_transport != "none":
-            raise ValueError(
-                f"Unknown gpu_transport {gpu_transport!r}. "
-                "Supported values: 'none', 'cuda_ipc'."
-            )
+        # The GPU transports share GPU memory with other processes on the host
+        # through the host's IPC namespace, nixl only on its same-host paths.
+        if gpu_transport != "none":
+            extra_args.append("--ipc=host")
 
         if network is not None:
             _ensure_network_exists(network)

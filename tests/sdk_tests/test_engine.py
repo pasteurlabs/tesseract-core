@@ -16,6 +16,7 @@ from jinja2.exceptions import TemplateNotFound
 
 from tesseract_core.sdk import docker_client, engine, serving
 from tesseract_core.sdk.api_parse import (
+    DEFAULT_PYTHON,
     TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
@@ -54,13 +55,54 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     dockerfile = (build_dir / "Dockerfile").read_text()
     assert 'TESSERACT_PYTHON_VERSION="3.12"' in dockerfile
 
-    # Without python_version, the env var should not appear
-    build_dir2 = tmp_path_factory.mktemp("build2")
-    config_default = TesseractConfig(name="foobar")
-    engine.prepare_build_context(src_dir, build_dir2, config_default)
 
-    dockerfile_default = (build_dir2 / "Dockerfile").read_text()
-    assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
+@pytest.mark.parametrize(
+    "build_config, expected",
+    [
+        # Neither set: the default image's Python is pinned, so it doesn't follow
+        # the default image if that changes.
+        ({}, DEFAULT_PYTHON),
+        # A custom base image keeps using its own system Python...
+        ({"base_image": "ubuntu:24.04"}, None),
+        # ...even when it names the current default explicitly.
+        ({"base_image": "debian:bookworm-slim"}, None),
+        # A declared version always wins.
+        ({"requirements": {"provider": "uv-pip", "python_version": "3.13"}}, "3.13"),
+        (
+            {
+                "base_image": "ubuntu:24.04",
+                "requirements": {"provider": "uv-pip", "python_version": "3.13"},
+            },
+            "3.13",
+        ),
+        # These need the base image's or the environment file's Python.
+        ({"inherit_base_image_packages": True}, None),
+        ({"requirements": {"provider": "conda"}}, None),
+    ],
+)
+def test_prepare_build_context_pins_python_on_the_default_image(
+    tmp_path_factory, build_config, expected
+):
+    """Which Python a container build installs, rendered as an ENV in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    (src_dir / "tesseract_environment.yaml").write_text("dependencies: []\n")
+    build_dir = tmp_path_factory.mktemp("build")
+    config = TesseractConfig(
+        name="foobar", build_config=TesseractBuildConfig.model_validate(build_config)
+    )
+    assert config.build_config.image_python_version == expected
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    # System libssl for native packages, which a uv-installed Python doesn't bring.
+    assert "openssl" in dockerfile.split("AS run_stage", 1)[1]
+    if expected is None:
+        assert "TESSERACT_PYTHON_VERSION" not in dockerfile
+    else:
+        assert f'TESSERACT_PYTHON_VERSION="{expected}"' in dockerfile
+        # No system Python is installed alongside the pinned one.
+        assert "python3-venv" not in dockerfile
 
 
 def test_prepare_build_context_build_env(tmp_path_factory):
@@ -583,6 +625,27 @@ def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
     assert "./local_requirements/mylocaldep" in reqs
 
 
+def test_prepare_build_context_editable_local_dependency(tmp_path_factory):
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text(
+        "numpy\n-e ./mylocaldep[extra]\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert reqs == ["numpy", "./local_requirements/mylocaldep[extra]"]
+
+
 def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
     """A local dependency that does not exist raises a clear error."""
     src_dir = tmp_path_factory.mktemp("src")
@@ -691,6 +754,17 @@ def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, 
     else:
         assert isinstance(out, Image)
         assert out.attrs == mocked_docker.images.get(image_name).attrs
+
+
+def test_build_tesseract_creates_missing_build_dir_parents(
+    dummy_tesseract_package, mocked_docker, tmp_path_factory
+):
+    build_dir = tmp_path_factory.mktemp("parent") / "missing" / "build"
+    out = engine.build_tesseract(
+        dummy_tesseract_package, "42", build_dir=build_dir, generate_only=True
+    )
+    assert out == build_dir
+    assert (build_dir / "Dockerfile").exists()
 
 
 @pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
@@ -1851,6 +1925,41 @@ def test_stage_local_dependency_file(tmp_path):
     assert staged.read_text() == "wheel contents"
 
 
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            './mypkg[extra] ; python_version >= "3.8"',
+            './local_requirements/mypkg[extra] ; python_version >= "3.8"',
+        ),
+        (
+            "./mypkg;sys_platform=='linux'",
+            "./local_requirements/mypkg ; sys_platform=='linux'",
+        ),
+    ],
+)
+def test_stage_local_dependency_marker(tmp_path, line, expected):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == expected
+    assert (local_requirements / "mypkg").is_dir()
+
+
+def test_stage_local_dependency_file_url_marker(tmp_path):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    line = (src_dir / "mypkg").as_uri() + ' ; python_version >= "3.8"'
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == './local_requirements/mypkg ; python_version >= "3.8"'
+
+
 def test_stage_local_dependency_name_collision(tmp_path):
     """Two dependencies resolving to the same basename get distinct staged names."""
     src_dir = tmp_path / "src"
@@ -2128,3 +2237,68 @@ def test_output_format_matches_runtime_source_of_truth():
     from tesseract_core.runtime.file_interactions import supported_format_type
 
     assert get_args(engine.OutputFormat) == get_args(supported_format_type)
+
+
+def _write_minimal_tesseract(path, config_yaml):
+    (path / "tesseract_api.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class InputSchema(BaseModel):\n    x: int = 0\n"
+        "class OutputSchema(BaseModel):\n    y: int = 0\n"
+        "def apply(inputs: InputSchema) -> OutputSchema:\n    return OutputSchema()\n"
+    )
+    (path / "tesseract_config.yaml").write_text(config_yaml)
+
+
+@pytest.mark.parametrize(
+    "config_yaml, override, warns",
+    [
+        ("name: demo\n", None, True),
+        ("name: demo\nbuild_config:\n  target_platform: native\n", None, True),
+        (
+            'name: demo\nbuild_config:\n  base_image: "debian:bookworm-slim"\n',
+            None,
+            False,
+        ),
+        (
+            'name: demo\nbuild_config:\n  base_image: "debian:trixie-slim"\n',
+            None,
+            False,
+        ),
+        ("name: demo\n", {("build_config", "base_image"): "debian:trixie-slim"}, False),
+    ],
+)
+def test_build_warns_only_when_relying_on_the_default_base_image(
+    tmp_path, caplog, config_yaml, override, warns
+):
+    """The default base image is changing; only builds that rely on it are told."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_minimal_tesseract(src, config_yaml)
+
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine.build_tesseract(
+            src,
+            None,
+            build_dir=tmp_path / "build",
+            config_override=override,
+            generate_only=True,
+        )
+
+    warned = [r for r in caplog.records if "base_image is not set" in r.getMessage()]
+    assert bool(warned) is warns
+    if warns:
+        message = warned[0].getMessage()
+        # Points to the field to set, and names both images to choose between.
+        assert "`base_image` field" in message
+        assert "debian:bookworm-slim" in message
+        assert "debian:trixie-slim" in message
+
+
+def test_default_base_image_warning_matches_the_scheduled_change():
+    """The warning names the image the default is moving to, and it isn't the current one."""
+    from tesseract_core._deprecations import NEXT_DEFAULT_BASE_IMAGE
+
+    current = TesseractBuildConfig.model_fields["base_image"].default
+    assert current != NEXT_DEFAULT_BASE_IMAGE, (
+        "the default has switched: remove the deprecation warning and its tombstone"
+    )

@@ -140,13 +140,20 @@ class HostCredential(BaseModel):
     @classmethod
     def _allowed_characters(cls, value: str, info: "ValidationInfo") -> str:
         pattern = _HOST_CREDENTIAL_ALLOWED[info.field_name]
-        if not pattern.match(value):
+        if not pattern.fullmatch(value):
             raise ValueError(
                 f"{info.field_name} contains disallowed characters "
                 f"(must match {pattern.pattern}, got {value!r})"
             )
         return value
 
+
+# The Python used when `python_version` is unset, by builds on the default
+# `build_config.base_image` and by `Tesseract.from_source`. It matches the default
+# image's own Python (debian:bookworm-slim is Debian 12, which ships 3.11 for its
+# whole lifetime), but is pinned so that changing the default image cannot change
+# their Python.
+DEFAULT_PYTHON = "3.11"
 
 # Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
 # ``pylock.prod.toml``.
@@ -162,9 +169,10 @@ class PipRequirements(BaseModel):
         description=(
             "Python version to use for the Tesseract's environment (e.g., '3.12'), "
             "installed via uv if needed. "
-            "When unset, container images use the base image's system Python. "
-            "``Tesseract.from_source`` uses Python 3.11 to match the default base image, "
-            "unless a ``pylock.toml`` lockfile's ``requires-python`` excludes it."
+            "When unset, images built on the default base image and "
+            f"``Tesseract.from_source`` use Python {DEFAULT_PYTHON}, "
+            "and images built on a custom ``base_image`` use that image's system "
+            "Python."
         ),
     )
     requirements_file: StrictStr = Field(
@@ -225,7 +233,8 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         "debian:bookworm-slim",
         description=(
             "Base Docker image for the build. Must be Debian-based. "
-            "Only applies to container images."
+            "Only applies to container images. The default will change to "
+            "debian:trixie-slim (Python 3.13); set this explicitly to choose."
         ),
     )
     target_platform: StrictStr = Field(
@@ -312,11 +321,30 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         return None
 
     @property
+    def image_python_version(self) -> str | None:
+        """Python version a container build installs, or None to use the base image's.
+
+        Returns ``python_version`` if declared, otherwise for a build on the default
+        base image, :data:`DEFAULT_PYTHON`. ``inherit_base_image_packages``
+        needs the base image's own Python, and conda pins Python in its environment
+        file.
+        """
+        if self.effective_python_version is not None:
+            return self.effective_python_version
+        if (
+            isinstance(self.requirements, PipRequirements)
+            and not self.inherit_base_image_packages
+            and "base_image" not in self.model_fields_set
+        ):
+            return DEFAULT_PYTHON
+        return None
+
+    @property
     def uses_base_image_python(self) -> bool:
         """Whether /python-env uses the base image's Python instead of bundling its own."""
         return (
             isinstance(self.requirements, PipRequirements)
-            and self.requirements.python_version is None
+            and self.image_python_version is None
         )
 
     @model_validator(mode="after")

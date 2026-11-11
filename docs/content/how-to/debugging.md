@@ -49,7 +49,7 @@ A Tesseract served in debug mode differs from a regular one in three ways:
 
 - Tracebacks from execution are returned in the response body, instead of a generic 500 error.
   This is useful for debugging and testing, but unsafe for production environments.
-- The `test` endpoint is exposed over HTTP.
+- The `test` and `check_gradients` endpoints are exposed over HTTP.
 - A debugpy server is started next to the Tesseract, so you can attach a debugger to it for
   remote debugging sessions.
 

@@ -52,9 +52,24 @@ class Release(NamedTuple):
     when: date
 
 
+# The implicit default `build_config.base_image` is changing; `tesseract build`
+# warns about it until then. Shared with that warning so the two cannot drift.
+DEFAULT_BASE_IMAGE_CHANGE = date(2026, 12, 18)
+NEXT_DEFAULT_BASE_IMAGE = "debian:trixie-slim"
+
 # Deprecations awaiting removal. Delete an entry together with its code once the
 # scheduled date passes.
 TOMBSTONES: tuple[Tombstone, ...] = (
+    Tombstone(
+        remove_after=DEFAULT_BASE_IMAGE_CHANGE,
+        what="debian:bookworm-slim as the default build_config.base_image",
+        hint=(
+            "Switch the default to NEXT_DEFAULT_BASE_IMAGE and DEFAULT_PYTHON in "
+            "tesseract_core/sdk/api_parse.py, then remove "
+            "_warn_about_default_base_image (engine.py), _warn_about_default_python "
+            "(venv_provision.py) and the two constants above. Update the tests, too."
+        ),
+    ),
     # Example:
     # Tombstone(
     #     remove_after=date(2026, 12, 1),
