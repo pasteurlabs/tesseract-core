@@ -4,3 +4,6 @@
 # -> libcudart.so.12).
 --extra-index-url https://download.pytorch.org/whl/cu130
 torch
+# NIXL for the nixl GPU transport tests. Its wheel depends on torch, which
+# the line above already satisfies with a build of the same CUDA major.
+nixl-cu13
