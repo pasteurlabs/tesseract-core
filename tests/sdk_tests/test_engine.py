@@ -95,6 +95,8 @@ def test_prepare_build_context_pins_python_on_the_default_image(
 
     engine.prepare_build_context(src_dir, build_dir, config)
     dockerfile = (build_dir / "Dockerfile").read_text()
+    # System libssl for native packages, which a uv-installed Python doesn't bring.
+    assert "openssl" in dockerfile.split("AS run_stage", 1)[1]
     if expected is None:
         assert "TESSERACT_PYTHON_VERSION" not in dockerfile
     else:
