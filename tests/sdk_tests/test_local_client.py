@@ -1113,23 +1113,95 @@ def test_undeclared_python_matches_the_build(example_copy):
     """
     for name in ("univariate", "localpackage"):
         api_path = example_copy(name)
-        build_config, requirements_file = venv_provision._declared_requirements(
-            api_path
-        )
+        build_config, _ = venv_provision._declared_requirements(api_path)
         assert (
-            venv_provision._build_python_version(build_config, requirements_file)
+            venv_provision._build_python_version(build_config)
             == DEFAULT_BASE_IMAGE_PYTHON
         )
 
 
 @pytest.mark.parametrize(
-    "requires_python, expected",
-    [(">=3.10", DEFAULT_BASE_IMAGE_PYTHON), (">=3.12", ">=3.12")],
+    "lockfile",
+    [
+        'lock-version = "1.0"\nrequires-python = ">=3.10"\n',
+        'lock-version = "1.0"\nrequires-python = ">=3.12"\n',
+        'lock-version = "1.0"\n',
+    ],
 )
-def test_a_lockfile_python_range_is_honoured(
-    dummy_tesseract_package, requires_python, expected
-):
-    """A lockfile excluding the default Python gets its own range passed to uv."""
+def test_a_lockfile_python_range_is_not_used(dummy_tesseract_package, lockfile):
+    """As in a container build, a lockfile's requires-python does not pick the Python.
+
+    A lockfile excluding the default Python fails to install, as it would in
+    `tesseract build`, rather than quietly building on another Python.
+    """
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "locked"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        "    requirements_file: pylock.toml\n"
+    )
+    (dummy_tesseract_package / "pylock.toml").write_text(lockfile)
+    build_config, _ = venv_provision._declared_requirements(
+        dummy_tesseract_package / "tesseract_api.py"
+    )
+
+    assert venv_provision._build_python_version(build_config) == (
+        DEFAULT_BASE_IMAGE_PYTHON
+    )
+
+
+@pytest.mark.parametrize(
+    "lockfile, ok",
+    [
+        ('lock-version = "1.0"\nrequires-python = ">=3"\n', True),
+        ('lock-version = "1.0"\n', True),
+        ('lock-version = "1.0"\nrequires-python = "<3"\n', False),
+    ],
+)
+def test_a_lockfile_must_allow_the_interpreter(tmp_path, lockfile, ok):
+    """A lockfile whose requires-python excludes the interpreter fails, as in uv."""
+    (tmp_path / "pylock.toml").write_text(lockfile)
+
+    def check():
+        venv_provision._check_lockfile_python(
+            tmp_path / "pylock.toml", Path(sys.executable)
+        )
+
+    if ok:
+        check()
+    else:
+        with pytest.raises(UserError, match=r"incompatible with pylock\.toml's"):
+            check()
+
+
+@pytest.mark.parametrize(
+    "content",
+    ['lock-version = "1.0"\nrequires-python = "not a range"\n', "lock-version = [\n"],
+)
+def test_a_broken_lockfile_is_reported(tmp_path, content):
+    """A lockfile that cannot be read fails loudly rather than being skipped."""
+    (tmp_path / "pylock.toml").write_text(content)
+    with pytest.raises(UserError, match=r"pylock\.toml"):
+        venv_provision._check_lockfile_python(
+            tmp_path / "pylock.toml", Path(sys.executable)
+        )
+
+
+def test_an_unreadable_interpreter_version_is_reported(monkeypatch):
+    """Output that is not a version fails clearly instead of being compared."""
+    noisy = subprocess.CompletedProcess([], 0, stdout="hello from a .pth\n3.11.13\n")
+    monkeypatch.setattr(venv_provision.subprocess, "run", lambda *a, **k: noisy)
+
+    with pytest.raises(RuntimeError, match="Could not determine the version"):
+        venv_provision._interpreter_version(Path(sys.executable))
+
+
+def test_a_lockfile_excluding_the_default_python_fails(dummy_tesseract_package):
+    """from_source refuses a conflicting lockfile instead of building on 3.11 anyway.
+
+    Older uv would install it regardless, so this must not depend on uv's version.
+    """
     (dummy_tesseract_package / "tesseract_config.yaml").write_text(
         'name: "locked"\n'
         "build_config:\n"
@@ -1138,57 +1210,13 @@ def test_a_lockfile_python_range_is_honoured(
         "    requirements_file: pylock.toml\n"
     )
     (dummy_tesseract_package / "pylock.toml").write_text(
-        f'lock-version = "1.0"\nrequires-python = "{requires_python}"\n'
-    )
-    build_config, requirements_file = venv_provision._declared_requirements(
-        dummy_tesseract_package / "tesseract_api.py"
+        'lock-version = "1.0"\nrequires-python = ">=3.12"\n'
     )
 
-    assert (
-        venv_provision._build_python_version(build_config, requirements_file)
-        == expected
-    )
-
-
-@pytest.mark.parametrize(
-    "content",
-    ['lock-version = "1.0"\nrequires-python = "not a range"\n', "lock-version = [\n"],
-)
-def test_a_broken_lockfile_is_reported(dummy_tesseract_package, content):
-    """A lockfile that cannot be read fails loudly rather than guessing a Python."""
-    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
-        'name: "locked"\n'
-        "build_config:\n"
-        "  requirements:\n"
-        "    provider: uv-pip\n"
-        "    requirements_file: pylock.toml\n"
-    )
-    (dummy_tesseract_package / "pylock.toml").write_text(content)
-
-    with pytest.raises(UserError, match=r"pylock\.toml"):
+    with pytest.raises(UserError, match=r"Python 3\.11\.\d+, which is incompatible"):
         venv_provision.resolve_python_executable(
             dummy_tesseract_package / "tesseract_api.py"
         )
-
-
-def test_a_lockfile_without_requires_python_uses_the_default(dummy_tesseract_package):
-    """requires-python is optional in PEP 751, and the build ignores it anyway."""
-    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
-        'name: "locked"\n'
-        "build_config:\n"
-        "  requirements:\n"
-        "    provider: uv-pip\n"
-        "    requirements_file: pylock.toml\n"
-    )
-    (dummy_tesseract_package / "pylock.toml").write_text('lock-version = "1.0"\n')
-    build_config, requirements_file = venv_provision._declared_requirements(
-        dummy_tesseract_package / "tesseract_api.py"
-    )
-
-    assert (
-        venv_provision._build_python_version(build_config, requirements_file)
-        == DEFAULT_BASE_IMAGE_PYTHON
-    )
 
 
 def test_changing_the_python_version_invalidates_the_stamp(dummy_tesseract_package):
@@ -1464,7 +1492,7 @@ def test_a_declared_python_version_applies_with_no_requirements(
     build_config, requirements_file = venv_provision._declared_requirements(api_path)
 
     assert requirements_file is None, "there is no requirements file to install"
-    assert venv_provision._build_python_version(build_config, None) == "3.11"
+    assert venv_provision._build_python_version(build_config) == "3.11"
 
 
 def test_conda_defaults_to_the_active_installation(monkeypatch):
