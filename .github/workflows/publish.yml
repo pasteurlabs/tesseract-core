@@ -35,9 +35,7 @@ jobs:
           git fetch --prune --unshallow --tags
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Set up Python
         uses: actions/setup-python@v7
