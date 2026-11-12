@@ -122,7 +122,7 @@ def apply_function_to_model_tree(
     when the model is built. It returns a function mapping the old default to the new
     one, or None to keep the default as is. A ``default=`` is converted right away.
     A ``default_factory=`` is left in place, and a model validator converts its output
-    for every field the caller omitted.
+    for every field omitted by the caller.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
