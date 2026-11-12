@@ -115,7 +115,7 @@ def has_device() -> bool:
 
 
 def validate_gpu_transport_config() -> None:
-    """Raise if the configured GPU transport cannot be served.
+    """Raise if the configured GPU transports cannot be served.
 
     A user who explicitly configures a GPU transport expects it to work. When
     this process cannot serve it (no CUDA runtime library, no visible device,
@@ -125,11 +125,11 @@ def validate_gpu_transport_config() -> None:
     from tesseract_core.runtime.config import get_config
 
     configured = get_config().gpu_transport
-    if configured == "none" or has_device():
+    if not configured or has_device():
         return
     raise ValueError(
-        f"gpu_transport={configured!r} is configured, but this Tesseract cannot "
-        "use a CUDA device, so it cannot serve that transport."
+        f"gpu_transport={','.join(configured)!r} is configured, but this "
+        "Tesseract cannot use a CUDA device, so it cannot serve GPU transports."
     )
 
 

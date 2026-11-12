@@ -260,6 +260,18 @@ def _fit_encoding_to_server(
 _AUTO_GPU_TRANSPORTS = ("cuda_ipc", "nixl")
 
 
+def _client_gpu_transport(gpu_transport: str | Sequence[str] | None) -> str | None:
+    """The GPU transport calls request when the server enables ``gpu_transport``.
+
+    That is the first transport it enables, ``none`` if it enables none, and
+    None (no preference) if ``gpu_transport`` is None.
+    """
+    if gpu_transport is None:
+        return None
+    transports = serving.parse_gpu_transports(gpu_transport)
+    return transports[0] if transports else "none"
+
+
 class Tesseract:
     """A Tesseract.
 
@@ -341,7 +353,7 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: OutputFormat = "json+base64",
-        gpu_transport: str | None = None,
+        gpu_transport: str | Sequence[str] | None = None,
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -381,14 +393,16 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            gpu_transport: GPU transport to enable on the served Tesseract and use for
-                this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
-                pass them by reference, which requires the container to have GPU
-                access and ``num_workers=1``. ``nixl`` also works across hosts and
-                runs the container on the host network. Independent of
+            gpu_transport: GPU transport, or list of them, to enable on the served
+                Tesseract. This client's calls use the first one listed (see
+                :meth:`with_encoding` to change it per call). ``none`` copies
+                GPU arrays to the host, and ``cuda_ipc`` and ``nixl`` pass them
+                by reference, which requires the container to have GPU access
+                and ``num_workers=1``. ``nixl`` also works across hosts and runs
+                the container on the host network. Independent of
                 ``output_format``, which governs CPU arrays. Resolved against
-                ``runtime_config`` with the precedence described in ``engine.serve``.
+                ``runtime_config`` with the precedence described in
+                ``engine.serve``.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -478,7 +492,7 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: OutputFormat = "json+base64",
-        gpu_transport: str | None = None,
+        gpu_transport: str | Sequence[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -504,8 +518,8 @@ class Tesseract:
             gpu_transport: Whether the endpoints accept GPU arrays, which only
                 integrations that pass GPU arrays act on (see
                 :meth:`resolve_gpu_transport`). ``none`` means they get GPU inputs
-                copied to the host, and any other transport (such as ``cuda_ipc``)
-                means they get them as they are. Resolved against
+                copied to the host, and any other transport (such as ``cuda_ipc``),
+                or list of them, means they get them as they are. Resolved against
                 ``runtime_config`` with the precedence described in
                 ``engine.serve``.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
@@ -570,7 +584,9 @@ class Tesseract:
             update_config(**config_kwargs)
             config = get_config()
             encoding = RequestedEncoding(
-                config.output_format, config.gpu_transport, config.compression
+                config.output_format,
+                _client_gpu_transport(config.gpu_transport),
+                config.compression,
             )
 
             # Capture this instance's config so its endpoints run under it
@@ -594,7 +610,7 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
-        gpu_transport: str | None = None,
+        gpu_transport: str | Sequence[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
         python_executable: str | Path | None = None,
@@ -631,11 +647,12 @@ class Tesseract:
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            gpu_transport: GPU transport to enable on the served Tesseract and use for
-                this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
-                pass them by reference, which needs no setup since processes on one
-                host share an IPC namespace and network. Independent of
+            gpu_transport: GPU transport, or list of them, to enable on the served
+                Tesseract. This client's calls use the first one listed (see
+                :meth:`with_encoding` to change it per call). ``none`` copies
+                GPU arrays to the host, and ``cuda_ipc`` and ``nixl`` pass them
+                by reference, which needs no setup since processes on one host
+                share an IPC namespace and network. Independent of
                 ``output_format``, which governs CPU arrays. Resolved against
                 ``runtime_config``, an explicit value winning.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
@@ -749,15 +766,17 @@ class Tesseract:
         output_path = self._spawn_config.get("output_path")
         input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
-        # The output format and GPU transport configure the server and are also
-        # what calls through this Tesseract request. The transport follows the
+        # The output format and GPU transports configure the server and are also
+        # what calls through this Tesseract request. The transports follow the
         # precedence serve() applies to the container, so the explicit kwarg wins
-        # over runtime_config. If neither sets it, calls request "none".
+        # over runtime_config. If neither sets them, calls request "none".
         runtime_config = self._spawn_config.get("runtime_config") or {}
-        gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
-            "gpu_transport"
+        gpu_transport = self._spawn_config.get("gpu_transport")
+        if gpu_transport is None:
+            gpu_transport = runtime_config.get("gpu_transport")
+        self._encoding = RequestedEncoding(
+            output_format, _client_gpu_transport(gpu_transport)
         )
-        self._encoding = RequestedEncoding(output_format, gpu_transport)
         self._client = HTTPClient(
             self._serve_context.url,
             output_path=Path(output_path) if output_path else None,
@@ -1247,7 +1266,7 @@ def _subprocess_spawn_config(
     input_path: Path | None,
     output_path: Path | None,
     output_format: Literal["json", "json+base64", "json+binref"],
-    gpu_transport: str | None,
+    gpu_transport: str | Sequence[str] | None,
     runtime_config: dict[str, Any] | None,
     python_executable: str | Path | None,
     startup_timeout: float,
@@ -1288,16 +1307,10 @@ def _subprocess_spawn_config(
     # Unlike a container there is nothing to wire up for it -- two processes on
     # one host already share an IPC namespace, so cuda_ipc needs no equivalent
     # of the container's `--ipc=host`, and the child sees the host's GPUs.
-    if gpu_transport is not None:
-        config_kwargs["gpu_transport"] = gpu_transport
-    else:
-        config_kwargs.setdefault("gpu_transport", "none")
-
-    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc", "nixl"):
-        raise ValueError(
-            f"Unknown gpu_transport {config_kwargs['gpu_transport']!r}. "
-            "Supported values: 'none', 'cuda_ipc', 'nixl'."
-        )
+    if gpu_transport is None:
+        gpu_transport = config_kwargs.get("gpu_transport", "none")
+    gpu_transports = serving.parse_gpu_transports(gpu_transport)
+    config_kwargs["gpu_transport"] = ",".join(gpu_transports) or "none"
 
     return auto_dirs, dict(
         api_path=tesseract_api_path,
@@ -2207,7 +2220,7 @@ class LocalClient:
         # Allows external clients (e.g. tesseract-jax) to access module directly
         self.api_module = tesseract_api
         config = self._config_snapshot[0]
-        self._gpu_transport = "none" if config is None else config.gpu_transport
+        self._gpu_transports = () if config is None else config.gpu_transport
 
     def check_requested_encoding(self, requested: RequestedEncoding) -> None:
         """Raise if ``requested`` asks for a GPU transport this Tesseract was not created with.
@@ -2215,8 +2228,8 @@ class LocalClient:
         Arrays are passed in memory, so the other fields have no effect.
         """
         gpu_transport = requested.gpu_transport
-        created = self._gpu_transport
-        if gpu_transport not in (None, "none", created):
+        if gpu_transport not in (None, "none", *self._gpu_transports):
+            created = ",".join(self._gpu_transports) or "none"
             raise ValueError(
                 f"This in-process Tesseract does not accept gpu_transport="
                 f"{gpu_transport!r}, since it was created with gpu_transport="
@@ -2227,7 +2240,9 @@ class LocalClient:
 
     def resolve_gpu_transport(self, encoding: RequestedEncoding) -> str:
         """See :meth:`Tesseract.resolve_gpu_transport`."""
-        return encoding.gpu_transport or self._gpu_transport
+        if encoding.gpu_transport is not None:
+            return encoding.gpu_transport
+        return self._gpu_transports[0] if self._gpu_transports else "none"
 
     def run_tesseract(
         self,

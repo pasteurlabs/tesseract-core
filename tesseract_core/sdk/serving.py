@@ -36,6 +36,10 @@ logger = logging.getLogger("tesseract")
 # How long to wait for a freshly started Tesseract to answer /health.
 DEFAULT_STARTUP_TIMEOUT = 30.0
 
+# GPU transports a served Tesseract can enable besides "none". New transports
+# are added here, and to engine.serve if a container needs setup for them.
+GPU_TRANSPORTS = ("cuda_ipc", "nixl")
+
 
 class ServedTesseract(Protocol):
     """A Tesseract that has been started and can be reached, inspected and stopped.
@@ -179,11 +183,40 @@ def validate_output_format(
         )
 
 
+def parse_gpu_transports(gpu_transport: str | Sequence[str]) -> tuple[str, ...]:
+    """Return the GPU transports ``gpu_transport`` enables besides ``none``, in order.
+
+    Accepts one name, a comma-separated string of names (as in
+    ``TESSERACT_GPU_TRANSPORT``), or a sequence of names.
+
+    Raises:
+        ValueError: if a name is not a known GPU transport.
+    """
+    names = (
+        gpu_transport.split(",") if isinstance(gpu_transport, str) else gpu_transport
+    )
+    transports = []
+    for name in (str(name).strip() for name in names):
+        if not name or name == "none" or name in transports:
+            continue
+        if name not in GPU_TRANSPORTS:
+            supported = ", ".join(repr(t) for t in ("none", *GPU_TRANSPORTS))
+            raise ValueError(
+                f"Unknown gpu_transport {name!r}. Supported values: {supported}."
+            )
+        transports.append(name)
+    return tuple(transports)
+
+
 def runtime_config_to_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
     """Convert runtime configuration to the variables the Tesseract runtime reads."""
 
     def encode(value: Any) -> str:
-        return ("1" if value else "0") if isinstance(value, bool) else str(value)
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, list | tuple):
+            return ",".join(str(item) for item in value)
+        return str(value)
 
     return {
         f"TESSERACT_{key.upper()}": encode(value)

@@ -287,6 +287,13 @@ def test_parse_media_range(media_range, expected):
             "application/*; gpu_transport=cuda_ipc",
             ("json", "cuda_ipc", None),
         ),
+        # Several transports are spelled as in TESSERACT_GPU_TRANSPORT.
+        (
+            "none,cuda_ipc",
+            None,
+            "application/*; gpu_transport=cuda_ipc",
+            ("json", "cuda_ipc", None),
+        ),
         # A range the server cannot produce falls through to the next one.
         (
             "none",
@@ -309,6 +316,25 @@ def test_negotiate_encoding(gpu_transport, compression, accept, expected):
 
     update_config(gpu_transport=gpu_transport, compression=compression)
     assert tuple(negotiate_encoding(accept)) == expected
+
+
+def test_gpu_transports_reach_the_server_process(monkeypatch):
+    """serve() hands its config to the server process through the environment."""
+    from tesseract_core.runtime.config import (
+        config_overrides_as_env,
+        get_config,
+        override_config,
+        update_config,
+    )
+    from tesseract_core.runtime.file_interactions import available_gpu_transports
+
+    update_config(gpu_transport=["cuda_ipc"])
+    for key, value in config_overrides_as_env().items():
+        monkeypatch.setenv(key, value)
+
+    with override_config():
+        assert get_config().gpu_transport == ("cuda_ipc",)
+        assert available_gpu_transports() == ("none", "cuda_ipc")
 
 
 def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):

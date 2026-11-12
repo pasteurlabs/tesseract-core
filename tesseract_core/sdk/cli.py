@@ -131,7 +131,7 @@ AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 LOGLEVELS = ("debug", "info", "warning", "error", "critical")
 OUTPUT_FORMATS = ("json", "json+base64", "json+binref")
 LIST_FORMATS = ("table", "json")
-GPU_TRANSPORTS = ("none", "cuda_ipc")
+GPU_TRANSPORTS = ("none", *serving.GPU_TRANSPORTS)
 
 
 def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
@@ -578,14 +578,17 @@ def serve(
         ),
     ] = None,
     gpu_transport: Annotated[
-        GPUTransportChoices | None,
+        list[GPUTransportChoices] | None,
         typer.Option(
             "--gpu-transport",
             help=(
-                "GPU transport the served Tesseract accepts. "
+                "GPU transport the served Tesseract accepts. Repeat to enable "
+                "several, e.g. `--gpu-transport cuda_ipc --gpu-transport nixl`. "
                 "Default `none` copies arrays from GPU to the host. "
-                "`cuda_ipc` passes them by reference, requires `--gpus` and "
-                "a shared IPC namespace, and needs `--num-workers 1`."
+                "`cuda_ipc` passes them by reference and requires a shared IPC "
+                "namespace. `nixl` passes them by reference, also across hosts, "
+                "and runs the container on the host network. Any transport "
+                "requires `--gpus` and `--num-workers 1`."
             ),
             show_default=False,
         ),
@@ -703,7 +706,11 @@ def serve(
     To serve a Tesseract without building an image, run `tesseract-runtime serve`
     from its source directory instead.
     """
-    gpu_transport: str | None = _enum_to_val(gpu_transport)
+    # Typer passes an empty list for an absent option; None defers to the
+    # runtime config.
+    gpu_transports: list[str] | None = [
+        _enum_to_val(t) for t in gpu_transport or ()
+    ] or None
     output_format: str | None = _enum_to_val(output_format)
 
     parsed_environment = _parse_environment(environment)
@@ -724,7 +731,7 @@ def serve(
             volumes=volume,
             environment=parsed_environment,
             gpus=gpus,
-            gpu_transport=gpu_transport,
+            gpu_transport=gpu_transports,
             debug=debug,
             num_workers=num_workers,
             user=user,
