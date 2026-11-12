@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import secrets
 import traceback
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from functools import wraps
@@ -18,6 +19,7 @@ from numpy.typing import ArrayLike
 from pydantic import BaseModel
 from rich.progress import Progress
 
+from ..config import get_config
 from ..core import create_endpoints, get_input_schema, get_output_schema
 from ..tree_transforms import (
     escape_dict_key,
@@ -696,6 +698,7 @@ def check_gradients(
     max_evals: int = 1000,
     max_output_samples: int | None = None,
     eps: float | Mapping[str, float] = 1e-4,
+    eps_for: Mapping[str, float] | None = None,
     rtol: float = 0.1,
     seed: int | None = None,
     show_progress: bool = True,
@@ -719,6 +722,8 @@ def check_gradients(
             differentiated input; a mapping gives one step per input path,
             which is what inputs of differing magnitude need, and must name
             every path being checked.
+        eps_for: Step sizes for some input paths, overriding a float ``eps``
+            for those paths only. Every other path uses ``eps``.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
         show_progress: Whether to show a progress bar.
@@ -776,6 +781,19 @@ def check_gradients(
     if not output_paths:
         output_paths = diff_outputs
 
+    if eps_for:
+        if isinstance(eps, Mapping):
+            raise ValueError(
+                f"eps_for cannot be combined with a dict-valued eps (got eps={eps})."
+            )
+        unknown = [path for path in eps_for if path not in input_paths]
+        if unknown:
+            raise ValueError(
+                f"eps_for names input path(s) that are not being checked: "
+                f"{', '.join(unknown)}"
+            )
+        eps = {path: eps_for.get(path, eps) for path in input_paths}
+
     if isinstance(eps, Mapping):
         missing = [path for path in input_paths if path not in eps]
         if missing:
@@ -816,3 +834,155 @@ def check_gradients(
             show_progress=show_progress,
         )
         yield endpoint, failures, num_evals
+
+
+class CheckGradientsSpec(BaseModel):
+    """Request for the ``check_gradients`` endpoint.
+
+    Mirrors the options of ``tesseract-runtime check-gradients``.
+    """
+
+    payload: dict[str, Any]
+    input_paths: list[str] | None = None
+    output_paths: list[str] | None = None
+    endpoints: list[GradientEndpointName] | None = None
+    eps: float = 1e-4
+    eps_for: dict[str, float] | None = None
+    rtol: float = 0.1
+    max_evals: int = 1000
+    max_output_samples: int | None = None
+    max_failures: int = 10
+    seed: int | None = None
+
+
+class EndpointGradientCheckSummary(BaseModel):
+    """Outcome of the gradient check for one endpoint."""
+
+    endpoint: str
+    num_failures: int
+    num_evals: int
+
+
+class CheckGradientsOutputSchema(BaseModel):
+    """Output schema for the ``check_gradients`` endpoint.
+
+    Attributes:
+        status: "passed" if every checked endpoint agreed with finite differences.
+        message: Human-readable report, including the first failures per endpoint.
+        seed: The seed used to sample indices, so a failing check can be rerun exactly.
+        results: Failure and evaluation counts per checked endpoint.
+    """
+
+    status: Literal["passed", "failed"]
+    message: str
+    seed: int
+    results: list[EndpointGradientCheckSummary]
+
+
+def _format_endpoint_report(
+    endpoint: str,
+    failures: list[GradientCheckResult],
+    num_evals: int,
+    max_failures: int,
+) -> list[str]:
+    if not failures:
+        return [
+            f"✅ Gradient check for {endpoint} passed ✅ ({len(failures)} failures / {num_evals} checks)"
+        ]
+
+    lines = [
+        "",
+        f"⚠️ Gradient check for {endpoint} failed ⚠️ ({len(failures)} failures / {num_evals} checks)",
+    ]
+    printed_failures = min(len(failures), max_failures)
+    lines.append(f"First {printed_failures} failures:")
+    for failure in failures[:printed_failures]:
+        lines.append(
+            f"  Input path: '{failure.in_path}', Output path: '{failure.out_path}', Index: {failure.idx}"
+        )
+        if failure.exception:
+            lines.append(f"  Encountered exception: {failure.exception}")
+        else:
+            lines.append(f"  {endpoint} value: {failure.grad_val}")
+            lines.append(f"  Finite difference value: {failure.ref_val}")
+        lines.append("")
+    return lines
+
+
+def run_gradient_check(
+    api_module: ModuleType,
+    spec: CheckGradientsSpec,
+    *,
+    base_dir: Path | None = None,
+    show_progress: bool = False,
+) -> CheckGradientsOutputSchema:
+    """Check gradients as requested by ``spec`` and summarize the outcome.
+
+    Shared by the ``check_gradients`` endpoint and ``tesseract-runtime check-gradients``.
+    If ``spec.seed`` is None, a seed is drawn here and reported back, so that
+    a failing check can be reproduced.
+    """
+    seed = spec.seed if spec.seed is not None else secrets.randbits(32)
+
+    result_iter = check_gradients(
+        api_module,
+        spec.payload,
+        base_dir=base_dir,
+        input_paths=spec.input_paths,
+        output_paths=spec.output_paths,
+        endpoints=spec.endpoints,
+        max_evals=spec.max_evals,
+        max_output_samples=spec.max_output_samples,
+        eps=spec.eps,
+        eps_for=spec.eps_for,
+        rtol=spec.rtol,
+        seed=seed,
+        show_progress=show_progress,
+    )
+
+    lines = []
+    results = []
+    for endpoint, failures, num_evals in result_iter:
+        lines.extend(
+            _format_endpoint_report(endpoint, failures, num_evals, spec.max_failures)
+        )
+        results.append(
+            EndpointGradientCheckSummary(
+                endpoint=endpoint, num_failures=len(failures), num_evals=num_evals
+            )
+        )
+
+    failed = any(r.num_failures for r in results)
+    if failed:
+        lines.append("❌ Some gradient checks failed ❌")
+        lines.append(f"To sample the same indices again, rerun with seed {seed}.")
+
+    return CheckGradientsOutputSchema(
+        status="failed" if failed else "passed",
+        message="\n".join(lines),
+        seed=seed,
+        results=results,
+    )
+
+
+def make_check_gradients_endpoint(
+    api_module: ModuleType,
+) -> Callable[[CheckGradientsSpec], CheckGradientsOutputSchema]:
+    """Create the ``check_gradients`` endpoint for a Tesseract API module."""
+
+    def check_gradients(payload: CheckGradientsSpec) -> CheckGradientsOutputSchema:
+        """Check gradient endpoints against a finite difference approximation of apply.
+
+        Samples input elements, perturbs each one, and compares the resulting
+        finite differences of apply against the jacobian,
+        jacobian_vector_product and vector_jacobian_product endpoints.
+
+        Note:
+            This endpoint is designed for testing and CI/CD workflows.
+            Passing and failing checks both return HTTP 200, with the outcome in ``status``.
+        """
+        config = get_config()
+        base_dir = Path(config.input_path) if config.input_path else None
+        return run_gradient_check(api_module, payload, base_dir=base_dir)
+
+    return check_gradients

@@ -16,6 +16,7 @@ from jinja2.exceptions import TemplateNotFound
 
 from tesseract_core.sdk import docker_client, engine, serving
 from tesseract_core.sdk.api_parse import (
+    DEFAULT_PYTHON,
     TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
@@ -54,13 +55,54 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     dockerfile = (build_dir / "Dockerfile").read_text()
     assert 'TESSERACT_PYTHON_VERSION="3.12"' in dockerfile
 
-    # Without python_version, the env var should not appear
-    build_dir2 = tmp_path_factory.mktemp("build2")
-    config_default = TesseractConfig(name="foobar")
-    engine.prepare_build_context(src_dir, build_dir2, config_default)
 
-    dockerfile_default = (build_dir2 / "Dockerfile").read_text()
-    assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
+@pytest.mark.parametrize(
+    "build_config, expected",
+    [
+        # Neither set: the default image's Python is pinned, so it doesn't follow
+        # the default image if that changes.
+        ({}, DEFAULT_PYTHON),
+        # A custom base image keeps using its own system Python...
+        ({"base_image": "ubuntu:24.04"}, None),
+        # ...even when it names the current default explicitly.
+        ({"base_image": "debian:bookworm-slim"}, None),
+        # A declared version always wins.
+        ({"requirements": {"provider": "uv-pip", "python_version": "3.13"}}, "3.13"),
+        (
+            {
+                "base_image": "ubuntu:24.04",
+                "requirements": {"provider": "uv-pip", "python_version": "3.13"},
+            },
+            "3.13",
+        ),
+        # These need the base image's or the environment file's Python.
+        ({"inherit_base_image_packages": True}, None),
+        ({"requirements": {"provider": "conda"}}, None),
+    ],
+)
+def test_prepare_build_context_pins_python_on_the_default_image(
+    tmp_path_factory, build_config, expected
+):
+    """Which Python a container build installs, rendered as an ENV in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    (src_dir / "tesseract_environment.yaml").write_text("dependencies: []\n")
+    build_dir = tmp_path_factory.mktemp("build")
+    config = TesseractConfig(
+        name="foobar", build_config=TesseractBuildConfig.model_validate(build_config)
+    )
+    assert config.build_config.image_python_version == expected
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    # System libssl for native packages, which a uv-installed Python doesn't bring.
+    assert "openssl" in dockerfile.split("AS run_stage", 1)[1]
+    if expected is None:
+        assert "TESSERACT_PYTHON_VERSION" not in dockerfile
+    else:
+        assert f'TESSERACT_PYTHON_VERSION="{expected}"' in dockerfile
+        # No system Python is installed alongside the pinned one.
+        assert "python3-venv" not in dockerfile
 
 
 def test_prepare_build_context_build_env(tmp_path_factory):
@@ -581,6 +623,27 @@ def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
     )
     assert "numpy" in reqs
     assert "./local_requirements/mylocaldep" in reqs
+
+
+def test_prepare_build_context_editable_local_dependency(tmp_path_factory):
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text(
+        "numpy\n-e ./mylocaldep[extra]\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert reqs == ["numpy", "./local_requirements/mylocaldep[extra]"]
 
 
 def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
@@ -1860,6 +1923,41 @@ def test_stage_local_dependency_file(tmp_path):
     assert spec == "./local_requirements/mypkg-1.0-py3-none-any.whl"
     assert staged.is_file()
     assert staged.read_text() == "wheel contents"
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            './mypkg[extra] ; python_version >= "3.8"',
+            './local_requirements/mypkg[extra] ; python_version >= "3.8"',
+        ),
+        (
+            "./mypkg;sys_platform=='linux'",
+            "./local_requirements/mypkg ; sys_platform=='linux'",
+        ),
+    ],
+)
+def test_stage_local_dependency_marker(tmp_path, line, expected):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == expected
+    assert (local_requirements / "mypkg").is_dir()
+
+
+def test_stage_local_dependency_file_url_marker(tmp_path):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    line = (src_dir / "mypkg").as_uri() + ' ; python_version >= "3.8"'
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == './local_requirements/mypkg ; python_version >= "3.8"'
 
 
 def test_stage_local_dependency_name_collision(tmp_path):

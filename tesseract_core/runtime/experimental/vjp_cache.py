@@ -30,6 +30,13 @@ def set_jax_vjp_cache_size(size: int) -> None:
       - Very small models where the forward pass is microseconds: the
         cache machinery overhead exceeds the saved work.
 
+    **Supported outputs.** With the cache enabled, ``apply`` may only nest its
+    outputs in dicts, lists, tuples and NamedTuples, because a cache hit
+    rebuilds the cotangent in the same structure. Any other pytree container
+    (for example an ``equinox.Module`` or a dataclass registered as a pytree)
+    makes ``jax_apply`` raise a ``TypeError``; such outputs work with the
+    cache disabled.
+
     Args:
         size: Number of cache slots. ``0`` (the default) disables caching
             entirely (both ``jax_apply`` and ``jax_vjp`` then bypass the cache

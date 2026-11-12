@@ -64,9 +64,8 @@ TOMBSTONES: tuple[Tombstone, ...] = (
         remove_after=DEFAULT_BASE_IMAGE_CHANGE,
         what="debian:bookworm-slim as the default build_config.base_image",
         hint=(
-            "Switch the default to NEXT_DEFAULT_BASE_IMAGE in "
-            "tesseract_core/sdk/api_parse.py and DEFAULT_BASE_IMAGE_PYTHON in "
-            "tesseract_core/sdk/venv_provision.py, then remove "
+            "Switch the default to NEXT_DEFAULT_BASE_IMAGE and DEFAULT_PYTHON in "
+            "tesseract_core/sdk/api_parse.py, then remove "
             "_warn_about_default_base_image (engine.py), _warn_about_default_python "
             "(venv_provision.py) and the two constants above. Update the tests, too."
         ),
