@@ -1,4 +1,7 @@
 # Deploying Tesseracts
+```{note}
+A containerized Tesseract does not inherit the host environment. Pass variables with `--env` (or `environment=` / `tesseract_config.yaml`); see {doc}`debugging` for the full launch-path table.
+```
 
 Tesseracts built via `tesseract build` are standard Docker images, so they can be shared, pushed, pulled, and deployed like any other container.
 
