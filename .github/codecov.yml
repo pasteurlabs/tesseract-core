@@ -19,3 +19,9 @@ comment:
   hide_project_coverage: false
 ignore:
   - "tesseract_core/_version.py"
+# Some test jobs only run in the merge queue (see .github/scripts/plan_ci.py).
+# Every upload is flagged by job, so on pull requests that skip those jobs,
+# Codecov carries their coverage forward from the base commit.
+flag_management:
+  default_rules:
+    carryforward: true
