@@ -2,7 +2,10 @@ name: Benchmarks
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "tesseract_core/**"
+      - "benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
 
   push:
     branches:
@@ -16,52 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  # Benchmarks a PR if it changes a file under tesseract_core/ or benchmarks/,
-  # or if it has the `ci:benchmark` or `ci:full` label. Paths are checked here
-  # instead of with a `paths:` filter, which would also keep a label from
-  # triggering the workflow on a PR that changes none of them.
-  check-trigger:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      run: ${{ steps.check.outputs.run }}
-
-    steps:
-      - name: Check labels and changed files
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          IS_PR: ${{ github.event_name == 'pull_request' }}
-          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:benchmark') || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
-        run: |
-          if [ "$IS_PR" != "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$HAS_LABEL" = "true" ]; then
-            echo "::notice::The PR has the ci:benchmark or ci:full label"
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')
-          if grep -qE '^(tesseract_core/|benchmarks/|\.github/workflows/benchmarks\.yml$)' <<< "$files"; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "::notice::No benchmarked files changed. To benchmark anyway, add the ci:benchmark label."
-          echo "run=false" >> "$GITHUB_OUTPUT"
-
   benchmark:
-    needs: check-trigger
-    if: needs.check-trigger.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
