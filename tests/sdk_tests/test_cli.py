@@ -64,6 +64,39 @@ def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     assert result.exit_code == 2, result.stdout
 
 
+def test_serve_accepts_valid_gpu_transport(cli_runner, mocked_docker, mocker):
+    # NO_COLOR ensures Rich isn't wrapping output symbols
+    help_result = cli_runner.invoke(cli, ["serve", "--help"], env={"NO_COLOR": "1"})
+    assert "GPU transport" in help_result.stdout
+
+    mocker.patch("tesseract_core.sdk.cli._display_container_meta", return_value={})
+
+    command = ["serve", "some-image", "--gpu-transport", "none"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 0
+
+    command = ["serve", "some-image", "--gpu-transport", "wrong"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 2
+
+
+def test_serve_passes_repeated_gpu_transports(cli_runner, mocker):
+    serve = mocker.patch(
+        "tesseract_core.sdk.engine.serve", return_value=("name", mocker.Mock())
+    )
+    mocker.patch("tesseract_core.sdk.cli._display_container_meta", return_value={})
+
+    command = ["serve", "some-image", "--gpu-transport", "cuda_ipc"]
+    command += ["--gpu-transport", "nixl"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 0, result.stdout
+    assert serve.call_args.kwargs["gpu_transport"] == ["cuda_ipc", "nixl"]
+
+    result = cli_runner.invoke(cli, ["serve", "some-image"])
+    assert result.exit_code == 0, result.stdout
+    assert serve.call_args.kwargs["gpu_transport"] is None
+
+
 @pytest.mark.parametrize("port", ["8000:8081", "8000-8080-9000"])
 def test_serve_rejects_malformed_port(cli_runner, port):
     result = cli_runner.invoke(cli, ["serve", "some-image", "-p", port])

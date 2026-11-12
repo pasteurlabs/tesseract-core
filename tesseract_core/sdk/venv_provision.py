@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE
-from .api_parse import ValidationError, get_config
+from .api_parse import DEFAULT_PYTHON, ValidationError, get_config
 from .config import get_config as get_sdk_config
 from .engine import (
     _split_local_dependency,
@@ -46,11 +47,6 @@ SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 # PIP_* settings (index urls etc.) are honoured.
 _SCRUBBED_INSTALL_VARS = ("PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_USER")
 
-
-# The Python in the default `build_config.base_image`, which `tesseract build`
-# uses when no python_version is set. debian:bookworm-slim is Debian 12, which
-# ships 3.11 for its whole lifetime; a test fails if the default image changes.
-DEFAULT_BASE_IMAGE_PYTHON = "3.11"
 
 # Deliberately not `.venv`: that one is the user's, and we neither read nor write it.
 _MANAGED_VENV_NAME = ".tesseract-venv"
@@ -141,7 +137,7 @@ def _expected_stamp(build_config: Any, requirements_file: Path | None) -> str:
     provider = build_config.requirements.provider
     settings = {
         "provider": provider,
-        "python_version": _build_python_version(build_config, requirements_file)
+        "python_version": _build_python_version(build_config)
         if provider == "uv-pip"
         else None,
         "inherit_base_image_packages": build_config.inherit_base_image_packages,
@@ -212,10 +208,36 @@ def _local_directories(requirements_file: Path) -> list[str]:
     return specs
 
 
-def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
-    """A PEP 751 lockfile's top-level `requires-python`, if any.
+def _interpreter_version(python_executable: Path) -> Version:
+    """The full version of a Python interpreter, e.g. 3.11.13."""
+    # -I and -S keep environment variables, the user site and .pth files from
+    # running anything that could print to stdout; platform needs neither.
+    result = subprocess.run(
+        [
+            str(python_executable),
+            "-I",
+            "-S",
+            "-c",
+            "import platform; print(platform.python_version())",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        return Version(result.stdout.strip())
+    except InvalidVersion:
+        output = (result.stderr or result.stdout).strip()
+        raise RuntimeError(
+            f"Could not determine the version of {python_executable}:\n{output}"
+        ) from None
 
-    The key is optional, but an unreadable file or invalid value raises.
+
+def _check_lockfile_python(lockfile: Path, python_executable: Path) -> None:
+    """Raise if a PEP 751 lockfile's ``requires-python`` excludes the interpreter.
+
+    The uv pinned for container builds refuses such a lockfile itself, but older
+    uv installs it anyway, so check here rather than rely on the uv on PATH.
     """
     try:
         import tomllib
@@ -227,37 +249,39 @@ def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
             declared = tomllib.load(handle).get("requires-python")
     except (OSError, ValueError) as e:
         raise UserError(f"Could not read {lockfile}: {e}") from e
-
     if declared is None:
-        return None
+        return
     try:
-        return SpecifierSet(declared)
+        allowed = SpecifierSet(declared)
     except (InvalidSpecifier, TypeError) as e:
         raise UserError(
             f"{lockfile.name} has an invalid requires-python: {declared!r}"
         ) from e
 
+    version = _interpreter_version(python_executable)
+    if not allowed.contains(version, prereleases=True):
+        # Worded like uv's own error, which a container build reports.
+        raise UserError(
+            f"The requested interpreter resolved to Python {version}, which is "
+            f"incompatible with {lockfile.name}'s Python requirement: `{declared}`. "
+            "Set `build_config.requirements.python_version` in tesseract_config.yaml "
+            "to a version it allows."
+        )
 
-def _build_python_version(
-    build_config: Any, requirements_file: Path | None
-) -> str | None:
+
+def _build_python_version(build_config: Any) -> str | None:
     """The Python to build a uv-pip environment on, as a `uv venv --python` request.
 
     Whatever a container build would use: the declared ``python_version``, else
-    the default base image's Python. A lockfile whose ``requires-python``
-    excludes that gets its range instead. None (for
-    ``inherit_base_image_packages``) leaves the choice to uv.
+    the default base image's Python. None (for ``inherit_base_image_packages``)
+    leaves the choice to uv.
     """
     declared = build_config.effective_python_version
     if declared is not None:
         return declared
     if build_config.inherit_base_image_packages:
         return None
-    if requirements_file is not None and build_config.requirements.is_pylock:
-        wanted = _pylock_requires_python(requirements_file)
-        if wanted is not None and f"{DEFAULT_BASE_IMAGE_PYTHON}.0" not in wanted:
-            return str(wanted)
-    return DEFAULT_BASE_IMAGE_PYTHON
+    return DEFAULT_PYTHON
 
 
 def _warn_about_default_python() -> None:
@@ -270,7 +294,7 @@ def _warn_about_default_python() -> None:
     """
     logger.warning(
         f"build_config.requirements.python_version is not set, so this environment "
-        f"is built on Python {DEFAULT_BASE_IMAGE_PYTHON}, the Python of the default "
+        f"is built on Python {DEFAULT_PYTHON}, the Python of the default "
         f"base image. That will change to Python 3.13 in the first minor release "
         f"after {DEFAULT_BASE_IMAGE_CHANGE:%Y-%m-%d}. To pin, set it with "
         f"the `python_version` field in tesseract_config.yaml."
@@ -330,10 +354,10 @@ def _build_pip_venv(
 ) -> Path:
     """Build a uv environment, following ``build_pip_venv.sh``."""
     env = build_config.build_env
-    python_version = _build_python_version(build_config, requirements_file)
+    python_version = _build_python_version(build_config)
     if (
         build_config.effective_python_version is None
-        and python_version == DEFAULT_BASE_IMAGE_PYTHON
+        and python_version == DEFAULT_PYTHON
     ):
         _warn_about_default_python()
     python_executable = _create_venv(
@@ -342,6 +366,8 @@ def _build_pip_venv(
         system_site_packages=build_config.inherit_base_image_packages,
         env=env,
     )
+    if requirements_file is not None and build_config.requirements.is_pylock:
+        _check_lockfile_python(requirements_file, python_executable)
     if requirements_file is not None:
         try:
             # `-r` handles flat files and PEP 751 lockfiles alike, as in

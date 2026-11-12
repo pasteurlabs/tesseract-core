@@ -38,7 +38,7 @@ DEFAULT_STARTUP_TIMEOUT = 30.0
 
 # GPU transports a served Tesseract can enable besides "none". New transports
 # are added here, and to engine.serve if a container needs setup for them.
-GPU_TRANSPORTS = ("cuda_ipc",)
+GPU_TRANSPORTS = ("cuda_ipc", "nixl")
 
 
 class ServedTesseract(Protocol):

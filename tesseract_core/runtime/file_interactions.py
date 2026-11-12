@@ -1,6 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import posixpath
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -35,7 +37,7 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 #
 # A server can enable several transports at once (see the ``gpu_transport``
 # config). New transports are added here and registered in device_transport.
-gpu_transport_type = Literal["none", "cuda_ipc"]
+gpu_transport_type = Literal["none", "cuda_ipc", "nixl"]
 
 # Compressions for array buffers. Disabled compression is ``None`` in the config
 # and in array payloads, and ``"none"`` in an Accept header.
@@ -185,10 +187,27 @@ def get_filesize(path: PathLike) -> int:
         return 0
 
 
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def check_run_id(run_id: str) -> None:
+    """Raise a ValueError unless the run ID uses only letters, digits, '-' and '_'.
+
+    The run ID names a directory in the output path, so nothing else is allowed.
+    """
+    if not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError(
+            f"Invalid run_id {run_id!r}: use only letters, digits, '-' and '_'."
+        )
+
+
 def join_paths(base: PathLike, other: PathLike) -> str:
     """Join the base path (URL or local path) with the given other path.
 
-    If the other path is an absolute URL, return it as is.
+    If the other path is an absolute URL, return it as is. A URL base is treated as
+    a directory and must have the form ``scheme://netloc/path``, as fsspec returns
+    it for a glob match (``file://``, ``http(s)://``, ``s3://``, ``memory://``, ...).
+    A query string or fragment is not supported.
     """
     # Coerce to str to avoid "Cannot mix str and non-str arguments"
     # when mixing PurePosixPath / PureWindowsPath on Windows
@@ -197,7 +216,9 @@ def join_paths(base: PathLike, other: PathLike) -> str:
     if is_absolute_path(other):
         return other
     if is_url(base):
-        return urllib.parse.urljoin(base, other)
+        if urllib.parse.urlsplit(base).scheme not in urllib.parse.uses_relative:
+            return posixpath.join(base, other)
+        return urllib.parse.urljoin(base.rstrip("/") + "/", other)
     return str(Path(base).joinpath(other))
 
 
@@ -214,8 +235,13 @@ def is_url(path: PathLike) -> bool:
 
 
 def parent_path(x: PathLike) -> PathLike:
-    """Get parent of given path (which may be a URL)."""
+    """Get parent of given path (which may be a URL).
+
+    A URL must have the form ``scheme://netloc/path``, as fsspec returns it for a
+    glob match; its parent is everything before the last ``/``. A query string or
+    fragment is not supported, since it may contain ``/`` itself.
+    """
     if is_url(x):
-        return urllib.parse.urljoin(x, "..")
+        return posixpath.dirname(str(x))
 
     return type(x)(str(Path(x).parent))

@@ -1066,9 +1066,11 @@ def serve(
         gpu_transport: GPU transport, or list of them, that the served Tesseract
             accepts besides ``none``, which copies GPU arrays to the host.
             ``cuda_ipc`` passes them by reference and requires ``gpus`` and a
-            shared IPC namespace. Responses only use a transport for requests
-            that ask for it. Any transport needs ``num_workers=1``. An explicit
-            value (including ``none``) wins over a ``gpu_transport`` in
+            shared IPC namespace. ``nixl`` passes them by reference via NIXL,
+            also across hosts, requires ``gpus``, and runs the container on the
+            host network. Responses only use a transport for requests that ask
+            for it. Any transport needs ``num_workers=1``. An explicit value
+            (including ``none``) wins over a ``gpu_transport`` in
             ``runtime_config``, and leaving it unset (``None``) defers to
             ``runtime_config``, falling back to ``none`` when neither sets it.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
@@ -1123,6 +1125,30 @@ def serve(
         gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
     gpu_transports = parse_gpu_transports(gpu_transport)
     environment["TESSERACT_GPU_TRANSPORT"] = ",".join(gpu_transports) or "none"
+
+    if gpu_transports:
+        if num_workers > 1:
+            raise ValueError(
+                f"gpu_transport={environment['TESSERACT_GPU_TRANSPORT']!r} cannot "
+                f"be served by more than one worker (got num_workers={num_workers})."
+            )
+        if not gpus:
+            raise ValueError(
+                f"gpu_transport={environment['TESSERACT_GPU_TRANSPORT']!r} requires "
+                "GPU access, but no GPUs were requested. Pass gpus=['all'] or "
+                "specific GPU IDs."
+            )
+
+    # nixl's UCX agent advertises its own network address to the client, and an
+    # address inside a container's network namespace is unreachable from
+    # outside it, so the container uses the host network.
+    if "nixl" in gpu_transports:
+        if network not in (None, "host"):
+            raise ValueError(
+                f"gpu_transport='nixl' requires host networking, but "
+                f"network={network!r} was requested."
+            )
+        network = "host"
 
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the
@@ -1217,21 +1243,10 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        if gpu_transports and num_workers > 1:
-            raise ValueError(
-                f"gpu_transport={environment['TESSERACT_GPU_TRANSPORT']!r} cannot "
-                f"be served by more than one worker (got num_workers={num_workers})."
-            )
-
-        # Each GPU transport wires up what the container needs for it.
-        if "cuda_ipc" in gpu_transports:
-            # A GPU and a shared IPC namespace between host and container.
-            if not gpus:
-                raise ValueError(
-                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
-                    "were requested. Pass gpus=['all'] or specific GPU IDs."
-                )
-            extra_args.extend(["--ipc=host"])
+        # The GPU transports share GPU memory with other processes on the host
+        # through the host's IPC namespace, nixl only on its same-host paths.
+        if gpu_transports:
+            extra_args.append("--ipc=host")
 
         if network is not None:
             _ensure_network_exists(network)
