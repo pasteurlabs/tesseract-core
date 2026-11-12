@@ -88,6 +88,16 @@ $ pytest --skip-endtoend
 $ pytest --always-run-endtoend tests/endtoend_tests
 ```
 
+The tests in `tests/compat_tests` check this SDK and runtime against a released
+version. CI runs them against the oldest supported release
+(`tesseract_core.__oldest_supported_version__`, raised by hand only for a change
+that cannot keep it working) and the latest one. They need `uv` and are skipped
+unless a version is given:
+
+```console
+$ pytest tests/compat_tests --compat-version 1.13.0
+```
+
 #### Testing philosophy
 
 We follow these principles when writing tests:
