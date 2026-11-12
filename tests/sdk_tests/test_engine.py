@@ -5,6 +5,9 @@ import json
 import logging
 import re
 import socket
+import subprocess
+import sys
+import threading
 import time
 from contextlib import closing
 from pathlib import Path
@@ -2302,3 +2305,43 @@ def test_default_base_image_warning_matches_the_scheduled_change():
     assert current != NEXT_DEFAULT_BASE_IMAGE, (
         "the default has switched: remove the deprecation warning and its tombstone"
     )
+
+
+def test_run_process_stops_the_process_when_interrupted(monkeypatch):
+    """An interrupt terminates the process, and lets a busy reader finish first."""
+    reader_busy = threading.Event()
+    thread_errors = []
+    interrupted = []
+    original_wait = subprocess.Popen.wait
+
+    def slow_echo(line):
+        reader_busy.set()
+        time.sleep(0.5)
+
+    def interrupted_wait(self, timeout=None):
+        if not interrupted:
+            interrupted.append(self)
+            assert reader_busy.wait(timeout=30)
+            raise KeyboardInterrupt
+        return original_wait(self, timeout=timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "wait", interrupted_wait)
+    monkeypatch.setattr(threading, "excepthook", thread_errors.append)
+    threads_before = set(threading.enumerate())
+
+    with pytest.raises(KeyboardInterrupt):
+        docker_client._run_process(
+            [
+                sys.executable,
+                "-c",
+                "import time; print('started', flush=True); time.sleep(60)",
+            ],
+            stream_stdout=slow_echo,
+        )
+
+    (proc,) = interrupted
+    assert proc.returncode is not None
+    assert proc.stdout.closed and proc.stderr.closed
+    for thread in set(threading.enumerate()) - threads_before:
+        thread.join(timeout=5)
+    assert not thread_errors, [args.exc_value for args in thread_errors]
