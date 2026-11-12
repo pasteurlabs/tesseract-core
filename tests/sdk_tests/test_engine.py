@@ -22,6 +22,7 @@ from tesseract_core.sdk.api_parse import (
     DEFAULT_PYTHON,
     TesseractBuildConfig,
     TesseractConfig,
+    get_config,
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
@@ -791,6 +792,30 @@ def test_init(tmpdir, recipe):
     with open(tmpdir / "test_dir/tesseract_config.yaml") as config_yaml:
         test = yaml.safe_load(config_yaml)
         assert test["name"] == "foo"
+
+    # Nothing is pinned by default, so the Tesseract follows our defaults...
+    assert "base_image" not in test["build_config"]
+    assert "requirements" not in test["build_config"]
+
+    # ...but uncommenting the offered pins gives a valid config pinned to the
+    # current defaults.
+    config_path = Path(tmpdir) / "test_dir" / "tesseract_config.yaml"
+    pinned = config_path.read_text()
+    for line in (
+        "  # base_image: ",
+        "  # requirements:",
+        "  #   provider: uv-pip",
+        "  #   python_version: ",
+    ):
+        assert pinned.count(line) == 1, line
+        pinned = pinned.replace(line, line.replace("# ", "", 1))
+    config_path.write_text(pinned)
+    build_config = get_config(config_path.parent).build_config
+    assert (
+        build_config.base_image
+        == TesseractBuildConfig.model_fields["base_image"].default
+    )
+    assert build_config.requirements.python_version == DEFAULT_PYTHON
 
     # Ensure template passes validation
     validate_tesseract_api(api_path.parent)

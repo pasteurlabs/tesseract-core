@@ -1,13 +1,14 @@
 name: Run test suite
 
+# Pull requests run a fast tier of jobs, and the merge queue runs the full
+# matrix. The commit the queue tests is the one that lands on main, so there is
+# no separate run on push to main. .github/scripts/plan_ci.py decides which
+# jobs run.
+
 on:
   pull_request:
 
   merge_group:
-
-  push:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -16,22 +17,100 @@ concurrency:
 env:
   TESSERACT_TEST_KEEP_IMAGES: "1"
 
+  # The Python versions to test with. NOTE: If bumping the oldest version, also
+  # update `requires-python` in pyproject.toml, ruff's `target-version`, and the
+  # other workflows.
+  PYTHON_OLDEST: "3.10"
+  PYTHON_LATEST: "3.15"
+  # For jobs that test a single version, such as the end-to-end test host
+  PYTHON_DEFAULT: "3.14"
+
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      run-demos: ${{ steps.plan.outputs.run-demos }}
+      run-gpu: ${{ steps.plan.outputs.run-gpu }}
+      base-matrix: ${{ steps.plan.outputs.base-matrix }}
+      e2e-matrix: ${{ steps.plan.outputs.e2e-matrix }}
+      pip-install-matrix: ${{ steps.plan.outputs.pip-install-matrix }}
+      demos: ${{ steps.plan.outputs.demos }}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+
+      # Labels are looked up live rather than read from the event payload, so
+      # that adding `ci:full` and re-running the workflow picks it up.
+      - name: Get labels and changed files
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --repo "$REPO" --json labels --jq '.labels[].name' > "$RUNNER_TEMP/labels.txt"
+          # If the files can't be listed, plan_ci.py runs the full matrix.
+          if ! gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' \
+            > "$RUNNER_TEMP/changed_files.txt"; then
+            echo "::warning::Could not list the changed files, so the full matrix runs."
+            rm -f "$RUNNER_TEMP/changed_files.txt"
+          fi
+
+      # The path globs below decide which optional jobs a pull request runs.
+      # They match with fnmatch, where `*` also matches `/`.
+      - name: Plan jobs
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          # Changes to any of these run the full matrix on the pull request.
+          FULL_PATHS: |
+            pyproject.toml
+            production.uv.lock
+            requirements.txt
+            .github/workflows/run_tests.yml
+            .github/scripts/plan_ci.py
+          DEMO_PATHS: |
+            demo/**
+          # The GPU-specific code paths. Broader changes that could still break
+          # GPU serving are caught by the merge queue.
+          GPU_PATHS: |
+            tesseract_core/runtime/cuda/**
+            tesseract_core/runtime/device_transport.py
+            tesseract_core/runtime/array_encoding.py
+            tests/test_cuda_ipc*
+            tests/endtoend_tests/test_serving_gpu.py
+            examples/_gpu_*/**
+        run: |
+          args=(
+            --event "$EVENT"
+            --python-oldest "$PYTHON_OLDEST"
+            --python-latest "$PYTHON_LATEST"
+            --python-default "$PYTHON_DEFAULT"
+            --full-paths "$FULL_PATHS"
+            --demo-paths "$DEMO_PATHS"
+            --gpu-paths "$GPU_PATHS"
+          )
+          if [ "$EVENT" == "pull_request" ]; then
+            args+=(--labels "$RUNNER_TEMP/labels.txt" --changed-files "$RUNNER_TEMP/changed_files.txt")
+          fi
+          python3 .github/scripts/plan_ci.py plan "${args[@]}"
+
   tests-base:
+    needs: [plan]
+
+    name: tests-base (${{ matrix.label }})
+
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
-        # test with oldest and latest supported Python versions
-        # NOTE: If bumping the minimum Python version here, also do it in
-        # ruff.toml, setup.py and other CI files as well.
-        python-version: ["3.10", "3.15"]
-        runtime-deps: ["latest"]
-
-        include:
-          - os: ubuntu-latest
-            python-version: "3.10"
-            runtime-deps: "oldest"
+        include: ${{ fromJson(needs.plan.outputs.base-matrix) }}
 
       fail-fast: false
 
@@ -47,9 +126,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Install package
         run: |
@@ -63,7 +140,21 @@ jobs:
             uv sync --python ${{ matrix.python-version }} --extra dev --frozen
           fi
 
+      # Typeguard breaks coverage's branch mapping (gh#691), so one job runs the
+      # suite with typeguard (enabled via addopts in pyproject.toml) and without
+      # coverage. This is where type annotations are validated in CI.
+      - name: Run test suite with typeguard
+        if: matrix.typeguard
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          uv run --no-sync pytest \
+            -v \
+            --skip-endtoend \
+            --timeout=300
+
       - name: Run test suite
+        if: ${{ !matrix.typeguard }}
         env:
           # Tests build environments in temp dirs. Keep those on the uv cache's
           # drive (RUNNER_TEMP) so uv hardlinks rather than copies on Windows.
@@ -82,122 +173,27 @@ jobs:
             --cov-branch
 
       - name: Upload coverage reports to Codecov
+        if: ${{ !matrix.typeguard }}
         uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
+          flags: base-${{ matrix.os }}-py${{ matrix.python-version }}-${{ matrix.runtime-deps }}
           fail_ci_if_error: true
 
-  # Enforces typeguard's runtime type checks. The coverage jobs disable
-  # typeguard (gh#691), so this is where type annotations are validated in CI.
-  tests-typeguard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    defaults:
-      run:
-        shell: bash -el {0}
-
-    steps:
-      - name: Set up Git repository
-        uses: actions/checkout@v7
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install package
-        run: |
-          cp production.uv.lock uv.lock
-          uv sync --python 3.14 --extra dev --frozen
-
-      - name: Run test suite with typeguard
-        run: |
-          uv run --no-sync pytest \
-            -v \
-            --skip-endtoend \
-            --timeout=300
-
-  get-e2e-matrix:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    outputs:
-      matrix: ${{ steps.get-matrix.outputs.matrix }}
-      demos: ${{ steps.get-matrix.outputs.demos }}
-
-    steps:
-      - name: Set up Git repository
-        uses: actions/checkout@v7
-
-      - name: Get available test matrix
-        id: get-matrix
-        env:
-          EXAMPLES_DIR: examples
-          DEMO_DIR: demo
-        run: |
-          # get JSON array of directories in EXAMPLES_DIR, except ones that start with _
-          subjobs=$(
-            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
-            | grep -v '^_' \
-            | jq -R -s -c 'split("\n")[:-1]'
-          )
-          # add "base" to subjobs
-          subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
-          printf 'matrix=%s\n' "$subjobs" >> $GITHUB_OUTPUT
-
-          # get JSON array of directories in DEMO_DIR, except ones that start with _
-          demos=$(
-            find "${{ env.DEMO_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
-            | grep -v '^_' \
-            | jq -R -s -c 'split("\n")[:-1]'
-          )
-          printf 'demos=%s\n' "$demos" >> $GITHUB_OUTPUT
-
   tests-e2e:
-    needs: [get-e2e-matrix]
+    needs: [plan]
 
-    if: needs.get-e2e-matrix.outputs.matrix != '[]'
+    name: tests-e2e (${{ matrix.label }})
 
     strategy:
       matrix:
-        os: [ubuntu-24.04]
-        python-version: ["3.14"]
-
-        arch: ["x64"]
-        docker-engine: ["docker"]
-
-        unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
-
-        exclude:
-          - arch: x64
-            unit-tesseract: "pyvista-arm64"
-
-        include:
-          # Test on arm to ensure compatibility with Apple M1 chips
-          # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-          - os: "ubuntu-24.04"
-            python-version: "3.14"
-            arch: "arm"
-            docker-engine: "docker"
-            unit-tesseract: "base"
-          - os: "ubuntu-24.04"
-            python-version: "3.14"
-            arch: "arm"
-            docker-engine: "docker"
-            unit-tesseract: "pyvista-arm64"
-          # Run tests using Podman
-          - os: "ubuntu-24.04"
-            python-version: "3.14"
-            arch: "x64"
-            docker-engine: "podman"
-            unit-tesseract: "base"
+        include: ${{ fromJson(needs.plan.outputs.e2e-matrix) }}
 
       fail-fast: false
 
-    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
+    runs-on: ${{ matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 60
 
     defaults:
@@ -208,7 +204,8 @@ jobs:
       - name: Set up Git repository
         uses: actions/checkout@v7
 
-      # Use Conda to install Python (setup-python action doesn't support ARM)
+      # Use Conda to install Python (setup-python action doesn't support ARM).
+      # This also puts conda on the PATH for the conda example's from_source test.
       - uses: conda-incubator/setup-miniconda@v4
         with:
           auto-update-conda: true
@@ -216,9 +213,7 @@ jobs:
           channels: defaults
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
@@ -239,21 +234,28 @@ jobs:
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
 
-      # Build the example here so its layers are cached before the tests run.
-      # test_unit_tesseract_endtoend builds the same example inside the timed
+      # The example tests are split into shards (see plan_ci.py). Build this
+      # shard's examples here so their layers are cached before the tests run.
+      # test_unit_tesseract_endtoend builds the same examples inside the timed
       # test body, and a cold build (pulling the base image plus installing the
       # runtime) can otherwise exceed the per-test --timeout=300. Warming the
-      # layer cache outside pytest's timeout leaves the in-test build as cache
-      # hits. The "base" shard runs no example build, so it is skipped.
-      - name: Pre-build example (warm layer cache)
-        if: matrix.unit-tesseract != 'base'
+      # layer cache outside pytest's timeout leaves the in-test builds as cache
+      # hits. The "base" jobs run no example builds, so they skip this.
+      - name: Pre-build examples (warm layer cache)
+        if: matrix.examples != ''
+        env:
+          EXAMPLES: ${{ matrix.examples }}
         run: |
-          uv run --no-sync tesseract build examples/${{ matrix.unit-tesseract }}
+          for example in $EXAMPLES; do
+            uv run --no-sync tesseract build "examples/$example"
+          done
 
       - name: Run test suite
+        env:
+          EXAMPLES: ${{ matrix.examples }}
         run: |
           # No typeguard here: it breaks coverage's branch mapping (gh#691).
-          if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
+          if [ -z "$EXAMPLES" ]; then
             uv run --no-sync pytest \
               -o addopts="--durations=10" \
               --always-run-endtoend \
@@ -265,6 +267,8 @@ jobs:
               tests/endtoend_tests \
               -k "not test_examples"
           else
+            # Select this shard's examples, e.g. "[helloworld] or [vectoradd]"
+            selection=$(printf '[%s] or ' $EXAMPLES)
             uv run --no-sync pytest \
               -o addopts="--durations=10" \
               --always-run-endtoend \
@@ -274,7 +278,7 @@ jobs:
               --cov-report=xml:coverage.xml \
               --cov=tesseract_core \
               tests/endtoend_tests/test_examples.py \
-              -k "[${{ matrix.unit-tesseract }}]"
+              -k "${selection% or }"
           fi
 
       - name: Upload coverage reports to Codecov
@@ -283,20 +287,18 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
+          flags: e2e-${{ matrix.name }}-${{ matrix.arch }}-${{ matrix.docker-engine }}
           fail_ci_if_error: true
 
   tests-demos:
-    needs: [get-e2e-matrix]
+    needs: [plan]
 
-    if: needs.get-e2e-matrix.outputs.demos != '[]'
+    if: needs.plan.outputs.run-demos == 'true'
 
     strategy:
       matrix:
         os: [ubuntu-latest]
-        # test with oldest supported Python version only (for slow tests)
-        python-version: ["3.10"]
-
-        demo: ${{ fromJson(needs.get-e2e-matrix.outputs.demos) }}
+        demo: ${{ fromJson(needs.plan.outputs.demos) }}
 
       fail-fast: false
 
@@ -308,14 +310,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v10.3.3
 
+      # Test with the oldest supported Python version only (for slow tests)
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ env.PYTHON_OLDEST }}
 
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
@@ -345,6 +346,10 @@ jobs:
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
 
   tests-gpu:
+    needs: [plan]
+
+    if: needs.plan.outputs.run-gpu == 'true'
+
     runs-on: tesseract-ci-gpu
     timeout-minutes: 60
 
@@ -382,14 +387,12 @@ jobs:
           docker run --rm --gpus all ${{ matrix.cuda.base_image }} nvidia-smi
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Install package
         run: |
           cp production.uv.lock uv.lock
-          uv sync --python 3.12 --extra dev --frozen
+          uv sync --python "$PYTHON_DEFAULT" --extra dev --frozen
 
       # cupy/torch/jax with CUDA support are not declared dependencies (they are
       # only needed to *produce* GPU arrays in the tests); install builds for the
@@ -473,39 +476,66 @@ jobs:
           flags: gpu-cuda${{ matrix.cuda.major }}
           fail_ci_if_error: true
 
+  tests-pip-install:
+    needs: [plan]
+
+    if: needs.plan.outputs.full == 'true'
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.pip-install-matrix) }}
+
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: |
+          if [ "${{ matrix.dependencies }}" = "pinned" ]; then
+            echo "Using pinned dependencies"
+            pip install -r requirements.txt
+            pip install --no-deps .
+          else
+            echo "Using latest dependencies"
+            pip install .
+          fi
+
+      - name: Ensure CLI is available
+        run: |
+          tesseract --help
+
+      - name: Ensure basic workflow works
+        # Docker is only available on Linux
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          tesseract build examples/helloworld
+          tesseract run helloworld apply '{"inputs": {"name": "GitHub Actions"}}'
+
   all-ok:
     if: always()
-    needs: [tests-base, tests-typeguard, tests-e2e, tests-demos, tests-gpu]
+    needs:
+      [plan, tests-base, tests-e2e, tests-demos, tests-gpu, tests-pip-install]
 
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+
       - name: Check for errors
-        run: |
-          if [[ "${{ needs.tests-base.result }}" != "success" && "${{ needs.tests-base.result }}" != "skipped" ]]; then
-            echo "Base tests failed"
-            exit 1
-          fi
-
-          if [[ "${{ needs.tests-typeguard.result }}" != "success" && "${{ needs.tests-typeguard.result }}" != "skipped" ]]; then
-            echo "Typeguard tests failed"
-            exit 1
-          fi
-
-          if [[ "${{ needs.tests-e2e.result }}" != "success" && "${{ needs.tests-e2e.result }}" != "skipped" ]]; then
-            echo "E2E tests failed"
-            exit 1
-          fi
-
-          if [[ "${{ needs.tests-demos.result }}" != "success" && "${{ needs.tests-demos.result }}" != "skipped" ]]; then
-            echo "Demo tests failed"
-            exit 1
-          fi
-
-          if [[ "${{ needs.tests-gpu.result }}" != "success" && "${{ needs.tests-gpu.result }}" != "skipped" ]]; then
-            echo "GPU tests failed"
-            exit 1
-          fi
-
-          echo "All tests passed!"
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/plan_ci.py check --needs "$NEEDS"

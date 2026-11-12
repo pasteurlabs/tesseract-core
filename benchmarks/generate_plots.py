@@ -2,13 +2,19 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generate performance plots from pytest-benchmark JSON output.
+r"""Generate performance plots from pytest-benchmark JSON output.
 
 This script generates plots showing Tesseract overhead for various workload
 sizes, helping users understand if their workload is a good fit.
 
+The plots span more array sizes than the default benchmark run, so pass them
+explicitly, for example:
+
+    pytest benchmarks/ --benchmark-json results.json \
+        --array-sizes 10,100,1000,10000,100000,1000000,10000000,100000000
+
 Usage:
-    python generate_plots.py --benchmark-file PATH [--output-dir PATH]
+    python generate_plots.py BENCHMARK_FILE [--output-dir PATH]
 """
 
 from __future__ import annotations

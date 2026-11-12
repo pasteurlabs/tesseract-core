@@ -2,15 +2,24 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compare pytest-benchmark JSON results and generate a markdown report.
+r"""Compare pytest-benchmark JSON results and generate a markdown report.
+
+Each side takes one JSON file per pass of the benchmark suite. A benchmark's
+median can move between two runs of the same code by more than it varies
+between rounds within one run (which CPU cores a server process lands on, for
+example), so a single pass per side is not enough to tell a change from noise.
+With several passes, a benchmark is flagged only if every current pass is more
+than NOTABLE_THRESHOLD_PCT slower (or faster) than every baseline pass.
 
 Usage:
-    python compare_benchmarks.py --current current.json --output output.md [--baseline baseline.json]
+    python compare_benchmarks.py --current current_1.json [current_2.json ...] \
+        --output output.md [--baseline baseline_1.json [baseline_2.json ...]]
 """
 
 import argparse
 import json
 import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -33,8 +42,6 @@ def _short_name(bench: dict) -> str:
         "test_containerized_cli[100]"    -> "cli/apply_100"
         "test_subprocess[100]"           -> "subprocess/apply_100"
         "test_subprocess_shmem[100]"     -> "subprocess-shmem/apply_100"
-        "test_encoding[json_100]"        -> "encoding/json_100"
-        "test_decoding[base64_10,000]"   -> "decoding/base64_10,000"
         "test_roundtrip[binref_1,000]"   -> "roundtrip/binref_1,000"
     """
     name = bench["name"]
@@ -60,8 +67,8 @@ def _short_name(bench: dict) -> str:
     if func == "subprocess_shmem":
         return f"subprocess-shmem/apply_{params}"
 
-    # Array encoding benchmarks: test_encoding[json_100] etc.
-    if func in ("encoding", "decoding", "roundtrip"):
+    # Array encoding benchmarks: test_roundtrip[json_100] etc.
+    if func == "roundtrip":
         return f"{func}/{params}"
 
     return name
@@ -72,7 +79,7 @@ def _parse_short_name(name: str) -> tuple[str, str, int]:
 
     Examples:
         "api/apply_1,000" -> ("api", "apply", 1000)
-        "encoding/json_100" -> ("encoding", "json", 100)
+        "roundtrip/json_100" -> ("roundtrip", "json", 100)
     """
     if "/" in name:
         suite, benchmark = name.split("/", 1)
@@ -124,71 +131,70 @@ def _python_description(data: dict) -> str:
     return " ".join(p for p in (implementation, version) if p) or "unknown"
 
 
-def _load_benchmark_file(path: str | None) -> dict | None:
-    """Load benchmark file, returning None if it doesn't exist."""
-    if path is None or not Path(path).exists():
-        return None
-    with open(path) as f:
-        return json.load(f)
+def _load_passes(paths: list[str] | None) -> list[dict]:
+    """Load the benchmark files of one side, skipping any that don't exist."""
+    passes = []
+    for path in paths or []:
+        if Path(path).exists():
+            with open(path) as f:
+                passes.append(json.load(f))
+    return passes
 
 
-def _index_benchmarks(data: dict) -> dict[str, dict]:
-    """Index benchmarks by short name, keyed to their stats."""
-    result = {}
-    for bench in data.get("benchmarks", []):
-        name = _short_name(bench)
-        result[name] = bench
+def _index_passes(passes: list[dict]) -> dict[str, list[float]]:
+    """Map each benchmark's short name to its median time in ms in every pass."""
+    result: dict[str, list[float]] = {}
+    for data in passes:
+        for bench in data.get("benchmarks", []):
+            result.setdefault(_short_name(bench), []).append(_get_median_ms(bench))
     return result
 
 
-def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
-    """Compute comparison metrics for a single benchmark."""
-    if name not in baseline:
-        curr_median = _get_median_ms(current[name])
-        return {
-            "name": name,
-            "base_median_ms": None,
-            "curr_median_ms": curr_median,
-            "diff_pct": None,
-            "status": ":new:",
-            "notable": True,
-        }
+def _spread_pct(medians: list[float]) -> float | None:
+    """Range of the per-pass medians, relative to their median."""
+    if len(medians) < 2:
+        return None
+    center = statistics.median(medians)
+    if center <= 0:
+        return None
+    return (max(medians) - min(medians)) / center * 100
 
-    if name not in current:
-        base_median = _get_median_ms(baseline[name])
-        return {
-            "name": name,
-            "base_median_ms": base_median,
-            "curr_median_ms": None,
-            "diff_pct": None,
-            "status": ":wastebasket:",
-            "notable": True,
-        }
 
-    base_median = _get_median_ms(baseline[name])
-    curr_median = _get_median_ms(current[name])
+def _compute_comparison(
+    name: str, baseline: dict[str, list[float]], current: dict[str, list[float]]
+) -> dict:
+    """Compare one benchmark, given each side's per-pass medians by name."""
+    base = baseline.get(name)
+    curr = current.get(name)
+    spreads = [_spread_pct(medians) for medians in (base, curr) if medians]
+    spreads = [s for s in spreads if s is not None]
+    comp = {
+        "name": name,
+        "base_median_ms": statistics.median(base) if base else None,
+        "curr_median_ms": statistics.median(curr) if curr else None,
+        "spread_pct": max(spreads) if spreads else None,
+        "diff_pct": None,
+    }
 
-    if base_median > 0:
-        diff_pct = ((curr_median - base_median) / base_median) * 100
+    if base is None:
+        return {**comp, "status": ":new:", "notable": True}
+    if curr is None:
+        return {**comp, "status": ":wastebasket:", "notable": True}
+
+    if comp["base_median_ms"] > 0:
+        comp["diff_pct"] = (comp["curr_median_ms"] / comp["base_median_ms"] - 1) * 100
     else:
-        diff_pct = 0.0
+        comp["diff_pct"] = 0.0
 
-    if diff_pct < -NOTABLE_THRESHOLD_PCT:
-        status = ":rocket: faster"
-    elif diff_pct > NOTABLE_THRESHOLD_PCT:
+    threshold = NOTABLE_THRESHOLD_PCT / 100
+    if min(curr) > max(base) * (1 + threshold):
         status = ":warning: slower"
+    elif max(curr) < min(base) * (1 - threshold):
+        status = ":rocket: faster"
     else:
         status = ":white_check_mark:"
 
-    notable = abs(diff_pct) > NOTABLE_THRESHOLD_PCT
-    return {
-        "name": name,
-        "base_median_ms": base_median,
-        "curr_median_ms": curr_median,
-        "diff_pct": diff_pct,
-        "status": status,
-        "notable": notable,
-    }
+    return {**comp, "status": status, "notable": status != ":white_check_mark:"}
 
 
 def _format_comparison_row(comp: dict) -> str:
@@ -206,11 +212,21 @@ def _format_comparison_row(comp: dict) -> str:
         if comp["status"] == ":new:"
         else "removed"
     )
-    return f"| `{comp['name']}` | {base_str} | {curr_str} | {change_str} | {comp['status']} |"
+    spread_str = f"{comp['spread_pct']:.1f}%" if comp["spread_pct"] is not None else "-"
+    return (
+        f"| `{comp['name']}` | {base_str} | {curr_str} | {change_str} | "
+        f"{spread_str} | {comp['status']} |"
+    )
+
+
+_TABLE_HEADER = [
+    "| Benchmark | Baseline | Current | Change | Spread | Status |",
+    "|-----------|----------|---------|--------|--------|--------|",
+]
 
 
 def _generate_current_only_report(
-    current: dict[str, dict],
+    current: dict[str, list[float]],
     current_data: dict,
     pr_number: str | None = None,
     notice: str = ":information_source: No baseline found — all benchmarks marked as new.",
@@ -228,8 +244,7 @@ def _generate_current_only_report(
         "",
         "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
         "",
-        "| Benchmark | Baseline | Current | Change | Status |",
-        "|-----------|----------|---------|--------|--------|",
+        *_TABLE_HEADER,
     ]
 
     for comp in comparisons:
@@ -251,50 +266,53 @@ def _generate_current_only_report(
 
 
 def generate_report(
-    baseline_path: str | None, current_path: str, pr_number: str | None = None
+    baseline_paths: list[str] | None,
+    current_paths: list[str],
+    pr_number: str | None = None,
 ) -> str | None:
     """Generate markdown comparison report.
 
     Returns None only if current results don't exist.
     If baseline doesn't exist, generates a report with current results only.
     """
-    baseline_data = _load_benchmark_file(baseline_path)
-    current_data = _load_benchmark_file(current_path)
+    baseline_passes = _load_passes(baseline_paths)
+    current_passes = _load_passes(current_paths)
 
-    if current_data is None:
+    if not current_passes:
         return None
 
-    current = _index_benchmarks(current_data)
+    current_data = current_passes[0]
+    current = _index_passes(current_passes)
 
-    if baseline_data is None:
+    if not baseline_passes:
         return _generate_current_only_report(current, current_data, pr_number)
 
     # Timings from different interpreters can differ by more than the notable
     # threshold, which the report would then attribute to the PR.
-    baseline_python = _python_description(baseline_data)
-    current_python = _python_description(current_data)
-    if baseline_python != current_python:
+    baseline_pythons = {_python_description(d) for d in baseline_passes}
+    current_pythons = {_python_description(d) for d in current_passes}
+    if len(baseline_pythons | current_pythons) > 1:
         return _generate_current_only_report(
             current,
             current_data,
             pr_number,
             notice=(
-                f":warning: Baseline ran on {baseline_python} but current ran on "
-                f"{current_python}, so the results are not comparable. "
-                "Showing current results only."
+                f":warning: Baseline ran on {', '.join(sorted(baseline_pythons))} but "
+                f"current ran on {', '.join(sorted(current_pythons))}, so the results "
+                "are not comparable. Showing current results only."
             ),
         )
 
-    baseline = _index_benchmarks(baseline_data)
+    baseline = _index_passes(baseline_passes)
 
     all_names = _sort_names(list(set(baseline.keys()) | set(current.keys())))
     comparisons = [_compute_comparison(name, baseline, current) for name in all_names]
 
     notable = [c for c in comparisons if c["notable"]]
-    diffs = [c["diff_pct"] for c in comparisons if c["diff_pct"] is not None]
-    num_faster = sum(1 for d in diffs if d < -NOTABLE_THRESHOLD_PCT)
-    num_slower = sum(1 for d in diffs if d > NOTABLE_THRESHOLD_PCT)
-    num_same = sum(1 for d in diffs if abs(d) <= NOTABLE_THRESHOLD_PCT)
+    statuses = [c["status"] for c in comparisons if c["diff_pct"] is not None]
+    num_faster = statuses.count(":rocket: faster")
+    num_slower = statuses.count(":warning: slower")
+    num_same = statuses.count(":white_check_mark:")
 
     lines = [
         "## Benchmark Results",
@@ -306,14 +324,7 @@ def generate_report(
     ]
 
     if notable:
-        lines.extend(
-            [
-                "### Notable changes",
-                "",
-                "| Benchmark | Baseline | Current | Change | Status |",
-                "|-----------|----------|---------|--------|--------|",
-            ]
-        )
+        lines.extend(["### Notable changes", "", *_TABLE_HEADER])
         for comp in notable:
             lines.append(_format_comparison_row(comp))
         lines.append("")
@@ -330,15 +341,24 @@ def generate_report(
             "<details>",
             "<summary>Full results</summary>",
             "",
-            "| Benchmark | Baseline | Current | Change | Status |",
-            "|-----------|----------|---------|--------|--------|",
+            *_TABLE_HEADER,
         ]
     )
     for comp in comparisons:
         lines.append(_format_comparison_row(comp))
 
+    method_note = (
+        f"Ran {len(baseline_passes)} baseline and {len(current_passes)} current "
+        "passes, alternating between the two. A benchmark is flagged only if "
+        "every current pass differs from every baseline pass by more than "
+        f"{NOTABLE_THRESHOLD_PCT}% in the same direction. Times are the median "
+        "over passes of each pass's median. Spread is the range of the per-pass "
+        "medians on the noisier side, relative to its median."
+    )
     lines.extend(
         [
+            "",
+            method_note,
             "",
             *_metadata_lines(current_data, pr_number),
             "",
@@ -352,16 +372,26 @@ def generate_report(
 def main() -> int:
     """Main function to compare benchmarks and generate report."""
     parser = argparse.ArgumentParser(description="Compare benchmark results.")
-    parser.add_argument("--baseline", default=None, help="Baseline benchmark JSON file")
-    parser.add_argument("--current", required=True, help="Current benchmark JSON file")
+    parser.add_argument(
+        "--baseline",
+        nargs="+",
+        default=None,
+        help="Baseline benchmark JSON files, one per pass",
+    )
+    parser.add_argument(
+        "--current",
+        nargs="+",
+        required=True,
+        help="Current benchmark JSON files, one per pass",
+    )
     parser.add_argument("--output", required=True, help="Output markdown report path")
     parser.add_argument(
         "--pr-number", default=None, help="PR number to record in the report"
     )
     args = parser.parse_args()
 
-    if not Path(args.current).exists():
-        print(f"Current benchmark file not found: {args.current}", file=sys.stderr)
+    if not any(Path(path).exists() for path in args.current):
+        print(f"Current benchmark files not found: {args.current}", file=sys.stderr)
         return 1
 
     report = generate_report(args.baseline, args.current, args.pr_number)
