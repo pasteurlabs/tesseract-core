@@ -237,6 +237,43 @@ def _get_current_backend() -> BaseBackend:
         ) from exc
 
 
+class _SinkRoutedStream:
+    """Stands in for ``sys.stdout`` or ``sys.stderr`` while a log sink is active.
+
+    The thread running the sink gets the original stream, and every other
+    thread gets the redirected one.
+    """
+
+    def __init__(
+        self, redirected: Any, original: Any, sink_state: threading.local
+    ) -> None:
+        object.__setattr__(self, "_redirected", redirected)
+        object.__setattr__(self, "_original", original)
+        object.__setattr__(self, "_sink_state", sink_state)
+
+    def _current_stream(self) -> Any:
+        if getattr(self._sink_state, "active", False):
+            return self._original
+        return self._redirected
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._current_stream(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._current_stream(), name, value)
+
+    # Python looks up these methods on the class, bypassing __getattr__.
+    def __enter__(self) -> Any:
+        self._current_stream().__enter__()
+        return self
+
+    def __exit__(self, *exc_info: object) -> Any:
+        return self._current_stream().__exit__(*exc_info)
+
+    def __iter__(self) -> Any:
+        return iter(self._current_stream())
+
+
 @contextmanager
 def redirect_stdio(
     logfile: str | Path,
@@ -300,14 +337,23 @@ def redirect_stdio(
 
         if log_sink is not None:
             # Wrap the user sink so it writes to the *original* stdout/stderr,
-            # preventing infinite recursion when the sink itself prints.
+            # preventing infinite recursion when the sink itself prints. Only
+            # the thread running the sink is rerouted, because the code being
+            # logged keeps printing meanwhile and its output belongs in the log.
+            sink_state = threading.local()
+
             def safe_sink(msg: str) -> None:
-                old_stdout, old_stderr = sys.stdout, sys.stderr
-                sys.stdout, sys.stderr = orig_stdout_file, orig_stderr_file
+                sink_state.active = True
                 try:
                     log_sink(msg)
                 finally:
-                    sys.stdout, sys.stderr = old_stdout, old_stderr
+                    sink_state.active = False
+
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            sys.stdout = _SinkRoutedStream(old_stdout, orig_stdout_file, sink_state)
+            sys.stderr = _SinkRoutedStream(old_stderr, orig_stderr_file, sink_state)
+            stack.callback(setattr, sys, "stderr", old_stderr)
+            stack.callback(setattr, sys, "stdout", old_stdout)
 
             streamer = LogStreamer(logfile, safe_sink)
             streamer.start()
