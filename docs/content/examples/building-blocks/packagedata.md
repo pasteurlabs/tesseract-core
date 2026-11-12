@@ -12,14 +12,14 @@ You may need to include local files into your Tesseract, e.g. if we want to load
 
 In this example, we want to include and process `parameters.json` file in our Tesseract.
 
-In order to achieve this, we must modify the `tesseract_config.yaml` file with the source (local path) and the target destinations (location in the Tesseract container).
+`Tesseract.from_source` runs `tesseract_api.py` where it is, so `apply` can read `parameters.json` from the same directory without further setup. A container image only contains the files you copy into it. To include the file in images built with `tesseract build`, we add it to `package_data` in `tesseract_config.yaml`, with the source (a local path) and the destination (a path in the container, relative to the directory that holds `tesseract_api.py`).
 
 ```{literalinclude} ../../../../examples/package_data/tesseract_config.yaml
 :language: yaml
 :start-at: build_config:
 ```
 
-Now that it is included in the build config, we can use it in our Tesseracts apply function as normal.
+Since the target path matches the source path, the file sits next to `tesseract_api.py` in both cases, and the `apply` function can locate it relative to its own module:
 
 ```{literalinclude} ../../../../examples/package_data/tesseract_api.py
 :language: python

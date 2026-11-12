@@ -3,6 +3,7 @@
 
 import time
 from functools import wraps
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -13,6 +14,8 @@ from numpyro.infer import MCMC, NUTS, SA
 from tesseract_jax import apply_tesseract
 
 from tesseract_core import Tesseract
+
+HERE = Path(__file__).parent
 
 
 def instrument(tesseract):
@@ -45,14 +48,16 @@ NUM_SAMPLES = 200
 
 # ── Step 1: Serve the JAX Lorenz Tesseract ──────────────────────────────
 print("=== Step 1: Serving JAX Lorenz Tesseract ===")
-lorenz = Tesseract.from_image("lorenz")
+lorenz = Tesseract.from_source(
+    HERE / "../data-assimilation/lorenz_tesseract/tesseract_api.py"
+)
 lorenz.serve()
 instrument(lorenz)
 print(f"Available endpoints: {lorenz.available_endpoints}")
 
 # ── Step 2: Generate synthetic observations ─────────────────────────────
 print("\n=== Step 2: Generating synthetic observations ===")
-data = np.load("lorenz96_two_scale_F_18_sample_0_small.npz")
+data = np.load(HERE / "lorenz96_two_scale_F_18_sample_0_small.npz")
 X_states = data["X_states"]
 true_trajectory = X_states[500:]
 X0 = true_trajectory[0]
@@ -153,7 +158,7 @@ print("NUTS posterior check PASSED")
 
 # ── Step 6: Test finite-diff Tesseract ──────────────────────────────────
 print("\n=== Step 6: Serving finite-diff Lorenz Tesseract ===")
-lorenz_fd = Tesseract.from_image("lorenz-finitediff")
+lorenz_fd = Tesseract.from_source(HERE / "lorenz_tesseract_finitediff/tesseract_api.py")
 lorenz_fd.serve()
 instrument(lorenz_fd)
 print(f"Available endpoints: {lorenz_fd.available_endpoints}")

@@ -1,4 +1,4 @@
-# Tips for Defining Tesseract APIs
+# Tips for defining Tesseract APIs
 
 ## Advanced Pydantic features
 
@@ -55,9 +55,9 @@ In case you run into issues with Pydantic features not listed here, please [open
 
 (x86-vs-arm)=
 
-### 🔪 Sharp edge: x86 vs ARM architecture on Apple Silicon
+### 🔪 Sharp edge: x86 vs ARM images on Apple Silicon
 
-If you're using a Mac, your system uses the ARM64 processor architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64). This can lead to architecture incompatibilities when building or running Tesseracts.
+If you're using a Mac, your system uses the ARM64 processor architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64). This can lead to architecture incompatibilities when building or running Tesseract images. `Tesseract.from_source` installs packages for the platform you run it on, so this section does not apply to it.
 
 **Common symptoms:**
 
@@ -79,7 +79,7 @@ If you're using a Mac, your system uses the ARM64 processor architecture, while 
 
    Note this uses QEMU emulation and will be slower to build, but produces images that work everywhere.
 
-2. **Build for your native architecture (for local development):** By default, Tesseract builds for your native platform. If you only need to run locally, this is faster. You can explicitly set it in `tesseract_config.yaml`:
+2. **Build for your native architecture:** By default, Tesseract builds for your native platform. If you only need to run the image on your own machine, this is faster. You can explicitly set it in `tesseract_config.yaml`:
 
    ```yaml
    # tesseract_config.yaml
@@ -89,7 +89,7 @@ If you're using a Mac, your system uses the ARM64 processor architecture, while 
 
 3. **Use ARM-compatible base images:** Some base images don't have ARM64 variants. Check that your base image supports ARM64 (e.g., `python:3.11-slim` supports both architectures).
 
-4. **Handle packages without Linux ARM64 wheels:** Some Python packages don't provide pre-built wheels for Linux ARM64. Note that a macOS ARM64 wheel is not sufficient here, since Tesseracts run in Linux containers.
+4. **Handle packages without Linux ARM64 wheels:** Some Python packages don't provide pre-built wheels for Linux ARM64. Note that a macOS ARM64 wheel is not sufficient here, since Tesseract images are Linux containers.
 
    One solution is to include the system packages required to build the wheel from source during the `tesseract build` step by specifying the `extra_packages` build option. Common required packages may include `build-essential`, `gcc`, or `nvidia-cuda-toolkit`:
 
@@ -127,11 +127,20 @@ class InputSchema(BaseModel):
         return v + 1
 ```
 
-## Building Tesseracts with private dependencies
+## Private dependencies
 
 Tesseracts can depend on packages that are not publicly available: private git
-repositories, authenticated package indices, or internal wheels. There are three
-ways to supply these at build time, depending on how the dependency is fetched.
+repositories, authenticated package indices, or internal wheels.
+
+`Tesseract.from_source` installs dependencies as your user and with your environment,
+so it uses the same credentials as your own installs, such as your SSH setup for
+`git+ssh` dependencies, and `~/.netrc`, a keyring, or `UV_INDEX_*` variables for
+authenticated HTTPS hosts. It ignores `build_config.host_credentials` and logs a
+warning if they are set.
+
+`tesseract build` installs dependencies inside a Docker build, which does not see your
+credentials unless you pass them in. There are three ways to supply private
+dependencies to it, depending on how they are fetched.
 
 ### Private git repositories over SSH
 
@@ -200,6 +209,7 @@ fetch a dependency on the build machine and add it as a
 To pass options to the package resolver during the build, set `build_config.build_env`.
 These environment variables apply only to the build stage, not the final image, which
 makes them a good fit for [uv resolver settings](https://docs.astral.sh/uv/reference/environment/).
+`Tesseract.from_source` also sets them when it builds its environment.
 For example, when drawing from multiple indices that share package names, let uv pick
 the best match across all of them:
 
@@ -215,9 +225,11 @@ build_config:
 secrets. Use `host_credentials` and `--secret` for credentials.
 ```
 
+(setting-environment-variables)=
+
 ## Setting environment variables
 
-Use the top-level `env` field in `tesseract_config.yaml` to set environment variables in the container. These are baked into the Docker image as `ENV` directives and available at both build time (during `RUN` steps after injection) and runtime.
+Use the top-level `env` field in `tesseract_config.yaml` to set environment variables for the Tesseract, whether it runs with `Tesseract.from_source` or from a built image.
 
 ```yaml
 # tesseract_config.yaml
@@ -226,7 +238,7 @@ env:
   OMP_NUM_THREADS: "4"
 ```
 
-This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenMP thread counts) without modifying your code. You can also override or extend these at runtime with `tesseract serve --env` or `tesseract run --env`.
+This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenMP thread counts) without modifying your code. For a built image, you can also override or extend these at runtime with `tesseract serve --env` or `tesseract run --env`.
 
 ```{warning}
 `env` values are baked into the image and visible via `docker inspect`, so they must not contain secrets. For build-time credentials use `host_credentials` with `--secret`. For build-only, non-secret settings use `build_config.build_env` (see [Tuning dependency resolution](#tuning-dependency-resolution)).
@@ -234,7 +246,13 @@ This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenM
 
 ## Customizing the build process
 
-The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) controls how the Tesseract image is built. Common reasons to customize it:
+The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) controls how the Tesseract image is built.
+
+```{note}
+The options below only affect built images. `Tesseract.from_source` ignores them, uses the system libraries on your machine, and reads data files in place.
+```
+
+Common reasons to customize it:
 
 - **Your code needs system libraries** (e.g., `gfortran`, `libgomp1`) — use `extra_packages` to install them via `apt-get`.
 - **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
@@ -246,7 +264,7 @@ The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) 
 For the full list of options and their defaults, see the [Configuration reference](../reference/config.md).
 ```
 
-For worked examples, see the [Package Data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran Integration](../examples/building-blocks/fortran.md) building blocks.
+For worked examples, see the [Package data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran integration](../examples/building-blocks/fortran.md) building blocks.
 
 ## Creating a Tesseract from a Python package
 

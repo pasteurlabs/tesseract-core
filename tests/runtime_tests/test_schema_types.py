@@ -10,6 +10,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from schema_example_generator import generate_example
 
+from tesseract_core.runtime.array_encoding import get_array_model
 from tesseract_core.runtime.experimental import LazySequence
 from tesseract_core.runtime.schema_types import (
     Array,
@@ -373,6 +374,22 @@ def test_json_schema_flags_and_typenames():
     scalar_int_def = _maybe_resolve_ref(schema["properties"]["scalar_int"])
     assert scalar_int_def["array_flags"] == ["DIFFERENTIABLE"]
 
+    assert array_int_def["array_dtype"] == "int64"
+    assert array_float_def["array_dtype"] == "float64"
+    assert array_bool_def["array_dtype"] == "bool"
+    assert scalar_int_def["array_dtype"] == "int32"
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int32", "complex64", None])
+def test_json_schema_array_dtype(dtype):
+    """The declared dtype is exposed, since the accepted-dtype enum cannot identify it.
+
+    A Float32 and a Float64 field accept the same dtypes, and a field with no
+    declared dtype accepts every dtype.
+    """
+    schema = get_array_model(Ellipsis, dtype, []).model_json_schema()
+    assert schema["array_dtype"] == dtype
+
 
 def test_lazy_sequence_array(tmpdir):
     class MyLazyModel(BaseModel):
@@ -491,6 +508,38 @@ def test_lazy_sequence_remote_glob():
     try:
         model = MyLazyModel(py_seq="@memory://lazy/inputs_*.json")
         assert list(model.py_seq) == test_seq
+    finally:
+        fs.rm("/lazy", recursive=True)
+
+
+def test_lazy_sequence_remote_glob_relative_binref(tmpdir):
+    import fsspec
+
+    class MyLazyModel(BaseModel):
+        array_int_seq: LazySequence[Array[(2, 3), Int64]]
+
+    encoded_array = {
+        "object_type": "array",
+        "shape": [2, 3],
+        "dtype": "int64",
+        "data": {"buffer": "inputs_0.bin:0", "encoding": "binref"},
+    }
+    item_dir = tmpdir.mkdir("items")
+    (item_dir / "inputs_0.bin").write_binary(arr_int.tobytes())
+    (item_dir / "inputs_0.json").write(json.dumps(encoded_array))
+    model = MyLazyModel(array_int_seq=f"@file://{item_dir}/inputs_*.json")
+    assert np.array_equal(model.array_int_seq[0], arr_int)
+
+    fs = fsspec.filesystem("memory")
+    fs.pipe(
+        {
+            "/lazy/items/inputs_0.json": json.dumps(encoded_array).encode(),
+            "/lazy/items/inputs_0.bin": arr_int.tobytes(),
+        }
+    )
+    try:
+        model = MyLazyModel(array_int_seq="@memory://lazy/items/inputs_*.json")
+        assert np.array_equal(model.array_int_seq[0], arr_int)
     finally:
         fs.rm("/lazy", recursive=True)
 

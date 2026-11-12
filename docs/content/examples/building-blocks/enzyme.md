@@ -1,10 +1,10 @@
-# Differentiating Compiled Code (Enzyme + Fortran)
+# Differentiating compiled code (Enzyme + Fortran)
 
 {gh-tree}`View on GitHub <examples/fortran_enzyme>`
 
 ## Context
 
-The {doc}`Fortran Integration <fortran>` example wraps a compiled solver as a Tesseract, but stops at the forward pass. This example adds **exact, machine-precision derivatives** with no hand-written adjoint code: the solver is compiled to LLVM IR with [LFortran](https://lfortran.org/), [Enzyme](https://enzyme.mit.edu/) generates forward- and reverse-mode derivatives directly from that IR, and the result is a shared library exposing all three differentiable endpoints. The pattern applies to any code that lowers to LLVM IR (C, C++, Rust).
+The {doc}`Fortran integration <fortran>` example wraps a compiled solver as a Tesseract, but stops at the forward pass. This example adds **exact, machine-precision derivatives** with no hand-written adjoint code: the solver is compiled to LLVM IR with [LFortran](https://lfortran.org/), [Enzyme](https://enzyme.mit.edu/) generates forward- and reverse-mode derivatives directly from that IR, and the result is a shared library exposing all three differentiable endpoints. The pattern applies to any code that lowers to LLVM IR (C, C++, Rust).
 
 ## Example Tesseract (examples/fortran_enzyme)
 
@@ -88,5 +88,5 @@ To differentiate your own compiled code with Enzyme:
 ## See also
 
 - {ref}`tr-autodiff` for background on differentiable programming in Tesseracts
-- The {doc}`Fortran Integration <fortran>` building block for wrapping a compiled solver without gradients
-- The {doc}`Finite Difference Gradients <finitediff>` building block for an inexact, framework-free alternative
+- The {doc}`Fortran integration <fortran>` building block for wrapping a compiled solver without gradients
+- The {doc}`Finite difference gradients <finitediff>` building block for an inexact, framework-free alternative

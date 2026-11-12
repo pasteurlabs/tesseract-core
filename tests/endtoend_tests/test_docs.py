@@ -14,9 +14,12 @@ MyST comments, which are not rendered, steer the run:
   lines runs hidden setup code.
 
 Each page gets one shell session. It starts in the repository root, keeps its
-working directory across commands, and sets ``$REPO_ROOT`` and ``$DOC_TMPDIR``.
+working directory and exported variables across commands, and sets
+``$REPO_ROOT`` and ``$DOC_TMPDIR``.
 After ``tesseract serve``, the placeholders ``<tesseract-address>`` and ``<port>``
-point at the served Tesseract, which is torn down after the page.
+point at the served Tesseract, which is torn down after the page. Background
+processes whose PID is written to ``$DOC_TMPDIR/<name>.pid`` are killed after
+the page, even if it fails.
 
 In rich tables, IDs, addresses, and container names are masked, and expected
 rows only need to appear somewhere in the output, so other running Tesseracts
@@ -28,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -65,7 +69,11 @@ class ShellSession:
             cmd = cmd.replace(placeholder, value)
 
         cwd_file = self.tmpdir / ".cwd"
-        script = f'{cmd}\n__rc=$?; pwd > "{cwd_file}"; exit $__rc'
+        env_file = self.tmpdir / ".env"
+        script = (
+            f'[ -f "{env_file}" ] && . "{env_file}"\n'
+            f'{cmd}\n__rc=$?; pwd > "{cwd_file}"; export -p > "{env_file}"; exit $__rc'
+        )
         env = {
             **os.environ,
             "REPO_ROOT": str(REPO_ROOT),
@@ -94,6 +102,11 @@ class ShellSession:
         return res
 
     def close(self):
+        for pid_file in self.tmpdir.glob("*.pid"):
+            try:
+                os.kill(int(pid_file.read_text()), signal.SIGTERM)
+            except (ValueError, ProcessLookupError):
+                pass
         if self.served_containers:
             subprocess.run(
                 ["tesseract", "teardown", *self.served_containers],

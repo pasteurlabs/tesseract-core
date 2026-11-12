@@ -5,7 +5,7 @@ name: "{{name}}"
 version: "unknown"
 description: ""
 
-# Environment variables to set in the container
+# Environment variables to set when serving the Tesseract
 # env:
 #   MY_VAR: "my_value"
 
@@ -14,35 +14,39 @@ description: ""
 #   key: value
 
 build_config:
-  # Base image to use for the container, must be Ubuntu or Debian-based
+  # Options marked (images only) are used by `tesseract build` and ignored by
+  # `Tesseract.from_source`.
+
+  # Base image for the container, must be Ubuntu or Debian-based (images only)
   # base_image: "debian:bookworm-slim"
 
-  # Python version to use inside the container (e.g. "3.12"). When set, the given
-  # version is installed via `uv python install`, decoupling it from the base
-  # image. When unset, the base image's system Python is used. Only available for
-  # the uv-pip provider; with conda, set the version in tesseract_environment.yaml.
+  # Python version to use for the Tesseract's environment (e.g. "3.12"), installed
+  # via uv if needed. When unset, container images use the base image's system
+  # Python. Only available for the uv-pip provider; with conda, set the version in
+  # tesseract_environment.yaml.
   # requirements:
   #   provider: uv-pip
   #   python_version: "3.12"
 
   # If true, create the Python virtual environment with --system-site-packages so
-  # it inherits packages pre-installed in the base image. Cannot be combined with
+  # it inherits packages pre-installed in the base image (or, with
+  # `Tesseract.from_source`, in the host Python). Cannot be combined with
   # requirements.python_version.
   # inherit_base_image_packages: false
 
-  # Platform to build the container for. In general, images can only be executed
-  # on the platform they were built for.
+  # Platform to build the container for (images only). In general, images can
+  # only be executed on the platform they were built for.
   target_platform: "native"
 
-  # Additional packages to install in the container (via apt-get)
+  # Additional packages to install in the container via apt-get (images only)
   # extra_packages:
   #  - package_name
 
-  # Data to copy into the container, relative to the project root
+  # Data to copy into the container, relative to the project root (images only)
   # package_data:
   #  - [path/to/source, path/to/destination]
 
-  # Additional Dockerfile commands to run during the build process
+  # Additional Dockerfile commands to run during the build process (images only)
   # custom_build_steps:
   #  - |
   #   RUN echo "Hello, World!"

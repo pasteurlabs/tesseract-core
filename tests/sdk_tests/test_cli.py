@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from tesseract_core.sdk.cli import app as cli
+from tesseract_core.sdk.exceptions import UserError
 
 
 def test_suggestion_on_misspelled_command(cli_runner):
@@ -35,6 +36,15 @@ def test_version(cli_runner):
     assert __version__ in result.stdout
 
 
+def test_init_refuses_existing_files_as_user_error(cli_runner, tmp_path):
+    args = ["init", "--name", "foo", "--target-dir", str(tmp_path)]
+    assert cli_runner.invoke(cli, args).exit_code == 0
+
+    result = cli_runner.invoke(cli, args)
+    assert isinstance(result.exception, UserError), result.exception
+    assert "tesseract_api.py already exists" in str(result.exception)
+
+
 @pytest.mark.parametrize("cmd", ["serve", "run"])
 def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     """cuda_ipc is a GPU transport, not a host output format, and never on the CLI.
@@ -52,6 +62,58 @@ def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
     )
     result = cli_runner.invoke(cli, command)
     assert result.exit_code == 2, result.stdout
+
+
+def test_serve_accepts_valid_gpu_transport(cli_runner, mocked_docker, mocker):
+    # NO_COLOR ensures Rich isn't wrapping output symbols
+    help_result = cli_runner.invoke(cli, ["serve", "--help"], env={"NO_COLOR": "1"})
+    assert "GPU transport" in help_result.stdout
+
+    mocker.patch("tesseract_core.sdk.cli._display_container_meta", return_value={})
+
+    command = ["serve", "some-image", "--gpu-transport", "none"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 0
+
+    command = ["serve", "some-image", "--gpu-transport", "wrong"]
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 2
+
+
+@pytest.mark.parametrize("port", ["8000:8081", "8000-8080-9000"])
+def test_serve_rejects_malformed_port(cli_runner, port):
+    result = cli_runner.invoke(cli, ["serve", "some-image", "-p", port])
+    assert result.exit_code == 2, result.stdout
+    assert "Invalid value for port" in result.stderr
+
+
+@pytest.mark.parametrize("user", [None, "1000"])
+def test_run_test_spec_with_null_cli_config(
+    cli_runner, mocked_docker, mocker, tmp_path, user
+):
+    from tesseract_core.runtime.testing.regression import TestCliConfig, TestSpec
+
+    spec = TestSpec(
+        endpoint="apply",
+        payload={"inputs": {}},
+        expected_outputs={},
+        cli_config=None if user is None else TestCliConfig(user=user),
+    )
+    spec_path = tmp_path / "test_apply.json"
+    spec_path.write_text(spec.model_dump_json())
+    mocked_run = mocker.patch(
+        "tesseract_core.sdk.engine.run_tesseract", return_value=("{}", "")
+    )
+
+    result = cli_runner.invoke(
+        cli,
+        ["run", "some-image", "test", f"@{spec_path}"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    assert mocked_run.call_args.kwargs["user"] == user
+    assert mocked_run.call_args.kwargs["volumes"] == []
+    assert mocked_run.call_args.kwargs["input_path"] is None
 
 
 def test_bad_docker_executable_env_var():

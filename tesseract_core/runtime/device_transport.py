@@ -5,13 +5,13 @@
 
 A *device transport* moves a GPU array's bytes from a producer process to a
 consumer process without a host round-trip. It is selected via the runtime's
-``gpu_transport`` config, independently of the host-array output format;
-``cuda_ipc`` is the first such transport. This module defines the common
-interface they share so further transports (VMM-fd map-and-read, and later
-cross-host NCCL/NIXL) slot in behind one dispatch path instead of each bolting a
-new encoder, wire format, and release hook onto the runtime.
+``gpu_transport`` config, independently of the host-array output format.
+``cuda_ipc`` and ``nixl`` are such transports. This module defines the
+interface they share, so the runtime encodes, decodes and releases arrays of
+any transport, including future ones such as VMM-fd map-and-read or NCCL,
+through one dispatch path.
 
-The interface follows the lifecycle the ``cuda_ipc`` code already uses:
+Each transport implements this lifecycle:
 
 * :meth:`DeviceTransport.register` -- encode side: pin the source array and
   return an opaque per-array handle.
@@ -33,6 +33,8 @@ The interface follows the lifecycle the ``cuda_ipc`` code already uses:
 from __future__ import annotations
 
 import abc
+import importlib
+import threading
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -101,7 +103,7 @@ class DeviceTransport(abc.ABC):
         """Decode side: materialise ``val`` into a fresh consumer-owned buffer.
 
         Returns the framework-agnostic on-GPU wrapper the consumer adopts
-        (``IpcDeviceArray`` for the CUDA transports), unchanged across
+        (``DeviceArray`` for the CUDA transports), unchanged across
         transports so the consumer-facing surface never forks.
         """
 
@@ -116,10 +118,36 @@ class DeviceTransport(abc.ABC):
 #
 # Transports register here by name, keyed by their ``gpu_transport`` value, so
 # the encode/decode dispatch and the eventual negotiation endpoint go through
-# one table rather than a chain of ``if encoding == ...`` branches. Built-in
-# transports are registered by the runtime package ``__init__``.
+# one table rather than a chain of ``if encoding == ...`` branches.
+#
+# Built-in transports register on the first lookup rather than in the runtime
+# package's ``__init__``. A thread that imports a runtime submodule while another
+# thread still runs that ``__init__`` can get the partly initialized package, and
+# would find no transports.
 
 _TRANSPORTS: dict[str, DeviceTransport] = {}
+
+# (module, class name) of each built-in transport.
+_BUILTIN_TRANSPORTS = (
+    ("tesseract_core.runtime.cuda.ipc", "CudaIpcTransport"),
+    ("tesseract_core.runtime.cuda.nixl", "NixlTransport"),
+)
+_BUILTINS_LOCK = threading.Lock()
+_builtins_registered = False
+
+
+def _register_builtin_transports() -> None:
+    """Register the built-in transports, once per process."""
+    global _builtins_registered
+    if _builtins_registered:
+        return
+    with _BUILTINS_LOCK:
+        if _builtins_registered:
+            return
+        for module, class_name in _BUILTIN_TRANSPORTS:
+            transport = getattr(importlib.import_module(module), class_name)()
+            _TRANSPORTS.setdefault(transport.name, transport)
+        _builtins_registered = True
 
 
 def register_transport(transport: DeviceTransport) -> DeviceTransport:
@@ -130,6 +158,7 @@ def register_transport(transport: DeviceTransport) -> DeviceTransport:
 
 def get_transport(name: str) -> DeviceTransport:
     """Look up a registered transport by name."""
+    _register_builtin_transports()
     if name not in _TRANSPORTS:
         raise KeyError(
             f"No device transport registered under {name!r} "
@@ -148,4 +177,5 @@ def available_transports() -> tuple[str, ...]:
     A caller deciding what to offer a client must apply that gating itself and
     not treat this list as the enabled set.
     """
+    _register_builtin_transports()
     return tuple(sorted(_TRANSPORTS))

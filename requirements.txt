@@ -4,7 +4,7 @@ annotated-doc==0.0.5
     # via typer
 annotated-types==0.8.0
     # via pydantic
-certifi==2026.10.18
+certifi==2026.10.23
     # via requests
 charset-normalizer==3.5.2
     # via requests
@@ -32,13 +32,13 @@ orjson==3.13.0
     # via tesseract-core
 packaging==26.3
     # via tesseract-core
-pip==26.2.1
+pip==26.3
     # via tesseract-core
 pybase64==1.5.1
     # via tesseract-core
-pydantic==2.14.1
+pydantic==2.14.3
     # via tesseract-core
-pydantic-core==2.50.1
+pydantic-core==2.50.4
     # via pydantic
 pygments==2.21.0
     # via rich
@@ -52,14 +52,14 @@ rich==15.0.0
     #   typer
 shellingham==1.5.4
     # via typer
-typer==0.27.3
+typer==0.28.0
     # via tesseract-core
 typing-extensions==4.16.0
     # via
     #   pydantic
     #   pydantic-core
     #   typing-inspection
-typing-inspection==0.4.4
+typing-inspection==0.4.5
     # via pydantic
 urllib3==2.8.0
     # via requests

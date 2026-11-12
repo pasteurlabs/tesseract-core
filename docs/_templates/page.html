@@ -28,14 +28,13 @@
       <span></span>
     </label>
     <div class="top-nav-links">
-      <a href="{{ pathto('content/introduction/get-started') if is_core else core_base + 'content/introduction/get-started.html' }}">Get Started</a>
+      <a href="{{ pathto('content/tutorials/get-started') if is_core else core_base + 'content/tutorials/get-started.html' }}">Get started</a>
       <div class="top-nav-dropdown">
         <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Docs</button>
         <div class="top-nav-dropdown-menu">
           <a href="{{ pathto('content/introduction/index') if is_core else core_base + 'content/introduction/index.html' }}">Tesseract Core</a>
           <a href="https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/">Tesseract-JAX</a>
           <a href="https://docs.pasteurlabs.ai/projects/tesseract-torch/latest/">Tesseract-Torch</a>
-          <a href="https://docs.pasteurlabs.ai/projects/tesseract-streamlit/en/latest/">Tesseract-Streamlit</a>
         </div>
       </div>
       <a href="{{ pathto('content/demo/demo') if is_core else core_base + 'content/demo/demo.html' }}">Demos</a>
@@ -47,7 +46,6 @@
           <a href="https://github.com/pasteurlabs/tesseract-core" class="external-link">Tesseract Core</a>
           <a href="https://github.com/pasteurlabs/tesseract-jax" class="external-link">Tesseract-JAX</a>
           <a href="https://github.com/pasteurlabs/tesseract-torch" class="external-link">Tesseract-Torch</a>
-          <a href="https://github.com/pasteurlabs/tesseract-streamlit" class="external-link">Tesseract-Streamlit</a>
         </div>
       </div>
       <span class="github-star-light"><a class="github-button" href="https://github.com/pasteurlabs/tesseract-core" data-color-scheme="light: light; dark: light;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star pasteurlabs/tesseract-core on GitHub">Star</a></span>

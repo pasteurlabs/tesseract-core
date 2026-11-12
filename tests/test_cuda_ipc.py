@@ -10,7 +10,7 @@ Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
 is framework-agnostic on *both* sides: encode works with any object that
 implements ``__cuda_array_interface__`` (CuPy, PyTorch, JAX, Numba), and decode
-returns a framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that
+returns a framework-agnostic ``DeviceArray`` (no CuPy dependency) that
 exposes ``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
 
 Note on process model
@@ -135,16 +135,14 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
 def _consumer_main(to_consumer, from_consumer, result_q):
     """Receive encodings, decode them cross-process, verify, report.
 
-    Decoding is framework-agnostic: it returns an ``IpcDeviceArray`` that
+    Decoding is framework-agnostic: it returns a ``DeviceArray`` that
     exposes ``__cuda_array_interface__`` and ``__dlpack__``. We read the values
     back via the wrapper's host-copy helper -- no CuPy needed for the assertions
     -- so this path proves the decoded result is framework-independent.
     """
     try:
-        from tesseract_core.runtime.cuda.ipc import (
-            IpcDeviceArray,
-            load_cuda_ipc_arraydict,
-        )
+        from tesseract_core.runtime.cuda.arrays import DeviceArray
+        from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
         payloads = to_consumer.get(timeout=_TIMEOUT)
         if isinstance(payloads, tuple) and payloads[0] == "PRODUCER_ERROR":
@@ -157,7 +155,7 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             # the IPC mapping before returning, so `decoded` no longer aliases
             # the producer's buffer.
             decoded = load_cuda_ipc_arraydict(encoded)
-            assert isinstance(decoded, IpcDeviceArray)
+            assert isinstance(decoded, DeviceArray)
             assert hasattr(decoded, "__cuda_array_interface__")
             assert hasattr(decoded, "__dlpack__")
             # Host-copy helper: read values back without any GPU framework.
@@ -792,17 +790,15 @@ def test_decode_to_torch_via_dlpack():
     """A decoded array is adopted by torch zero-copy via DLPack -- no CuPy.
 
     This is the framework-agnostic proof: the decode returns an
-    ``IpcDeviceArray`` (no CuPy involved), ``torch.from_dlpack`` takes ownership
+    ``DeviceArray`` (no CuPy involved), ``torch.from_dlpack`` takes ownership
     of its device buffer, and the values match. ``cupy`` is imported in this
     process only to *produce* the input in the subprocess harness, never to
     inspect the decoded result.
     """
     import torch
 
-    from tesseract_core.runtime.cuda.ipc import (
-        IpcDeviceArray,
-        load_cuda_ipc_arraydict,
-    )
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
+    from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
     # Produce in a subprocess, hand the encoded dict back, decode here, then
     # adopt with torch via DLPack.
@@ -819,7 +815,7 @@ def test_decode_to_torch_via_dlpack():
         payloads = to_consumer.get(timeout=_TIMEOUT)
         encoded, expected = payloads[0]
         decoded = load_cuda_ipc_arraydict(encoded)
-        assert isinstance(decoded, IpcDeviceArray)
+        assert isinstance(decoded, DeviceArray)
         decoded_torch = torch.from_dlpack(decoded)
         assert decoded_torch.is_cuda
         np.testing.assert_array_equal(decoded_torch.cpu().numpy(), np.asarray(expected))
@@ -841,12 +837,11 @@ def test_torch_tensor_that_requires_grad_is_encoded(allow_device_host_copy):
     import pybase64
     import torch
 
-    from tesseract_core.runtime.cuda.ipc import (
-        ExportGroup,
+    from tesseract_core.runtime.cuda.arrays import (
         cuda_array_to_host,
-        dump_cuda_ipc_arraydict,
         has_cuda_array_interface,
     )
+    from tesseract_core.runtime.cuda.ipc import ExportGroup, dump_cuda_ipc_arraydict
     from tesseract_core.sdk.tesseract import (
         EncodingContext,
         _close_encoding_context,
@@ -933,17 +928,17 @@ def test_dlpack_capsule_keeps_its_array_alive_and_can_be_made_twice():
 
     import torch
 
-    from tesseract_core.runtime.cuda.ipc import _device_array_from_bytes
+    from tesseract_core.runtime.cuda.arrays import device_array_from_bytes
 
     data = bytes(range(16))
-    array = _device_array_from_bytes(data, 0)
+    array = device_array_from_bytes(data, 0)
     capsule = array.__dlpack__()
     del array
     gc.collect()
-    _device_array_from_bytes(b"\xff" * 16, 0)  # would reuse a freed buffer
+    device_array_from_bytes(b"\xff" * 16, 0)  # would reuse a freed buffer
     assert torch.from_dlpack(capsule).cpu().numpy().tobytes() == data
 
-    array = _device_array_from_bytes(data, 0)
+    array = device_array_from_bytes(data, 0)
     first, second = torch.from_dlpack(array), torch.from_dlpack(array)
     assert first.data_ptr() == second.data_ptr()
     with pytest.raises((BufferError, RuntimeError)):
@@ -1008,10 +1003,8 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
     try:
         import torch
 
-        from tesseract_core.runtime.cuda.ipc import (
-            IpcDeviceArray,
-            load_cuda_ipc_arraydict,
-        )
+        from tesseract_core.runtime.cuda.arrays import DeviceArray
+        from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
         payloads = to_consumer.get(timeout=_TIMEOUT)
         encoded, expected = payloads[0]
@@ -1023,7 +1016,7 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
         builtins.__import__ = blocked_import
 
         decoded = load_cuda_ipc_arraydict(encoded)
-        assert isinstance(decoded, IpcDeviceArray)
+        assert isinstance(decoded, DeviceArray)
         # Host-copy helper path (no framework).
         host = decoded.copy_to_host()
         host_ok = bool(np.array_equal(host, np.asarray(expected)))
@@ -1285,32 +1278,23 @@ def test_resolve_gpu_transport_uses_cuda_ipc_when_it_works(
 
 
 @requires_cuda
-def test_resolve_gpu_transport_falls_back_when_cuda_ipc_does_not_work(
-    free_port, serve_in_subprocess, allow_device_host_copy
+def test_serve_fails_when_the_configured_transport_is_unusable(
+    free_port, serve_in_subprocess
 ):
-    """A server that offers cuda_ipc but cannot use it gets host copies instead.
+    """A server configured with a transport it cannot serve refuses to start.
 
-    Hiding the GPU from the server stands in for every reason the check can
-    fail, e.g. a server on another host or in another IPC namespace. A client
-    that asked for cuda_ipc gets an error rather than a silent host copy.
+    Hiding the GPU from the server stands in for every reason the transport
+    cannot work there (no visible device, no CUDA runtime, failed initialisation).
+    The configuration is explicit, so instead of coming up without it the server
+    exits while starting and reports why.
     """
-    from tesseract_core.sdk.tesseract import Tesseract
-
     with tempfile.TemporaryDirectory() as tmpdir:
         api_path = Path(tmpdir) / "tesseract_api.py"
         api_path.write_text(_DOUBLE_API_CODE.format(module="numpy"))
 
         server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc", "CUDA_VISIBLE_DEVICES": ""}
-        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
-            remote = Tesseract.from_url(url)
-            with pytest.warns(UserWarning, match="copied to the host instead"):
-                transport = remote.resolve_gpu_transport()
-            assert transport == "none"
-
-            # CuPy refuses to convert implicitly, so this takes an explicit copy
-            x = cupy.arange(4, dtype=cupy.float32)
-            result = remote.with_encoding(gpu_transport=transport).apply({"x": x})
-            np.testing.assert_allclose(result["y"], cupy.asnumpy(x) * 2.0, rtol=1e-6)
-
-            with pytest.raises(RuntimeError, match="does not work between"):
-                remote.with_encoding(gpu_transport="cuda_ipc").resolve_gpu_transport()
+        with (
+            pytest.raises(RuntimeError, match="cannot use a CUDA device"),
+            serve_in_subprocess(api_path, free_port, env=server_env),
+        ):
+            pass

@@ -465,6 +465,68 @@ class TestPerInputEps:
         assert np.allclose(jvp["from_big"], 3 * BIG**2, rtol=1e-6)
         assert np.allclose(jvp["from_small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
 
+    @pytest.mark.parametrize("algorithm", ["central", "forward"])
+    def test_jvp_skips_groups_with_zero_tangents(self, simple_inputs, algorithm):
+        """Seeding one input of many costs one group, not one group per input.
+
+        Each input has its own step size, so evaluating every group would cost
+        6 calls with central differences and 4 with forward. A zero tangent
+        perturbs nothing, so only the seeded input's group is evaluated.
+        """
+        n_calls = 0
+
+        def counting_apply(inputs):
+            nonlocal n_calls
+            n_calls += 1
+            return linear_apply(inputs)
+
+        jvp = finite_difference_jvp(
+            counting_apply,
+            simple_inputs,
+            jvp_inputs={"a", "b", "s"},
+            jvp_outputs={"result"},
+            tangent_vector={
+                "a": np.array([1.0, 0.0, 0.0]),
+                "b": np.zeros(3),
+                "s": np.float64(0.0),
+            },
+            algorithm=algorithm,
+            eps={"a": 1e-6, "b": 1e-5, "s": 1e-4},
+        )
+
+        assert n_calls == 2
+        # JVP with tangent [1,0,0] on 'a' should give [s, 0, 0] = [2, 0, 0]
+        assert np.allclose(jvp["result"], [2.0, 0.0, 0.0], atol=1e-5)
+
+    def test_jvp_with_only_zero_tangents_evaluates_once(self):
+        """All-zero tangents need one evaluation, for the shapes of the zeros."""
+
+        class In(BaseModel):
+            x: Differentiable[Float64]
+            y: Differentiable[Float64]
+
+        calls = []
+
+        def counting_apply(inputs):
+            calls.append(inputs)
+            return {
+                "vector": np.full(3, inputs.x),
+                "scalar": inputs.x * inputs.y,
+            }
+
+        jvp = finite_difference_jvp(
+            counting_apply,
+            In(x=1.0, y=2.0),
+            jvp_inputs={"x", "y"},
+            jvp_outputs={"vector", "scalar"},
+            tangent_vector={"x": np.float64(0.0), "y": np.float64(0.0)},
+            eps={"x": 1e-6, "y": 1e-4},
+        )
+
+        assert len(calls) == 1
+        np.testing.assert_array_equal(jvp["vector"], np.zeros(3))
+        assert jvp["scalar"] == 0.0
+
     def test_vjp_uses_each_inputs_own_step(self, scale_spread_inputs):
         vjp = finite_difference_vjp(
             scale_spread_apply,
@@ -497,6 +559,7 @@ class TestPerInputEps:
 
         Nothing downstream can detect that, so it is rejected up front. The rule
         and the exception type match ``check_gradients`` in the testing module.
+        A JVP checks it even when zero tangents mean no step is ever taken.
         """
         with pytest.raises(ValueError, match=match):
             finite_difference_jacobian(
@@ -504,6 +567,15 @@ class TestPerInputEps:
                 scale_spread_inputs,
                 jac_inputs={"big", "small"},
                 jac_outputs={"from_big", "from_small"},
+                eps=eps,
+            )
+        with pytest.raises(ValueError, match=match):
+            finite_difference_jvp(
+                scale_spread_apply,
+                scale_spread_inputs,
+                jvp_inputs={"big", "small"},
+                jvp_outputs={"from_big", "from_small"},
+                tangent_vector={"big": np.float64(0.0), "small": np.float64(0.0)},
                 eps=eps,
             )
 

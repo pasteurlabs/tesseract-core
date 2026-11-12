@@ -1,4 +1,4 @@
-# Building the JAX Solver Tesseract for Lorenz-96
+# Building the JAX solver Tesseract for Lorenz-96
 
 ```{seealso}
 The full Tesseract API for the Lorenz-96 model can be found in the {gh-tree}`demo/data-assimilation/lorenz_tesseract <demo/data-assimilation/lorenz_tesseract>` folder of the Tesseract Core repository.

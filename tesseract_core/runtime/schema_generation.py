@@ -17,9 +17,11 @@ from typing import (
     get_origin,
 )
 
+import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     RootModel,
@@ -29,7 +31,7 @@ from pydantic import (
     create_model,
     field_validator,
 )
-from pydantic_core import PydanticUndefined
+from pydantic_core import PydanticSerializationError
 
 from .schema_types import (
     Array,
@@ -83,12 +85,29 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
+def _wrap_default_factory(
+    factory: Callable[..., Any], convert: Callable[[Any], Any]
+) -> Callable[..., Any]:
+    """Wrap a default_factory so its output goes through ``convert``.
+
+    ``functools.wraps`` keeps the factory's signature visible to pydantic, which
+    inspects it to decide whether to pass the validated data.
+    """
+
+    @functools.wraps(factory)
+    def wrapped(*args: Any) -> Any:
+        return convert(factory(*args))
+
+    return wrapped
+
+
 def apply_function_to_model_tree(
     Schema: type[BaseModel],
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
-    default_func: Callable[[Any, Any], Any] | None = None,
+    make_default_converter: Callable[[Any, Any], Callable[[Any], Any] | None]
+    | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -98,8 +117,11 @@ def apply_function_to_model_tree(
     in the model tree (as a list of field names). It should return the new type annotation
     for the field, or None to remove the field from the model.
 
-    If given, default_func is called with the type annotation and default value of every
-    field that has a default, and should return the default to use in the new model.
+    If given, make_default_converter is called as
+    ``make_default_converter(old_type, new_type)`` for every field that has a default,
+    when the model is built. It returns a function mapping the old default to the new
+    one, or None to keep the default as is. A ``default=`` is converted right away,
+    and a ``default_factory=`` is wrapped so that each value it produces is converted.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
@@ -151,8 +173,16 @@ def apply_function_to_model_tree(
                 new_field = copy(field)
                 # Need to strip off metadata to trigger re-evaluation of the field
                 new_field.metadata = []
-                if default_func is not None and field.default is not PydanticUndefined:
-                    new_field.default = default_func(field.annotation, field.default)
+                convert = None
+                if make_default_converter is not None and not field.is_required():
+                    convert = make_default_converter(field_type, new_type)
+                if convert is not None:
+                    if field.default_factory is not None:
+                        new_field.default_factory = _wrap_default_factory(
+                            field.default_factory, convert
+                        )
+                    else:
+                        new_field.default = convert(field.default)
 
                 new_fields[field_name] = (new_type, new_field)
 
@@ -357,6 +387,55 @@ def create_apply_schema(
     return ApplyInputSchema, ApplyOutputSchema
 
 
+# Validation context key that lets the abstract schema's array fields accept real
+# arrays. Only passed when converting defaults, so abstract_eval still rejects them.
+_CONVERT_DEFAULT_KEY = "tesseract_convert_abstract_default"
+
+
+def _array_default_to_shapedtype(value: Any, info: ValidationInfo) -> Any:
+    """Before-validator replacing a real array by its ShapeDType, when converting a default."""
+    converting = (info.context or {}).get(_CONVERT_DEFAULT_KEY, False)
+    # Defaults reach here validated against the real Array annotation, which turns
+    # any array-like (JAX, PyTorch, ...) into a NumPy array, so NumPy is all we see.
+    if converting and isinstance(value, np.ndarray | np.generic):
+        return ShapeDType(shape=value.shape, dtype=str(value.dtype))
+    return value
+
+
+def _abstract_default_converter(
+    old_type: Any, new_type: Any
+) -> Callable[[Any], Any] | None:
+    """Return a function turning a default of ``old_type`` into one of ``new_type``.
+
+    The default is validated against the original annotation, so it is cast to the
+    declared dtype (``[1, 2]`` on a ``Float64`` field becomes float64), and dumped
+    back to plain data, which turns model instances into dicts but keeps arrays.
+    Validating that against the abstract annotation, with the context that lets its
+    array fields accept arrays, replaces each array by its ShapeDType.
+    A default that fails validation is returned unchanged.
+
+    Returns None if ``new_type`` has no arrays to replace.
+    """
+    if new_type == old_type:
+        return None
+
+    # Built once per field, not cached: annotations may be unhashable
+    real_adapter = TypeAdapter(old_type)
+    abstract_adapter = TypeAdapter(new_type)
+
+    def convert(default: Any) -> Any:
+        try:
+            real = real_adapter.validate_python(default)
+            plain = real_adapter.dump_python(real, by_alias=True)
+            return abstract_adapter.validate_python(
+                plain, context={_CONVERT_DEFAULT_KEY: True}
+            )
+        except (ValidationError, PydanticSerializationError):
+            return default
+
+    return convert
+
+
 def create_abstract_eval_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
@@ -368,24 +447,18 @@ def create_abstract_eval_schema(
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> T | type[ShapeDType]:
         if safe_issubclass(obj, PydanticArrayAnnotation):
-            return ShapeDType.from_array_type(obj)
+            return Annotated[
+                ShapeDType.from_array_type(obj),
+                BeforeValidator(_array_default_to_shapedtype),
+            ]
         return obj
-
-    def replace_array_default_with_shapedtype(obj: Any, default: Any) -> Any:
-        if not safe_issubclass(obj, PydanticArrayAnnotation):
-            return default
-        try:
-            arr = TypeAdapter(obj).validate_python(default)
-        except ValidationError:
-            return default
-        return ShapeDType(shape=arr.shape, dtype=str(arr.dtype))
 
     GeneratedInputSchema = apply_function_to_model_tree(
         InputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=replace_array_default_with_shapedtype,
+        make_default_converter=_abstract_default_converter,
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
@@ -393,7 +466,7 @@ def create_abstract_eval_schema(
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
         default_model_config=dict(extra="forbid"),
-        default_func=replace_array_default_with_shapedtype,
+        make_default_converter=_abstract_default_converter,
     )
 
     class AbstractInputSchema(BaseModel):

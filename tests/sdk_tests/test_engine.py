@@ -16,6 +16,7 @@ from jinja2.exceptions import TemplateNotFound
 
 from tesseract_core.sdk import docker_client, engine, serving
 from tesseract_core.sdk.api_parse import (
+    DEFAULT_PYTHON,
     TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
@@ -54,13 +55,54 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     dockerfile = (build_dir / "Dockerfile").read_text()
     assert 'TESSERACT_PYTHON_VERSION="3.12"' in dockerfile
 
-    # Without python_version, the env var should not appear
-    build_dir2 = tmp_path_factory.mktemp("build2")
-    config_default = TesseractConfig(name="foobar")
-    engine.prepare_build_context(src_dir, build_dir2, config_default)
 
-    dockerfile_default = (build_dir2 / "Dockerfile").read_text()
-    assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
+@pytest.mark.parametrize(
+    "build_config, expected",
+    [
+        # Neither set: the default image's Python is pinned, so it doesn't follow
+        # the default image if that changes.
+        ({}, DEFAULT_PYTHON),
+        # A custom base image keeps using its own system Python...
+        ({"base_image": "ubuntu:24.04"}, None),
+        # ...even when it names the current default explicitly.
+        ({"base_image": "debian:bookworm-slim"}, None),
+        # A declared version always wins.
+        ({"requirements": {"provider": "uv-pip", "python_version": "3.13"}}, "3.13"),
+        (
+            {
+                "base_image": "ubuntu:24.04",
+                "requirements": {"provider": "uv-pip", "python_version": "3.13"},
+            },
+            "3.13",
+        ),
+        # These need the base image's or the environment file's Python.
+        ({"inherit_base_image_packages": True}, None),
+        ({"requirements": {"provider": "conda"}}, None),
+    ],
+)
+def test_prepare_build_context_pins_python_on_the_default_image(
+    tmp_path_factory, build_config, expected
+):
+    """Which Python a container build installs, rendered as an ENV in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    (src_dir / "tesseract_environment.yaml").write_text("dependencies: []\n")
+    build_dir = tmp_path_factory.mktemp("build")
+    config = TesseractConfig(
+        name="foobar", build_config=TesseractBuildConfig.model_validate(build_config)
+    )
+    assert config.build_config.image_python_version == expected
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    # System libssl for native packages, which a uv-installed Python doesn't bring.
+    assert "openssl" in dockerfile.split("AS run_stage", 1)[1]
+    if expected is None:
+        assert "TESSERACT_PYTHON_VERSION" not in dockerfile
+    else:
+        assert f'TESSERACT_PYTHON_VERSION="{expected}"' in dockerfile
+        # No system Python is installed alongside the pinned one.
+        assert "python3-venv" not in dockerfile
 
 
 def test_prepare_build_context_build_env(tmp_path_factory):
@@ -583,6 +625,27 @@ def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
     assert "./local_requirements/mylocaldep" in reqs
 
 
+def test_prepare_build_context_editable_local_dependency(tmp_path_factory):
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text(
+        "numpy\n-e ./mylocaldep[extra]\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert reqs == ["numpy", "./local_requirements/mylocaldep[extra]"]
+
+
 def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
     """A local dependency that does not exist raises a clear error."""
     src_dir = tmp_path_factory.mktemp("src")
@@ -691,6 +754,17 @@ def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, 
     else:
         assert isinstance(out, Image)
         assert out.attrs == mocked_docker.images.get(image_name).attrs
+
+
+def test_build_tesseract_creates_missing_build_dir_parents(
+    dummy_tesseract_package, mocked_docker, tmp_path_factory
+):
+    build_dir = tmp_path_factory.mktemp("parent") / "missing" / "build"
+    out = engine.build_tesseract(
+        dummy_tesseract_package, "42", build_dir=build_dir, generate_only=True
+    )
+    assert out == build_dir
+    assert (build_dir / "Dockerfile").exists()
 
 
 @pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
@@ -1460,6 +1534,37 @@ def test_container_diagnoses_its_own_exit(state, expected):
     assert expected in docker_client.diagnose_exit(container, logs="")
 
 
+def test_container_url_on_the_host_network():
+    """A host-network container publishes no ports and serves on its API port."""
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={
+            "Config": {"Cmd": ["serve", "--port", "41234", "--host", "0.0.0.0"]},
+            "HostConfig": {"NetworkMode": "host"},
+            "NetworkSettings": {"Ports": {}},
+        },
+    )
+    assert container.url == "http://127.0.0.1:41234"
+
+
+def test_container_url_from_its_published_port():
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={
+            "Config": {"Cmd": ["serve", "--port", "8000", "--host", "0.0.0.0"]},
+            "HostConfig": {"NetworkMode": "bridge"},
+            "NetworkSettings": {
+                "Ports": {"8000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "50001"}]}
+            },
+        },
+    )
+    assert container.url == "http://127.0.0.1:50001"
+
+
 def _stopped_container(logs=b"", state=None, **overrides):
     """A Container wired up to answer without a daemon behind it.
 
@@ -1820,6 +1925,41 @@ def test_stage_local_dependency_file(tmp_path):
     assert staged.read_text() == "wheel contents"
 
 
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            './mypkg[extra] ; python_version >= "3.8"',
+            './local_requirements/mypkg[extra] ; python_version >= "3.8"',
+        ),
+        (
+            "./mypkg;sys_platform=='linux'",
+            "./local_requirements/mypkg ; sys_platform=='linux'",
+        ),
+    ],
+)
+def test_stage_local_dependency_marker(tmp_path, line, expected):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == expected
+    assert (local_requirements / "mypkg").is_dir()
+
+
+def test_stage_local_dependency_file_url_marker(tmp_path):
+    src_dir = tmp_path / "src"
+    (src_dir / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    line = (src_dir / "mypkg").as_uri() + ' ; python_version >= "3.8"'
+    spec = engine._stage_local_dependency(line, src_dir, local_requirements)
+    assert spec == './local_requirements/mypkg ; python_version >= "3.8"'
+
+
 def test_stage_local_dependency_name_collision(tmp_path):
     """Two dependencies resolving to the same basename get distinct staged names."""
     src_dir = tmp_path / "src"
@@ -2048,7 +2188,7 @@ def test_get_free_port_skips_port_in_use():
         # Release the spare port so it becomes the only free port in the range.
         spare.close()
 
-        within_range = (min(in_use, free), max(in_use, free) + 1)
+        within_range = (min(in_use, free), max(in_use, free))
         port = engine.get_free_port(within_range=within_range)
 
     assert port == free
@@ -2060,9 +2200,9 @@ def test_get_free_port_no_free_ports():
         occupied.bind(("127.0.0.1", 0))
         in_use = occupied.getsockname()[1]
 
-        # Range containing only the single occupied port (end is exclusive).
+        # Range containing only the single occupied port.
         with pytest.raises(RuntimeError, match="No free ports found"):
-            engine.get_free_port(within_range=(in_use, in_use + 1))
+            engine.get_free_port(within_range=(in_use, in_use))
 
 
 def test_get_free_port_all_excluded():
@@ -2072,7 +2212,17 @@ def test_get_free_port_all_excluded():
         free = s.getsockname()[1]
 
     with pytest.raises(RuntimeError, match="No free ports found"):
-        engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+        engine.get_free_port(within_range=(free, free), exclude=(free,))
+
+
+def test_serve_port_range_of_one_port(mocked_docker):
+    """A range's end port can be picked, so ``-p 8080-8080`` serves on 8080."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+
+    res, _ = engine.serve("foobar", port=f"{free}-{free}")
+    assert json.loads(res)["ports"] == {f"127.0.0.1:{free}": engine.CONTAINER_API_PORT}
 
 
 def test_output_format_matches_runtime_source_of_truth():
@@ -2087,3 +2237,68 @@ def test_output_format_matches_runtime_source_of_truth():
     from tesseract_core.runtime.file_interactions import supported_format_type
 
     assert get_args(engine.OutputFormat) == get_args(supported_format_type)
+
+
+def _write_minimal_tesseract(path, config_yaml):
+    (path / "tesseract_api.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class InputSchema(BaseModel):\n    x: int = 0\n"
+        "class OutputSchema(BaseModel):\n    y: int = 0\n"
+        "def apply(inputs: InputSchema) -> OutputSchema:\n    return OutputSchema()\n"
+    )
+    (path / "tesseract_config.yaml").write_text(config_yaml)
+
+
+@pytest.mark.parametrize(
+    "config_yaml, override, warns",
+    [
+        ("name: demo\n", None, True),
+        ("name: demo\nbuild_config:\n  target_platform: native\n", None, True),
+        (
+            'name: demo\nbuild_config:\n  base_image: "debian:bookworm-slim"\n',
+            None,
+            False,
+        ),
+        (
+            'name: demo\nbuild_config:\n  base_image: "debian:trixie-slim"\n',
+            None,
+            False,
+        ),
+        ("name: demo\n", {("build_config", "base_image"): "debian:trixie-slim"}, False),
+    ],
+)
+def test_build_warns_only_when_relying_on_the_default_base_image(
+    tmp_path, caplog, config_yaml, override, warns
+):
+    """The default base image is changing; only builds that rely on it are told."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_minimal_tesseract(src, config_yaml)
+
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine.build_tesseract(
+            src,
+            None,
+            build_dir=tmp_path / "build",
+            config_override=override,
+            generate_only=True,
+        )
+
+    warned = [r for r in caplog.records if "base_image is not set" in r.getMessage()]
+    assert bool(warned) is warns
+    if warns:
+        message = warned[0].getMessage()
+        # Points to the field to set, and names both images to choose between.
+        assert "`base_image` field" in message
+        assert "debian:bookworm-slim" in message
+        assert "debian:trixie-slim" in message
+
+
+def test_default_base_image_warning_matches_the_scheduled_change():
+    """The warning names the image the default is moving to, and it isn't the current one."""
+    from tesseract_core._deprecations import NEXT_DEFAULT_BASE_IMAGE
+
+    current = TesseractBuildConfig.model_fields["base_image"].default
+    assert current != NEXT_DEFAULT_BASE_IMAGE, (
+        "the default has switched: remove the deprecation warning and its tombstone"
+    )

@@ -131,6 +131,7 @@ AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 LOGLEVELS = ("debug", "info", "warning", "error", "critical")
 OUTPUT_FORMATS = ("json", "json+base64", "json+binref")
 LIST_FORMATS = ("table", "json")
+GPU_TRANSPORTS = ("none", "cuda_ipc")
 
 
 def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
@@ -174,6 +175,7 @@ def version_callback(value: bool | None) -> None:
 
 
 LogLevelChoices = make_choice_enum("LogLevel", LOGLEVELS)
+GPUTransportChoices = make_choice_enum("GpuTransport", GPU_TRANSPORTS)
 
 
 @app.callback()
@@ -335,7 +337,7 @@ def build_image(
         ),
     ] = False,
 ) -> None:
-    """Build a new Tesseract from a context directory.
+    """Build a container image from a Tesseract source directory.
 
     The passed directory must contain the files `tesseract_api.py` and `tesseract_config.yaml`
     (can be created via `tesseract init`).
@@ -436,7 +438,10 @@ def init(
     """Initialize a new Tesseract API module."""
     recipe: str = _enum_to_val(recipe)
     logger.info(f"Initializing Tesseract {name} in directory: {target_dir}")
-    engine.init_api(target_dir, name, recipe=recipe)
+    try:
+        engine.init_api(target_dir, name, recipe=recipe)
+    except FileExistsError as e:
+        raise UserError(f"Cannot initialize Tesseract: {e}") from e
 
 
 def _validate_port(port: str | None) -> str | None:
@@ -445,12 +450,11 @@ def _validate_port(port: str | None) -> str | None:
         return None
 
     port = port.strip()
-    if "-" in port:
-        start, end = port.split("-")
-    else:
-        start = end = port
-
     try:
+        if "-" in port:
+            start, end = port.split("-")
+        else:
+            start = end = port
         start, end = int(start), int(end)
     except ValueError as ex:
         raise typer.BadParameter(
@@ -573,6 +577,19 @@ def serve(
             ),
         ),
     ] = None,
+    gpu_transport: Annotated[
+        GPUTransportChoices | None,
+        typer.Option(
+            "--gpu-transport",
+            help=(
+                "GPU transport the served Tesseract accepts. "
+                "Default `none` copies arrays from GPU to the host. "
+                "`cuda_ipc` passes them by reference, requires `--gpus` and "
+                "a shared IPC namespace, and needs `--num-workers 1`."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     num_workers: Annotated[
         int,
         typer.Option(
@@ -678,12 +695,15 @@ def serve(
         ),
     ] = None,
 ) -> None:
-    """Serve one or more Tesseract images.
+    """Serve a Tesseract image in a container.
 
-    A successful serve command will display on standard output a JSON object
-    with the Tesseract container name, which is required to run the teardown
-    command and its respective port.
+    On success, prints a JSON object with the container name, which
+    `tesseract teardown` needs, and the port.
+
+    To serve a Tesseract without building an image, run `tesseract-runtime serve`
+    from its source directory instead.
     """
+    gpu_transport: str | None = _enum_to_val(gpu_transport)
     output_format: str | None = _enum_to_val(output_format)
 
     parsed_environment = _parse_environment(environment)
@@ -704,6 +724,7 @@ def serve(
             volumes=volume,
             environment=parsed_environment,
             gpus=gpus,
+            gpu_transport=gpu_transport,
             debug=debug,
             num_workers=num_workers,
             user=user,
@@ -718,6 +739,10 @@ def serve(
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
+        ) from ex
+    except ValueError as ex:
+        raise typer.BadParameter(
+            f"Incorrect arguments provided to the serve command: {ex}"
         ) from ex
 
     container_ports = _display_container_meta(container)
@@ -845,7 +870,7 @@ def apidoc(
         typer.Option(help="Open the browser after serving the OpenAPI schema"),
     ] = True,
 ) -> None:
-    """Serve the OpenAPI schema for a Tesseract."""
+    """Serve the OpenAPI schema for a Tesseract image."""
     host_ip = "127.0.0.1"
     container_name, container = engine.serve(image_name, host_ip=host_ip)
     try:
@@ -973,7 +998,7 @@ def _extract_cli_config(
     base_dir: Path,
 ) -> tuple[str | None, list[str], str | None]:
     """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
-    cli_config = test_spec.get("cli_config", {})
+    cli_config = test_spec.get("cli_config") or {}
 
     if (input_path := cli_config.get("input_path")) and not Path(
         input_path
@@ -983,7 +1008,7 @@ def _extract_cli_config(
     from tesseract_core.sdk.engine import _split_volume_spec
 
     volume_mounts = []
-    for vol_mount in cli_config.get("volume_mounts", []):
+    for vol_mount in cli_config.get("volume_mounts") or []:
         source = _split_volume_spec(vol_mount)[0]
         if not Path(source).is_absolute():
             volume_mounts.append(str(base_dir / vol_mount))
@@ -1191,9 +1216,13 @@ def run_container(
         ),
     ] = False,
 ) -> None:
-    """Execute a command in a Tesseract.
+    """Execute a command in a Tesseract image.
 
-    This command starts a Tesseract instance and executes the given command.
+    This command starts a container from the given image, executes the command
+    in it, and removes the container afterwards.
+
+    To execute a command without building an image, run `tesseract-runtime <cmd>`
+    from the Tesseract's source directory instead.
     """
     cmd: str | None = _enum_to_val(cmd)
     output_format: str | None = _enum_to_val(output_format)

@@ -5,8 +5,8 @@
 ## Context
 
 Instead passing file constents to the input payload, a Tesseract can
-declare `InputPath` / `OutputPath` fields that refer to files or directories on
-the `--input-path` / `--output-path` mounts. This is useful when inputs or
+declare `InputPath` / `OutputPath` fields that refer to files or directories in
+the Tesseract's input and output paths. This is useful when inputs or
 outputs are large on disk, or consist of many files.
 
 ## Example Tesseract (`examples/file_io`)
@@ -14,7 +14,8 @@ outputs are large on disk, or consist of many files.
 Using `InputPath` and `OutputPath` you can
 include references to files or directories in the `InputSchema` and `OutputSchema` of a Tesseract.
 The schemas make sure that a path exists (either locally or in the Tesseract)
-and resolve paths correctly in both `tesseract-runtime` and `tesseract run` calls.
+and resolve paths correctly whether the Tesseract runs through
+`Tesseract.from_source`, `tesseract-runtime`, or `tesseract run`.
 
 ```{literalinclude} ../../../../examples/file_io/tesseract_api.py
 :pyobject: InputSchema
@@ -31,13 +32,33 @@ and resolve paths correctly in both `tesseract-runtime` and `tesseract run` call
 :language: python
 ```
 
+The examples below run from `examples/file_io`, which contains sample inputs in
+`test_cases/testdata`.
+
+With `Tesseract.from_source`, pass the directories as `input_path` and
+`output_path`. Paths in the inputs are relative to `input_path`, and paths in the
+outputs are relative to `output_path`:
+
+```python
+from tesseract_core import Tesseract
+
+with Tesseract.from_source(
+    "tesseract_api.py",
+    input_path="test_cases/testdata",
+    output_path="output",
+) as t:
+    result = t.apply({"paths": ["sample_0.json", "sample_1.json"]})
+
+print(result)  # {'paths': ['sample_0.copy', 'sample_1.copy']}
+```
+
 For the `tesseract-runtime` command, paths are relative to the local input/output paths:
 
 ```bash
-tesseract-runtime apply \
-    --input-path ./testdata \
+TESSERACT_API_PATH=tesseract_api.py tesseract-runtime \
+    --input-path ./test_cases/testdata \
     --output-path ./output \
-    '{"inputs": {"paths": ["sample_0.json", "sample_1.json"]}}'
+    apply '{"inputs": {"paths": ["sample_0.json", "sample_1.json"]}}'
 ```
 
 For the `tesseract run` command, the path
@@ -46,7 +67,7 @@ Tesseract:
 
 ```bash
 tesseract run file_io apply \
-    --input-path ./testdata \
+    --input-path ./test_cases/testdata \
     --output-path ./output \
     '{"inputs": {"paths": ["sample_2.json", "sample_3.json"]}}'
 ```

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from textwrap import dedent
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -122,6 +123,18 @@ def test_Tesseract_from_url_adds_missing_scheme(url, expected):
     assert Tesseract.from_url(url)._client.url == expected
 
 
+@pytest.mark.parametrize("run_id", ["../escaped", "run.1"])
+def test_Tesseract_from_tesseract_api_rejects_an_invalid_run_id(
+    dummy_tesseract_module, tmp_path, run_id
+):
+    t = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, output_path=tmp_path / "out"
+    )
+    with pytest.raises(ValueError, match="Invalid run_id"):
+        t.apply({}, run_id=run_id)
+    assert not (tmp_path / "escaped").exists()
+
+
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
     all_endpoints = {
         "apply",
@@ -130,6 +143,7 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
         "vector_jacobian_product",
         "health",
         "abstract_eval",
+        "check_gradients",
         "test",
     }
 
@@ -253,6 +267,55 @@ def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
 
     # The edit stayed contained to this instance's snapshot, not the global.
     assert get_config().profiling is False
+
+
+def test_Tesseract_from_tesseract_api_resolves_paths_against_own_config(
+    tmp_path, monkeypatch
+):
+    """InputPath / OutputPath resolve against the instance's paths, not the cwd (#880)."""
+    api_file = tmp_path / "tesseract_api.py"
+    api_file.write_text(
+        dedent(
+            """
+            from pathlib import Path
+
+            from pydantic import BaseModel
+            from tesseract_core.runtime.config import get_config
+            from tesseract_core.runtime.experimental import InputPath, OutputPath
+
+            class InputSchema(BaseModel):
+                data: InputPath
+
+            class OutputSchema(BaseModel):
+                copied: OutputPath
+
+            def apply(inputs: InputSchema) -> OutputSchema:
+                outfile = Path(get_config().output_path) / "copied.txt"
+                outfile.write_text(inputs.data.read_text())
+                return OutputSchema(copied=outfile)
+            """
+        )
+    )
+
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "data.txt").write_text("right")
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+
+    # A same-named decoy in the cwd must not be picked up.
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "data.txt").write_text("wrong")
+    monkeypatch.chdir(cwd)
+
+    tess = Tesseract.from_tesseract_api(
+        api_file, input_path=input_dir, output_path=output_dir
+    )
+    result = tess.apply({"data": "data.txt"})
+    # OutputPath is returned relative to output_path, as from a container.
+    assert result["copied"] == "copied.txt"
+    assert (output_dir / "copied.txt").read_text() == "right"
 
 
 def test_rejects_imported_module(dummy_tesseract_module):
@@ -1690,6 +1753,47 @@ def test_test_endpoint_with_exception_type_local(dummy_tesseract_package):
     )
 
 
+def test_check_gradients_success_local(dummy_tesseract_package):
+    """check_gradients() passes for a correct gradient, with eps_for overriding one input."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    # Should not raise. The dummy's jacobian is correct; `b` falls back to `eps`.
+    tess.check_gradients(
+        {
+            "a": np.array([1.0, 2.0], dtype=np.float32),
+            "b": np.array([3.0, 4.0], dtype=np.float32),
+            "s": 1,
+        },
+        endpoints=["jacobian"],
+        eps=1e-2,
+        eps_for={"a": 1e-3},
+        max_evals=20,
+    )
+
+
+def test_check_gradients_failure_local(dummy_tesseract_package):
+    """check_gradients() raises with the report and the seed to rerun it."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    # The dummy's JVP deliberately returns zeros
+    with pytest.raises(AssertionError) as excinfo:
+        tess.check_gradients(
+            {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                "b": np.array([3.0, 4.0], dtype=np.float32),
+                "s": 1,
+            },
+            endpoints=["jacobian_vector_product"],
+            eps=1e-2,
+            max_evals=5,
+            seed=123,
+        )
+
+    message = str(excinfo.value)
+    assert "Gradient check for jacobian_vector_product failed" in message
+    assert "rerun with seed 123" in message
+
+
 def _make_mock_response(status_code, json_data):
     """Create a mock requests.Response with the given status code and JSON body."""
     resp = Mock(spec=requests.Response)
@@ -1734,6 +1838,21 @@ class TestHTTPClientValidationErrors:
         assert exc_info.value.error_count() == 1
         err = exc_info.value.errors()[0]
         assert err["loc"] == ("body", "inputs")
+
+    @pytest.mark.parametrize(
+        "body",
+        [b"<html>Unprocessable</html>", orjson.dumps({"detail": "bad input"})],
+        ids=["not-json", "str-detail"],
+    )
+    def test_non_pydantic_422_is_reported(self, body):
+        """A 422 body that is not a Pydantic error list falls back to a plain error."""
+        response = _make_mock_response(422, {})
+        response.content = body
+        response.text = body.decode()
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(RuntimeError, match="Error 422 from Tesseract"):
+            tess.apply({"inputs": {}})
 
     def test_custom_error_type(self):
         """Custom error types (e.g. from PydanticCustomError) don't crash."""

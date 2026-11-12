@@ -2,7 +2,7 @@
 
 {gh-tree}`View on GitHub <demo/_showcase/ansys-shapeopt/spaceclaim>`
 
-This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](project:#running-without-containers) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
+This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use `tesseract-runtime serve` to start an HTTP server on the SpaceClaim host that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
 
 ```{seealso}
 The full code for this Tesseract can be found under {gh-tree}`demo/_showcase/ansys-shapeopt/spaceclaim <demo/_showcase/ansys-shapeopt/spaceclaim>` in the Tesseract Core repository.
@@ -43,31 +43,23 @@ If this doesn't look familiar you can learn more about Tesseract basics [here](.
 To wrap SpaceClaim as a Tesseract, we will have to implement each of these files:
 
 - `tesseract_api.py` contains all logic on accepted inputs / outputs and dispatches calls to SpaceClaim.
-- `tesseract_config.yaml` is not relevant here, since we will be invoking the Tesseract without containerization (see below).
+- `tesseract_config.yaml` holds the Tesseract's name and metadata. Its build options don't apply here, since the Tesseract is served directly on the host (see below).
 - `tesseract_requirements.txt` contains additional Python requirements to run the Tesseract.
 
-### Non-containerized usage via `tesseract-runtime`
+### Serving on the host via `tesseract-runtime`
 
-```{note}
-**Tesseract without containerization** --- Tesseracts are most commonly used in the form of Docker containers. This is not a neccessary requirement, and any object that adheres to the Tesseract interface is a valid Tesseract (see also <project:#running-without-containers>).
-```
-
-SpaceClaim is typically running directly on a Windows host machine, so instead of using Docker to build an image and spin up a container, we leverage the [Tesseract runtime CLI](../../reference/tesseract-runtime-cli) to serve the SpaceClaim Tesseract on bare metal and expose SpaceClaim's functionality over HTTP.
-
-So instead of using the more common `tesseract build`, we install and use the `tesseract-runtime` CLI application which will provide us an interface with the Tesseract:
+SpaceClaim typically runs directly on a Windows host machine, so we use the [Tesseract runtime CLI](../../reference/tesseract-runtime-cli) to serve the SpaceClaim Tesseract on that host and expose SpaceClaim's functionality over HTTP (see also <project:#running-without-containers>). First, install the runtime:
 
 ```bash
 $ pip install tesseract-core[runtime]
 ```
 
-```{note}
-Windows is natively supported. If you run into performance issues, consider using [WSL](https://docs.microsoft.com/en-us/windows/wsl/) to avoid Docker Desktop's virtualization overhead (see [](#windows-support)).
-```
+Tesseract is natively supported on Windows (see [](#windows-support)).
 
-Now with an a open port of your choice, and from within the Tesseract directory, we can execute:
+Now with an open port of your choice, and from within the Tesseract directory, we can execute:
 
 ```bash
-$ pip install ./tesseract-requirements.txt
+$ pip install -r tesseract_requirements.txt
 $ tesseract-runtime serve --host 0.0.0.0 --port port_number
 ```
 
@@ -91,7 +83,7 @@ Besides a SpaceClaim installation and a recent Python version, this Tesseract on
 :language: text
 ```
 
-Since we are running the Tesseract in a non-containerized way, all requirements need to be installed into the current Python interpreter:
+Since `tesseract-runtime serve` runs the Tesseract in the current Python interpreter, all requirements need to be installed there:
 
 ```bash
 $ pip install -r tesseract_requirements.txt
@@ -163,7 +155,7 @@ The `.scscript` preperation is unique to this grid fin example, with the user in
 :pyobject: _safereplace
 ```
 
-Once the `.scscript` is ready the final step is to run SpaceClaim. Here it is easy to see how this process could be extended to any software that is running on the host machine. For example Ansys Fluent could also be wrapped in a runtime Tesseract, potentially using an adjoint solver to produce gradient information, allowing the Tesseract to be differentiable.
+Once the `.scscript` is ready the final step is to run SpaceClaim. The same approach extends to any software that runs on the host machine. For example Ansys Fluent could also be wrapped as a Tesseract served on its host, potentially using an adjoint solver to produce gradient information, allowing the Tesseract to be differentiable.
 
 ```{literalinclude} ../../../../demo/_showcase/ansys-shapeopt/spaceclaim/tesseract_api.py
 :language: python

@@ -140,13 +140,20 @@ class HostCredential(BaseModel):
     @classmethod
     def _allowed_characters(cls, value: str, info: "ValidationInfo") -> str:
         pattern = _HOST_CREDENTIAL_ALLOWED[info.field_name]
-        if not pattern.match(value):
+        if not pattern.fullmatch(value):
             raise ValueError(
                 f"{info.field_name} contains disallowed characters "
                 f"(must match {pattern.pattern}, got {value!r})"
             )
         return value
 
+
+# The Python used when `python_version` is unset, by builds on the default
+# `build_config.base_image` and by `Tesseract.from_source`. It matches the default
+# image's own Python (debian:bookworm-slim is Debian 12, which ships 3.11 for its
+# whole lifetime), but is pinned so that changing the default image cannot change
+# their Python.
+DEFAULT_PYTHON = "3.11"
 
 # Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
 # ``pylock.prod.toml``.
@@ -160,10 +167,12 @@ class PipRequirements(BaseModel):
     python_version: StrictStr | None = Field(
         None,
         description=(
-            "Python version to use inside the Tesseract (e.g., '3.12'). "
-            "When set, ``uv python install`` is used to install the specified version, "
-            "decoupling the Python version from the base image. "
-            "When unset, the system Python from the base image is used."
+            "Python version to use for the Tesseract's environment (e.g., '3.12'), "
+            "installed via uv if needed. "
+            "When unset, images built on the default base image and "
+            f"``Tesseract.from_source`` use Python {DEFAULT_PYTHON}, "
+            "and images built on a custom ``base_image`` use that image's system "
+            "Python."
         ),
     )
     requirements_file: StrictStr = Field(
@@ -222,18 +231,27 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
 
     base_image: StrictStr = Field(
         "debian:bookworm-slim",
-        description="Base Docker image for the build. Must be Debian-based.",
+        description=(
+            "Base Docker image for the build. Must be Debian-based. "
+            "Only applies to container images. The default will change to "
+            "debian:trixie-slim (Python 3.13); set this explicitly to choose."
+        ),
     )
     target_platform: StrictStr = Field(
         "native",
         description=(
             "Target platform for the Docker build. Must be a valid Docker platform, "
             "or 'native' to build for the host platform. "
-            "In general, images built for one platform will not run on another."
+            "In general, images built for one platform will not run on another. "
+            "Only applies to container images."
         ),
     )
     extra_packages: tuple[StrictStr, ...] = Field(
-        (), description="Extra packages to install during build via apt-get."
+        (),
+        description=(
+            "Extra packages to install during build via apt-get. "
+            "Only applies to container images."
+        ),
     )
     package_data: tuple[tuple[RelativePath, StrictStr], ...] | None = Field(
         (),
@@ -241,13 +259,14 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "Additional files to copy into the Docker image, in the format ``(source, destination)``. "
             "Source paths are relative to the directory containing `tesseract_api.py`. "
             "Destination paths are relative or absolute paths within the Docker image (e.g., ``/app/shared_code.py``) "
-            "and must be unique."
+            "and must be unique. Only applies to container images."
         ),
     )
     custom_build_steps: tuple[StrictStr, ...] | None = Field(
         (),
         description=(
             "Custom steps to run during ``docker build`` (after everything else is installed). "
+            "Only applies to container images. "
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
     )
@@ -256,7 +275,9 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         description=(
             "If True, create the Python virtual environment with --system-site-packages "
             "so it inherits Python packages pre-installed in the base image "
-            "(e.g. Firedrake, FEniCS, OpenFOAM). Cannot be combined with python_version."
+            "(e.g. Firedrake, FEniCS, OpenFOAM). With ``Tesseract.from_source``, the "
+            "environment inherits the packages of the host Python instead. "
+            "Cannot be combined with python_version."
         ),
     )
 
@@ -269,15 +290,17 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "entry maps a host to a build secret supplied out-of-band at build time "
             "(see ``HostCredential`` and ``tesseract build --secret``). Applies to "
             "package indices, direct-reference wheels, conda channels, and "
-            "``git+https`` dependencies on that host."
+            "``git+https`` dependencies on that host. Only applies to container "
+            "images. ``Tesseract.from_source`` installs with your own credentials."
         ),
     )
 
     build_env: dict[StrictStr, StrictStr] = Field(
         default_factory=dict,
         description=(
-            "Environment variables to set during the build stage only (not in the "
-            "final image). Useful for configuring the package resolver, e.g. "
+            "Environment variables to set while building the Tesseract's environment "
+            "only (not in the final image or the served Tesseract). Useful for "
+            "configuring the package resolver, e.g. "
             "``{UV_INDEX_STRATEGY: unsafe-best-match}``. "
             "Do not put secrets here: values are written into the build context. "
             "Use ``tesseract build --secret`` for credentials instead."
@@ -298,11 +321,30 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         return None
 
     @property
+    def image_python_version(self) -> str | None:
+        """Python version a container build installs, or None to use the base image's.
+
+        Returns ``python_version`` if declared, otherwise for a build on the default
+        base image, :data:`DEFAULT_PYTHON`. ``inherit_base_image_packages``
+        needs the base image's own Python, and conda pins Python in its environment
+        file.
+        """
+        if self.effective_python_version is not None:
+            return self.effective_python_version
+        if (
+            isinstance(self.requirements, PipRequirements)
+            and not self.inherit_base_image_packages
+            and "base_image" not in self.model_fields_set
+        ):
+            return DEFAULT_PYTHON
+        return None
+
+    @property
     def uses_base_image_python(self) -> bool:
         """Whether /python-env uses the base image's Python instead of bundling its own."""
         return (
             isinstance(self.requirements, PipRequirements)
-            and self.requirements.python_version is None
+            and self.image_python_version is None
         )
 
     @model_validator(mode="after")
@@ -324,7 +366,8 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         description=(
             "If True, skip build-time checks of Tesseract API module. "
             "This can be useful when such a check cannot succeed (e.g. when building for a "
-            "different platform), but may lead to runtime errors if the Tesseract API is not valid."
+            "different platform), but may lead to runtime errors if the Tesseract API is not valid. "
+            "Only applies to container images."
         ),
     )
 
@@ -349,20 +392,27 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     )
     build_config: OptionalBuildConfig = Field(
         default_factory=TesseractBuildConfig,
-        description="Configuration options for building the Tesseract.",
+        description=(
+            "Configuration options for building the Tesseract. Most only apply to "
+            "container images, but ``requirements``, ``build_env`` and "
+            "``inherit_base_image_packages`` also configure the environment that "
+            "``Tesseract.from_source`` builds."
+        ),
     )
     env: dict[StrictStr, StrictStr] = Field(
         default_factory=dict,
         description=(
-            "Environment variables to set in the Docker image. "
-            "Rendered as ``ENV`` lines in the Dockerfile. "
+            "Environment variables to set when serving the Tesseract. "
+            "Rendered as ``ENV`` lines in the Dockerfile of container images, and "
+            "passed to the process started by ``Tesseract.from_source``. "
             "Example: ``{XLA_PYTHON_CLIENT_PREALLOCATE: 'false'}``"
         ),
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary user-defined metadata. "
-        "This will be stored as a Docker label (ai.pasteurlabs.tesseract.metadata).",
+        "In container images, this is stored as a Docker label "
+        "(ai.pasteurlabs.tesseract.metadata).",
     )
 
     model_config = ConfigDict(extra="forbid")

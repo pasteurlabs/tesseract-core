@@ -4,5 +4,9 @@ description: |
   Tesseract that runs a differentiable 2D Navier Stokes simulation on a 2D grid.
 
 build_config:
+  requirements:
+    provider: uv-pip
+    python_version: "3.14"
+
   package_data: []
   custom_build_steps: []

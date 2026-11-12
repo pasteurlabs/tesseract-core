@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     # every annotation below a string, so these names are never needed at
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
     from tesseract_core.runtime.config import ConfigSnapshot
-    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.arrays import DeviceArray
 
 # Output serialization formats; single SDK-side definition lives in engine.
 OutputFormat: TypeAlias = engine.OutputFormat
@@ -257,7 +257,7 @@ def _fit_encoding_to_server(
 
 # GPU transports a client picks by itself when a server offers them, in order of
 # preference.
-_AUTO_GPU_TRANSPORTS = ("cuda_ipc",)
+_AUTO_GPU_TRANSPORTS = ("cuda_ipc", "nixl")
 
 
 class Tesseract:
@@ -288,8 +288,8 @@ class Tesseract:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError(
             "Tesseract cannot be instantiated directly. "
-            "Use Tesseract.from_url(), Tesseract.from_image(), or "
-            "Tesseract.from_tesseract_api() instead."
+            "Use Tesseract.from_source(), Tesseract.from_image(), "
+            "Tesseract.from_url(), or Tesseract.from_tesseract_api() instead."
         )
 
     @classmethod
@@ -383,11 +383,12 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             gpu_transport: GPU transport to enable on the served Tesseract and use for
                 this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
-                reference, which requires the container to have GPU access and
-                ``num_workers=1``. Independent of ``output_format``, which governs
-                CPU arrays. Resolved against ``runtime_config`` with the precedence
-                described in ``engine.serve``.
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
+                pass them by reference, which requires the container to have GPU
+                access and ``num_workers=1``. ``nixl`` also works across hosts and
+                runs the container on the host network. Independent of
+                ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -483,10 +484,10 @@ class Tesseract:
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
-        Warning: This does not use a containerized Tesseract, but rather
-        imports the Tesseract API directly. This is useful for debugging,
-        but requires a matching runtime environment + all dependencies to be
-        installed locally.
+        Unlike :meth:`from_source` and :meth:`from_image`, this imports the
+        Tesseract API into the calling process. This is useful for debugging,
+        but requires ``tesseract-core[runtime]`` and all of the Tesseract's
+        dependencies to be installed in the calling environment.
 
         Note: Uses a thread lock internally, so concurrent calls to Tesseracts
         created via `from_tesseract_api` will always run sequentially.
@@ -616,8 +617,9 @@ class Tesseract:
             >>> with Tesseract.from_source("tesseract_api.py") as tess:
             ...     tess.apply({"a": 1})
 
-        This is not a substitute for a container: the Tesseract inherits this
-        process's environment, working directory, filesystem access and user.
+        The Tesseract is not isolated the way a container would be. It inherits
+        this process's environment, working directory, filesystem access and
+        user.
 
         Args:
             tesseract_api: Path to the `tesseract_api.py` file. Unlike
@@ -631,10 +633,11 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             gpu_transport: GPU transport to enable on the served Tesseract and use for
                 this client's calls (see :meth:`with_encoding` to change it per call).
-                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
-                reference, which needs no setup since processes on one host share an
-                IPC namespace. Independent of ``output_format``, which governs CPU
-                arrays. Resolved against ``runtime_config``, an explicit value winning.
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` and ``nixl``
+                pass them by reference, which needs no setup since processes on one
+                host share an IPC namespace and network. Independent of
+                ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config``, an explicit value winning.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -907,7 +910,7 @@ class Tesseract:
         or the ``gpu_transport`` it was created with, is returned once it is
         known to work. Otherwise this returns the first transport the server
         offers that works from this process, in the SDK's order of preference
-        (which currently holds only ``cuda_ipc``), and ``none`` otherwise, with
+        (``cuda_ipc``, then ``nixl``), and ``none`` otherwise, with
         a warning for each offered transport that does not work.
 
         Whether a transport works depends on how both processes are set up
@@ -965,8 +968,9 @@ class Tesseract:
 
         Args:
             inputs: a dictionary with the inputs.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1012,8 +1016,9 @@ class Tesseract:
             inputs: a dictionary with the inputs.
             jac_inputs: Inputs with respect to which derivatives will be calculated.
             jac_outputs: Outputs which will be differentiated.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1046,8 +1051,9 @@ class Tesseract:
             jvp_inputs: Inputs with respect to which derivatives will be calculated.
             jvp_outputs: Outputs which will be differentiated.
             tangent_vector: Element of the tangent space to multiply with the Jacobian.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1087,8 +1093,9 @@ class Tesseract:
             vjp_inputs: Inputs with respect to which derivatives will be calculated.
             vjp_outputs: Outputs which will be differentiated.
             cotangent_vector: Element of the cotangent space to multiply with the Jacobian.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -1157,6 +1164,82 @@ class Tesseract:
         elif result["status"] == "error":
             raise RuntimeError(result["message"])
 
+    @requires_client
+    def check_gradients(
+        self,
+        inputs: dict,
+        *,
+        input_paths: list[str] | None = None,
+        output_paths: list[str] | None = None,
+        endpoints: list[str] | None = None,
+        eps: float = 1e-4,
+        eps_for: dict[str, float] | None = None,
+        rtol: float = 0.1,
+        max_evals: int = 1000,
+        max_output_samples: int | None = None,
+        max_failures: int = 10,
+        seed: int | None = None,
+    ) -> None:
+        """Check gradient endpoints against finite differences, raising AssertionError on failure.
+
+        Runs the same check as ``tesseract-runtime check-gradients`` inside the
+        Tesseract's own process. Works in LocalClient, HTTPClient and remote if
+        served in debug mode.
+
+        Args:
+            inputs: Inputs at which to check the gradients.
+            input_paths: Differentiable inputs to check. Defaults to all of them.
+            output_paths: Differentiable outputs to check. Defaults to all of them.
+            endpoints: Gradient endpoints to check. Defaults to all that the
+                Tesseract implements.
+            eps: Absolute finite-difference step, applied to every input not
+                named in ``eps_for``.
+            eps_for: Step size per input path, overriding ``eps`` for those
+                paths. Use this for inputs whose magnitudes differ by orders
+                of magnitude.
+            rtol: Relative tolerance when comparing gradients to finite differences.
+            max_evals: Number of input elements to sample, split across
+                differentiable inputs in proportion to their size.
+            max_output_samples: Maximum number of output elements sampled when
+                checking vector_jacobian_product. Defaults to all of them.
+            max_failures: Maximum number of failures to report per endpoint.
+            seed: Seed for sampling indices. If not set, a random seed is used,
+                and reported in the error message on failure.
+
+        Raises:
+            AssertionError: If any gradient disagrees with finite differences.
+
+        Example:
+            >>> with Tesseract.from_source("path/to/tesseract_api.py") as tess:
+            ...     tess.check_gradients({"x": [1.0, 2.0, 3.0]}, eps_for={"x": 1e-3})
+        """
+        if "check_gradients" not in self.available_endpoints:
+            raise NotImplementedError(
+                "check_gradients endpoint not available. To expose it, a Tesseract must "
+                "implement a gradient endpoint, be served in debug mode, and be built "
+                "with a tesseract-core version that supports it."
+            )
+
+        spec = {
+            "payload": {"inputs": inputs},
+            "input_paths": input_paths,
+            "output_paths": output_paths,
+            "endpoints": endpoints,
+            "eps": eps,
+            "eps_for": eps_for,
+            "rtol": rtol,
+            "max_evals": max_evals,
+            "max_output_samples": max_output_samples,
+            "max_failures": max_failures,
+            "seed": seed,
+        }
+        result = self._client.run_tesseract(
+            "check_gradients", spec, run_id=None, stream_logs=self._stream_logs
+        )
+
+        if result["status"] == "failed":
+            raise AssertionError(result["message"])
+
 
 def _subprocess_spawn_config(
     tesseract_api: str | Path | ModuleType,
@@ -1194,9 +1277,8 @@ def _subprocess_spawn_config(
     )
 
     # Debug mode gives full tracebacks from the child and enables the `test`
-    # endpoint, matching what the in-process path configures. The debugpy
-    # listener it would normally imply is disabled separately, in
-    # `local_client.serve`.
+    # endpoint, matching what the in-process path configures. It also starts a
+    # debugpy listener, which `local_client.serve` puts on a free port.
     config_kwargs: dict[str, Any] = {"debug": True}
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
@@ -1211,10 +1293,10 @@ def _subprocess_spawn_config(
     else:
         config_kwargs.setdefault("gpu_transport", "none")
 
-    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc"):
+    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc", "nixl"):
         raise ValueError(
             f"Unknown gpu_transport {config_kwargs['gpu_transport']!r}. "
-            "Supported values: 'none', 'cuda_ipc'."
+            "Supported values: 'none', 'cuda_ipc', 'nixl'."
         )
 
     return auto_dirs, dict(
@@ -1255,9 +1337,9 @@ def _import_runtime(module: str, feature: str) -> ModuleType:
         ) from exc
 
 
-def _import_cuda_ipc() -> ModuleType:
-    """Import the cuda_ipc runtime module, or explain the missing extra."""
-    return _import_runtime("cuda.ipc", "The 'cuda_ipc' GPU transport")
+def _import_cuda_arrays() -> ModuleType:
+    """Import the runtime's GPU array helpers, or explain the missing extra."""
+    return _import_runtime("cuda.arrays", "Copying a GPU array to the host")
 
 
 def _get_device_transport(name: str) -> Any:
@@ -1372,14 +1454,16 @@ def _gpu_array_to_host(arr: Any) -> np.ndarray:
         "1",
         "true",
     }:
-        _import_cuda_ipc().check_device_host_copy(f"a {type(arr).__name__} GPU array")
+        _import_cuda_arrays().check_device_host_copy(
+            f"a {type(arr).__name__} GPU array"
+        )
     try:
         host = np.asanyarray(_without_autograd(arr))
     except (TypeError, ValueError):
         # PyTorch and CuPy refuse to convert device memory implicitly
         host = None
     if host is None or host.dtype == object:
-        host = _import_cuda_ipc().cuda_array_to_host(arr)
+        host = _import_cuda_arrays().cuda_array_to_host(arr)
     return host
 
 
@@ -1512,7 +1596,7 @@ def _decode_array(
     output_path: str | Path | None = None,
     lazy: bool = False,
     mapped_paths: list[Path] | None = None,
-) -> np.ndarray | IpcDeviceArray:
+) -> np.ndarray | DeviceArray:
     """Decode an encoded array dict into a numpy array.
 
     When ``lazy`` is set and the array is decoded as a zero-copy mmap view, the
@@ -1521,7 +1605,7 @@ def _decode_array(
     alive after unlink, so the returned view stays valid.
 
     Returns np.ndarray for every encoding except those of GPU transports, which
-    yield a framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
+    yield a framework-agnostic on-GPU wrapper (DeviceArray, exposing
     __cuda_array_interface__ and __dlpack__). That type is imported only under
     TYPE_CHECKING so naming it here adds no runtime import.
     """
@@ -1963,10 +2047,10 @@ class HTTPClient:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
                 data = from_json(response.content)
-            except requests.JSONDecodeError:
+            except ValueError:
                 # Is not a Pydantic error
                 data = {}
-            if "detail" in data:
+            if isinstance(data, dict) and isinstance(data.get("detail"), list):
                 errors = []
                 for e in data["detail"]:
                     error = InitErrorDetails(
@@ -2010,7 +2094,7 @@ class HTTPClient:
             # where several arrays share one file at different offsets.
             mapped_paths: list[Path] = []
 
-            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
+            def decode_with_path(arr: dict) -> np.ndarray | DeviceArray:
                 return _decode_array(
                     arr,
                     output_path=self._output_path,
@@ -2042,8 +2126,9 @@ class HTTPClient:
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
-            run_id: a string to identify the run. Run outputs will be located
-                    in a directory suffixed with this id.
+            run_id: a string to identify the run, made of letters, digits, '-'
+                    and '_'. Run outputs will be located in a directory
+                    suffixed with this id.
             stream_logs: If True, stream logs to stdout. If a callable, stream
                     logs to that callable.
             encoding: The encoding to request. None, or a field left as None,
@@ -2157,7 +2242,7 @@ class LocalClient:
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
-            run_id: a string to identify the run.
+            run_id: a string to identify the run, made of letters, digits, '-' and '_'.
             stream_logs: If True, stream logs to stdout. If a callable, stream logs to that callable.
             encoding: Ignored, since arrays are passed in memory. Accepted so
                 both clients can be called the same way.
@@ -2174,7 +2259,7 @@ class LocalClient:
             override_config,
             snapshot_config,
         )
-        from tesseract_core.runtime.file_interactions import join_paths
+        from tesseract_core.runtime.file_interactions import check_run_id, join_paths
         from tesseract_core.runtime.mpa import start_run
         from tesseract_core.runtime.profiler import Profiler
 
@@ -2182,14 +2267,10 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        if InputSchema is not None:
-            parsed_payload = InputSchema.model_validate(payload)
-        else:
-            parsed_payload = None
-
         # Set up run directory for logging
         if run_id is None:
             run_id = str(uuid.uuid4())
+        check_run_id(run_id)
         rundir = join_paths(str(self._output_path), f"run_{run_id}")
 
         # Determine log sink from stream_logs parameter
@@ -2205,10 +2286,17 @@ class LocalClient:
             )
 
         # Run under this instance's own config rather than whatever the global
-        # happens to be. Any update_config() the endpoint makes is captured back
-        # into the snapshot afterwards, so it persists to later calls (matching
-        # the containerized case).
+        # happens to be. This includes schema validation, which resolves
+        # InputPath / OutputPath against the configured input / output paths.
+        # Any update_config() the endpoint makes is captured back into the
+        # snapshot afterwards, so it persists to later calls (matching the
+        # containerized case).
         with override_config(self._config_snapshot):
+            if InputSchema is not None:
+                parsed_payload = InputSchema.model_validate(payload)
+            else:
+                parsed_payload = None
+
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
 
@@ -2233,11 +2321,13 @@ class LocalClient:
             finally:
                 self._config_snapshot = snapshot_config()
 
-        if OutputSchema is not None:
-            # Validate via schema, then dump to stay consistent with other clients
-            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
-                result = OutputSchema.model_validate(result).model_dump()
-            else:
-                result = TypeAdapter(OutputSchema).validate_python(result)
+            if OutputSchema is not None:
+                # Validate via schema, then dump to stay consistent with other clients
+                if isinstance(OutputSchema, type) and issubclass(
+                    OutputSchema, BaseModel
+                ):
+                    result = OutputSchema.model_validate(result).model_dump()
+                else:
+                    result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result

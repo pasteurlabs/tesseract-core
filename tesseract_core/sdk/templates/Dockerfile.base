@@ -7,7 +7,7 @@
 # For "native", pin to $BUILDPLATFORM (the host platform BuildKit runs on) so the
 # base image manifest is re-resolved for the host architecture instead of reusing a
 # wrong-arch image that may already be in the local cache.
-ARG UV_VERSION=0.13.1
+ARG UV_VERSION=0.13.7
 ARG UV_URL="ghcr.io/astral-sh/uv:${UV_VERSION}"
 
 {% if config.build_config.target_platform.strip() == "native" %}
@@ -89,8 +89,8 @@ ENV TESSERACT_REQUIREMENTS_FILE="{{ config.build_config.requirements._filename }
 ENV TESSERACT_INHERIT_BASE_IMAGE_PACKAGES=1
 {% endif %}
 
-{% if config.build_config.effective_python_version %}
-ENV TESSERACT_PYTHON_VERSION="{{ config.build_config.effective_python_version }}"
+{% if config.build_config.image_python_version %}
+ENV TESSERACT_PYTHON_VERSION="{{ config.build_config.image_python_version }}"
 {% endif %}
 
 # Reset uv configuration inherited from the base image to inert defaults, so the
@@ -135,8 +135,11 @@ FROM --platform={{ config.build_config.target_platform }} {{ config.build_config
 # Ensure root user for build commands (some base images set a non-root default)
 USER root
 
+# openssl pulls in the system libssl, which some native packages load (e.g. NIXL).
+# A system python3 would bring it too, but a uv-installed Python does not.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
+        openssl \
 {%- if config.build_config.uses_base_image_python %}
     && { [ -x "$(command -v python3)" ] || apt-get install -y --no-install-recommends python3; } \
 {%- endif %}
