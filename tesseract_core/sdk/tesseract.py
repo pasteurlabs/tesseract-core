@@ -517,7 +517,7 @@ class Tesseract:
             A Tesseract instance.
         """
         # Import the package before the submodule, as in _import_runtime, so
-        # this can't deadlock with a first GPU call on another thread.
+        # this can't deadlock when called concurrently.
         importlib.import_module("tesseract_core.runtime")
         from tesseract_core.runtime.config import (
             get_config,
