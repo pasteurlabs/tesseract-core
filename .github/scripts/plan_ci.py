@@ -9,43 +9,23 @@ Python versions, ARM, Podman, and pip installs).
 
 A pull request also runs the full matrix when it carries the `ci:full` label
 or changes dependencies or the CI setup itself. It runs the demo and GPU jobs
-when it touches their files.
+when it touches their files. run_tests.yml sets the paths that trigger each.
 
-Writes job outputs to $GITHUB_OUTPUT and an explanation to $GITHUB_STEP_SUMMARY,
-or prints both when those are unset.
+`plan` prints the job outputs and an explanation to the log, and also writes
+them to $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY when those are set. `check`
+fails if any of the jobs that ran failed.
 """
 
 import argparse
 import json
 import os
-import re
+import sys
 from collections.abc import Iterable
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import NamedTuple
 
 FULL_LABEL = "ci:full"
-
-# Changes to any of these run the full matrix on the pull request.
-FULL_PATTERNS = [
-    r"^pyproject\.toml$",
-    r"^production\.uv\.lock$",
-    r"^requirements\.txt$",
-    r"^\.github/workflows/run_tests\.yml$",
-    r"^\.github/scripts/plan_ci\.py$",
-]
-
-DEMO_PATTERNS = [r"^demo/"]
-
-# The GPU-specific code paths. Broader changes that could still break GPU
-# serving are caught by the merge queue.
-GPU_PATTERNS = [
-    r"^tesseract_core/runtime/cuda/",
-    r"^tesseract_core/runtime/device_transport\.py$",
-    r"^tesseract_core/runtime/array_encoding\.py$",
-    r"^tests/test_cuda_ipc",
-    r"^tests/endtoend_tests/test_serving_gpu\.py$",
-    r"^examples/_gpu_",
-]
 
 # Shards for the example end-to-end tests, sized so a shard takes about as
 # long as the base end-to-end job.
@@ -53,6 +33,14 @@ NUM_EXAMPLE_SHARDS = 6
 
 # Examples that only build on arm64 and run on the ARM runner in the full tier.
 ARM_ONLY_EXAMPLES = ["pyvista-arm64"]
+
+
+class PathTriggers(NamedTuple):
+    """Glob patterns for the changed paths that trigger optional jobs."""
+
+    full: list[str]
+    demos: list[str]
+    gpu: list[str]
 
 
 class PythonVersions(NamedTuple):
@@ -87,12 +75,12 @@ def _base_jobs(python: PythonVersions) -> tuple[list[dict], list[dict]]:
     fast = [
         _base_job("ubuntu-latest", python.oldest, deps="oldest"),
         _base_job("ubuntu-latest", python.latest, typeguard=True),
+        _base_job("macos-latest", python.latest),
         _base_job("windows-latest", python.latest),
     ]
     full_only = [
         _base_job("ubuntu-latest", python.oldest),
         _base_job("macos-latest", python.oldest),
-        _base_job("macos-latest", python.latest),
         _base_job("windows-latest", python.oldest),
     ]
     return fast, full_only
@@ -130,7 +118,7 @@ def _pip_install_jobs(python: PythonVersions) -> list[dict]:
 
 
 def _matches(paths: Iterable[str], patterns: list[str]) -> list[str]:
-    return sorted(p for p in paths if any(re.search(pat, p) for pat in patterns))
+    return sorted(p for p in paths if any(fnmatchcase(p, pat) for pat in patterns))
 
 
 def _list_dirs(path: Path) -> list[str]:
@@ -143,6 +131,7 @@ def plan(
     event: str,
     labels: list[str],
     changed_files: list[str] | None,
+    triggers: PathTriggers,
     python: PythonVersions,
     repo_root: Path,
 ) -> tuple[dict[str, str], list[str]]:
@@ -158,13 +147,13 @@ def plan(
         reasons.append(f"`{FULL_LABEL}` label")
     if changed_files is None and event == "pull_request":
         reasons.append("could not list the changed files")
-    full_triggers = _matches(changed_files or [], FULL_PATTERNS)
+    full_triggers = _matches(changed_files or [], triggers.full)
     if full_triggers:
         reasons.append("changes to " + ", ".join(f"`{p}`" for p in full_triggers))
     full = bool(reasons)
 
-    run_demos = full or bool(_matches(changed_files or [], DEMO_PATTERNS))
-    run_gpu = full or bool(_matches(changed_files or [], GPU_PATTERNS))
+    run_demos = full or bool(_matches(changed_files or [], triggers.demos))
+    run_gpu = full or bool(_matches(changed_files or [], triggers.gpu))
 
     examples = [
         e for e in _list_dirs(repo_root / "examples") if e not in ARM_ONLY_EXAMPLES
@@ -217,61 +206,118 @@ def _summary(outputs: dict[str, str], reasons: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def check(needs: dict[str, dict]) -> list[str]:
+    """Return the failed jobs in `needs`, the workflow's `needs` context.
+
+    Jobs outside this event's tier are skipped, which counts as passing. The
+    plan job itself must succeed, since every other job is skipped without it.
+    """
+    return [
+        f"{job}: {info['result']}"
+        for job, info in needs.items()
+        if info["result"] != "success"
+        and (job == "plan" or info["result"] != "skipped")
+    ]
+
+
+def _split_lines(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
 def _read_lines(path: Path) -> list[str]:
-    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+    return _split_lines(path.read_text())
 
 
-def main() -> None:
-    """Plan the jobs for the current event and write the results."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--event", required=True, help="GitHub event name")
-    parser.add_argument(
-        "--python-oldest", required=True, help="Oldest supported Python version"
-    )
-    parser.add_argument(
-        "--python-latest", required=True, help="Latest supported Python version"
-    )
-    parser.add_argument(
-        "--python-default",
-        required=True,
-        help="Python version for jobs that test a single version",
-    )
-    parser.add_argument(
-        "--labels", type=Path, help="File with the pull request's labels, one per line"
-    )
-    parser.add_argument(
-        "--changed-files",
-        type=Path,
-        help="File with the pull request's changed paths, one per line. "
-        "If missing, the changed files are treated as unknown.",
-    )
-    args = parser.parse_args()
+def _print_and_append(env_var: str, text: str) -> None:
+    print(text)
+    if env_var in os.environ:
+        with open(os.environ[env_var], "a") as f:
+            f.write(text)
 
+
+def _run_plan(args: argparse.Namespace) -> None:
     labels = _read_lines(args.labels) if args.labels else []
     changed_files = (
         _read_lines(args.changed_files)
         if args.changed_files and args.changed_files.exists()
         else None
     )
+    triggers = PathTriggers(
+        full=_split_lines(args.full_paths),
+        demos=_split_lines(args.demo_paths),
+        gpu=_split_lines(args.gpu_paths),
+    )
     python = PythonVersions(
         oldest=args.python_oldest,
         latest=args.python_latest,
         default=args.python_default,
     )
-    outputs, reasons = plan(args.event, labels, changed_files, python, Path("."))
+    outputs, reasons = plan(
+        args.event, labels, changed_files, triggers, python, Path(".")
+    )
+    _print_and_append("GITHUB_STEP_SUMMARY", _summary(outputs, reasons))
+    _print_and_append(
+        "GITHUB_OUTPUT", "".join(f"{k}={v}\n" for k, v in outputs.items())
+    )
 
-    output_text = "".join(f"{key}={value}\n" for key, value in outputs.items())
-    summary_text = _summary(outputs, reasons)
-    if "GITHUB_OUTPUT" in os.environ:
-        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            f.write(output_text)
-    else:
-        print(output_text)
-    if "GITHUB_STEP_SUMMARY" in os.environ:
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-            f.write(summary_text)
-    else:
-        print(summary_text)
+
+def _run_check(args: argparse.Namespace) -> None:
+    failed = check(json.loads(args.needs))
+    if failed:
+        print("Failed jobs:\n" + "\n".join(failed))
+        sys.exit(1)
+    print("All tests passed!")
+
+
+def main() -> None:
+    """Run the subcommand given on the command line."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(required=True)
+
+    plan_parser = subparsers.add_parser("plan", help="Plan the jobs for an event")
+    plan_parser.set_defaults(func=_run_plan)
+    plan_parser.add_argument("--event", required=True, help="GitHub event name")
+    plan_parser.add_argument(
+        "--python-oldest", required=True, help="Oldest supported Python version"
+    )
+    plan_parser.add_argument(
+        "--python-latest", required=True, help="Latest supported Python version"
+    )
+    plan_parser.add_argument(
+        "--python-default",
+        required=True,
+        help="Python version for jobs that test a single version",
+    )
+    for name, jobs in [
+        ("full", "the full matrix"),
+        ("demo", "the demo jobs"),
+        ("gpu", "the GPU jobs"),
+    ]:
+        plan_parser.add_argument(
+            f"--{name}-paths",
+            default="",
+            help=f"Path globs, one per line, whose changes run {jobs}",
+        )
+    plan_parser.add_argument(
+        "--labels", type=Path, help="File with the pull request's labels, one per line"
+    )
+    plan_parser.add_argument(
+        "--changed-files",
+        type=Path,
+        help="File with the pull request's changed paths, one per line. "
+        "If missing, the changed files are treated as unknown.",
+    )
+
+    check_parser = subparsers.add_parser(
+        "check", help="Fail if any of the jobs that ran failed"
+    )
+    check_parser.set_defaults(func=_run_check)
+    check_parser.add_argument(
+        "--needs", required=True, help="The workflow's `needs` context as JSON"
+    )
+
+    args = parser.parse_args()
+    args.func(args)
 
 
 if __name__ == "__main__":

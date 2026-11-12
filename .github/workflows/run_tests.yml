@@ -64,21 +64,44 @@ jobs:
             rm -f "$RUNNER_TEMP/changed_files.txt"
           fi
 
+      # The path globs below decide which optional jobs a pull request runs.
+      # They match with fnmatch, where `*` also matches `/`.
       - name: Plan jobs
         id: plan
         env:
           EVENT: ${{ github.event_name }}
+          # Changes to any of these run the full matrix on the pull request.
+          FULL_PATHS: |
+            pyproject.toml
+            production.uv.lock
+            requirements.txt
+            .github/workflows/run_tests.yml
+            .github/scripts/plan_ci.py
+          DEMO_PATHS: |
+            demo/**
+          # The GPU-specific code paths. Broader changes that could still break
+          # GPU serving are caught by the merge queue.
+          GPU_PATHS: |
+            tesseract_core/runtime/cuda/**
+            tesseract_core/runtime/device_transport.py
+            tesseract_core/runtime/array_encoding.py
+            tests/test_cuda_ipc*
+            tests/endtoend_tests/test_serving_gpu.py
+            examples/_gpu_*/**
         run: |
           args=(
             --event "$EVENT"
             --python-oldest "$PYTHON_OLDEST"
             --python-latest "$PYTHON_LATEST"
             --python-default "$PYTHON_DEFAULT"
+            --full-paths "$FULL_PATHS"
+            --demo-paths "$DEMO_PATHS"
+            --gpu-paths "$GPU_PATHS"
           )
           if [ "$EVENT" == "pull_request" ]; then
             args+=(--labels "$RUNNER_TEMP/labels.txt" --changed-files "$RUNNER_TEMP/changed_files.txt")
           fi
-          python3 .github/scripts/plan_ci.py "${args[@]}"
+          python3 .github/scripts/plan_ci.py plan "${args[@]}"
 
   tests-base:
     needs: [plan]
@@ -515,21 +538,12 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # Jobs outside this event's tier are skipped, which counts as passing.
-      # The plan job itself must succeed, since every other job is skipped
-      # without it.
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+
       - name: Check for errors
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          failed=$(jq -r 'to_entries[]
-            | select(.value.result != "success" and (.key == "plan" or .value.result != "skipped"))
-            | "\(.key): \(.value.result)"' <<< "$NEEDS")
-
-          if [ -n "$failed" ]; then
-            echo "Failed jobs:"
-            echo "$failed"
-            exit 1
-          fi
-
-          echo "All tests passed!"
+        run: python3 .github/scripts/plan_ci.py check --needs "$NEEDS"
