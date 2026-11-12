@@ -27,6 +27,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from .._deprecations import DEFAULT_BASE_IMAGE_CHANGE, NEXT_DEFAULT_BASE_IMAGE
 from .api_parse import (
+    DEFAULT_PYTHON,
     TesseractBuildConfig,
     TesseractConfig,
     get_config,
@@ -641,6 +642,10 @@ def init_api(
         "version": tesseract_version,
         "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "name": tesseract_name,
+        # Offered as commented-out pins to the current defaults, so uncommenting
+        # freezes what the Tesseract gets today (in builds and from_source alike).
+        "base_image": TesseractBuildConfig.model_fields["base_image"].default,
+        "python_version": DEFAULT_PYTHON,
     }
 
     # If target dir does not exist, create it
