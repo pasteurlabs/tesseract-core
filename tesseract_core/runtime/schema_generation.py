@@ -30,7 +30,6 @@ from pydantic import (
     ValidationInfo,
     create_model,
     field_validator,
-    model_validator,
 )
 from pydantic_core import PydanticSerializationError
 
@@ -86,19 +85,20 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
-def _factory_default_validator(converters: dict[str, Callable[[Any], Any]]) -> Any:
-    """Model validator converting the defaults of default_factory fields the caller omitted."""
+def _wrap_default_factory(
+    factory: Callable[..., Any], convert: Callable[[Any], Any]
+) -> Callable[..., Any]:
+    """Wrap a default_factory so its output goes through ``convert``.
 
-    def convert_factory_defaults(self: BaseModel) -> BaseModel:
-        # Pydantic does not validate defaults, so a field missing from
-        # model_fields_set still holds its factory's raw output.
-        for name, convert in converters.items():
-            if name not in self.model_fields_set:
-                # Write to __dict__ to bypass validate_assignment and frozen models
-                self.__dict__[name] = convert(self.__dict__[name])
-        return self
+    ``functools.wraps`` keeps the factory's signature visible to pydantic, which
+    inspects it to decide whether to pass the validated data.
+    """
 
-    return model_validator(mode="after")(convert_factory_defaults)
+    @functools.wraps(factory)
+    def wrapped(*args: Any) -> Any:
+        return convert(factory(*args))
+
+    return wrapped
 
 
 def apply_function_to_model_tree(
@@ -120,9 +120,8 @@ def apply_function_to_model_tree(
     If given, make_default_converter is called as
     ``make_default_converter(old_type, new_type)`` for every field that has a default,
     when the model is built. It returns a function mapping the old default to the new
-    one, or None to keep the default as is. A ``default=`` is converted right away.
-    A ``default_factory=`` is left in place, and a model validator converts its output
-    for every field omitted by the caller.
+    one, or None to keep the default as is. A ``default=`` is converted right away,
+    and a ``default_factory=`` is wrapped so that each value it produces is converted.
 
     The notion of path is used to handle nested models and containers. For example, given
     a model like this:
@@ -160,7 +159,6 @@ def apply_function_to_model_tree(
             seen_models.add(id(treeobj))
 
             new_fields = {}
-            factory_converters = {}
 
             for field_name, field in treeobj.model_fields.items():
                 field_type = field.annotation
@@ -180,7 +178,9 @@ def apply_function_to_model_tree(
                     convert = make_default_converter(field_type, new_type)
                 if convert is not None:
                     if field.default_factory is not None:
-                        factory_converters[field_name] = convert
+                        new_field.default_factory = _wrap_default_factory(
+                            field.default_factory, convert
+                        )
                     else:
                         new_field.default = convert(field.default)
 
@@ -198,17 +198,11 @@ def apply_function_to_model_tree(
             if safe_issubclass(treeobj, RootModel):
                 model_config.pop("extra", None)
 
-            validators = None
-            if factory_converters:
-                validator = _factory_default_validator(factory_converters)
-                validators = {"_convert_factory_defaults": validator}
-
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
                 model_config=(ConfigDict, model_config),
                 __base__=treeobj,
-                __validators__=validators,
             )
 
         elif _is_annotated(treeobj):
@@ -393,18 +387,16 @@ def create_apply_schema(
     return ApplyInputSchema, ApplyOutputSchema
 
 
-# Validation context that lets the abstract schema's array fields accept real
-# arrays, only passed when converting defaults. Pydantic wants string keys, so the
-# value is a private object: callers cannot reproduce it to send real arrays to
-# abstract_eval.
+# Validation context key that lets the abstract schema's array fields accept real
+# arrays. Only passed when converting defaults, so abstract_eval still rejects them.
 _CONVERT_DEFAULT_KEY = "tesseract_convert_abstract_default"
-_CONVERT_DEFAULT_SENTINEL = object()
 
 
 def _array_default_to_shapedtype(value: Any, info: ValidationInfo) -> Any:
     """Before-validator replacing a real array by its ShapeDType, when converting a default."""
-    context = info.context or {}
-    converting = context.get(_CONVERT_DEFAULT_KEY) is _CONVERT_DEFAULT_SENTINEL
+    converting = (info.context or {}).get(_CONVERT_DEFAULT_KEY, False)
+    # Defaults reach here validated against the real Array annotation, which turns
+    # any array-like (JAX, PyTorch, ...) into a NumPy array, so NumPy is all we see.
     if converting and isinstance(value, np.ndarray | np.generic):
         return ShapeDType(shape=value.shape, dtype=str(value.dtype))
     return value
@@ -436,7 +428,7 @@ def _abstract_default_converter(
             real = real_adapter.validate_python(default)
             plain = real_adapter.dump_python(real, by_alias=True)
             return abstract_adapter.validate_python(
-                plain, context={_CONVERT_DEFAULT_KEY: _CONVERT_DEFAULT_SENTINEL}
+                plain, context={_CONVERT_DEFAULT_KEY: True}
             )
         except (ValidationError, PydanticSerializationError):
             return default
