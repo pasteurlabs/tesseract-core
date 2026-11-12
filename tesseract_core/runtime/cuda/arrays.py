@@ -423,6 +423,11 @@ class DeviceArray:
         """Size of the owned device buffer in bytes."""
         return self._nbytes
 
+    def __len__(self) -> int:
+        if not self.shape:
+            raise TypeError("len() of unsized object")
+        return self.shape[0]
+
     @property
     def __cuda_array_interface__(self) -> dict:
         return {
