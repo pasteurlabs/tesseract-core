@@ -4,6 +4,7 @@
 """Tests for the MPA module."""
 
 import csv
+import io
 import json
 import os
 import sys
@@ -140,6 +141,16 @@ def test_concurrent_runs_do_not_clobber_stdio(tmp_path):
 
 def test_output_printed_while_the_log_sink_runs_goes_to_the_log(tmp_path):
     """Output printed while the log sink runs goes to the log, but the sink's own prints don't."""
+    try:
+        sys.stdout.fileno()
+        sys.stderr.fileno()
+    except io.UnsupportedOperation:
+        # redirect_stdio leaves streams without a file descriptor alone.
+        pytest.skip("needs stdio with file descriptors, e.g. pytest --capture=fd")
+
+    # Each line has a small chance of being printed while the sink runs. Without
+    # per-thread routing, all of 20 local runs failed by line 74, so 200 lines
+    # leave a margin.
     lines = 200
     received = []
 
@@ -154,7 +165,9 @@ def test_output_printed_while_the_log_sink_runs_goes_to_the_log(tmp_path):
         for index in range(lines):
             print(f"line-{index}", file=sys.stderr, flush=True)
             # Print the next line as soon as the sink has seen this one, while
-            # it may still be running.
+            # it may still be running. The deadline is generous so that a slow
+            # machine doesn't fail the test, and the test polls often so that
+            # the next print follows the sink closely.
             deadline = time.monotonic() + 10
             while not (tmp_path / f"line-{index}.seen").exists():
                 assert time.monotonic() < deadline, f"the sink never got line-{index}"
@@ -163,6 +176,26 @@ def test_output_printed_while_the_log_sink_runs_goes_to_the_log(tmp_path):
     expected = [f"line-{index}" for index in range(lines)]
     assert logfile.read_text().splitlines() == expected
     assert received == expected
+
+
+def test_sink_routed_stream_forwards_to_the_stream_for_the_current_thread():
+    """Attribute writes, iteration and ``with`` reach the stream the thread is routed to."""
+    redirected, original = io.StringIO("a\nb\n"), io.StringIO()
+    sink_state = threading.local()
+    stream = mpa._SinkRoutedStream(redirected, original, sink_state)
+
+    stream.marker = "redirected"
+    sink_state.active = True
+    stream.marker = "original"
+    sink_state.active = False
+    assert (redirected.marker, original.marker) == ("redirected", "original")
+
+    assert list(stream) == ["a\n", "b\n"]
+
+    with stream as entered:
+        assert entered is stream
+    assert redirected.closed
+    assert not original.closed
 
 
 def test_file_backend_default():

@@ -245,16 +245,33 @@ class _SinkRoutedStream:
     """
 
     def __init__(
-        self, redirected: Any, original: Any, in_sink: threading.local
+        self, redirected: Any, original: Any, sink_state: threading.local
     ) -> None:
-        self._redirected = redirected
-        self._original = original
-        self._in_sink = in_sink
+        object.__setattr__(self, "_redirected", redirected)
+        object.__setattr__(self, "_original", original)
+        object.__setattr__(self, "_sink_state", sink_state)
+
+    def _current_stream(self) -> Any:
+        if getattr(self._sink_state, "active", False):
+            return self._original
+        return self._redirected
 
     def __getattr__(self, name: str) -> Any:
-        if getattr(self._in_sink, "active", False):
-            return getattr(self._original, name)
-        return getattr(self._redirected, name)
+        return getattr(self._current_stream(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._current_stream(), name, value)
+
+    # Python looks up these methods on the class, bypassing __getattr__.
+    def __enter__(self) -> Any:
+        self._current_stream().__enter__()
+        return self
+
+    def __exit__(self, *exc_info: object) -> Any:
+        return self._current_stream().__exit__(*exc_info)
+
+    def __iter__(self) -> Any:
+        return iter(self._current_stream())
 
 
 @contextmanager
@@ -323,18 +340,18 @@ def redirect_stdio(
             # preventing infinite recursion when the sink itself prints. Only
             # the thread running the sink is rerouted, because the code being
             # logged keeps printing meanwhile and its output belongs in the log.
-            in_sink = threading.local()
+            sink_state = threading.local()
 
             def safe_sink(msg: str) -> None:
-                in_sink.active = True
+                sink_state.active = True
                 try:
                     log_sink(msg)
                 finally:
-                    in_sink.active = False
+                    sink_state.active = False
 
             old_stdout, old_stderr = sys.stdout, sys.stderr
-            sys.stdout = _SinkRoutedStream(old_stdout, orig_stdout_file, in_sink)
-            sys.stderr = _SinkRoutedStream(old_stderr, orig_stderr_file, in_sink)
+            sys.stdout = _SinkRoutedStream(old_stdout, orig_stdout_file, sink_state)
+            sys.stderr = _SinkRoutedStream(old_stderr, orig_stderr_file, sink_state)
             stack.callback(setattr, sys, "stderr", old_stderr)
             stack.callback(setattr, sys, "stdout", old_stdout)
 

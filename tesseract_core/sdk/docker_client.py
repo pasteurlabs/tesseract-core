@@ -143,7 +143,7 @@ def _run_process(
             proc.wait()
         # Let the readers drain the pipes before they are closed under them.
         for thread in (stdout_thread, stderr_thread):
-            if thread is not None:
+            if thread is not None and thread.ident is not None:
                 thread.join(timeout=5)
         raise
     finally:
