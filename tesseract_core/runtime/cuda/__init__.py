@@ -15,9 +15,11 @@ Layers:
   (memory management, IPC, device-to-device/host copies).
 * :mod:`~tesseract_core.runtime.cuda.dlpack` -- export an owned device buffer
   as a DLPack capsule.
+* :mod:`~tesseract_core.runtime.cuda.arrays` -- what the GPU transports share,
+  such as the device array they decode into.
 
-The main consumer is :mod:`tesseract_core.runtime.cuda.ipc`, which layers the
-``cuda_ipc`` GPU transport on top of this API.
+The GPU transports :mod:`~tesseract_core.runtime.cuda.ipc` (``cuda_ipc``) and
+:mod:`~tesseract_core.runtime.cuda.nixl` (``nixl``) build on these.
 :mod:`~tesseract_core.runtime.cuda.serving` holds what the REST API needs to
 serve GPU transports.
 """

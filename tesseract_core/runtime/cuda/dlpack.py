@@ -5,7 +5,7 @@
 
 Mirrors just enough of the DLPack C ABI to wrap a device buffer in a
 ``"dltensor"`` PyCapsule without depending on any GPU framework.
-:class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray` implements
+:class:`tesseract_core.runtime.cuda.arrays.DeviceArray` implements
 ``__dlpack__`` with :func:`make_dlpack_capsule`. All ctypes and CPython capsule
 calls stay in this module. A capsule, and the tensor a framework adopts from
 it, keep the object that owns the buffer alive until the framework is done.
