@@ -637,8 +637,8 @@ def test_copy_to_host_reads_device_bytes(mocked_cuda, allow_device_host_copy):
     np.testing.assert_array_equal(np.asarray(out), expected)
 
 
-def test_len_reads_shape_without_device_access(mocked_cuda):
-    """len() is the size of the first axis and copies nothing; 0-d arrays have none."""
+def test_len_reads_shape(mocked_cuda):
+    """len() is the size of the first axis; 0-d arrays have none."""
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
     )
