@@ -1,4 +1,21 @@
 # Debugging guide
+## The Tesseract can't see an environment variable
+
+A containerized Tesseract does not inherit the host environment. Which environment a Tesseract sees depends on how it was launched:
+
+| Launch path | Environment seen |
+| --- | --- |
+| `tesseract run` / `tesseract serve` (container) | Only variables passed with `--env`, set via `environment=` on `Tesseract.from_image`, or defined in `tesseract_config.yaml`. |
+| `Tesseract.from_image` | Same as the container: only `--env` / `environment=` / `tesseract_config.yaml`. |
+| `Tesseract.from_source` | The caller's environment. |
+| `tesseract-runtime` | The caller's environment. |
+| `Tesseract.from_tesseract_api` | The caller's environment. |
+
+If a variable set on the host is missing inside a container, pass it explicitly:
+
+```bash
+tesseract run my-tesseract --env MY_VAR=value apply ...
+```
 
 This page covers strategies for interactive development and debugging of Tesseracts.
 
