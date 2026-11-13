@@ -56,7 +56,7 @@ def abstract_eval(abstract_inputs: Any) -> dict:
 
 def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
     """Return the Jacobian blocks as device memory."""
-    eye = torch.eye(len(inputs.a), dtype=torch.float32, device="cuda")
+    eye = torch.eye(inputs.a.shape[0], dtype=torch.float32, device="cuda")
     scales = _partial_scales(inputs)
     return {"result": {name: scales[name] * eye for name in jac_inputs}}
 
