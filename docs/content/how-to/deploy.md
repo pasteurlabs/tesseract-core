@@ -1,4 +1,11 @@
 # Deploying Tesseracts
+
+:::{warning}
+A container does not inherit the host environment. A Tesseract running in a
+container only sees the environment variables baked into its image, so
+variables exported on the host are not available to it. Pass the ones it needs
+explicitly when launching the container.
+:::
 ```{note}
 A containerized Tesseract does not inherit the host environment. Pass variables with `--env` (or `environment=` / `tesseract_config.yaml`); see {doc}`debugging` for the full launch-path table.
 ```
