@@ -1,4 +1,17 @@
 # Debugging guide
+
+## Environment variables
+
+Which environment variables a Tesseract can see depends on how it is launched:
+
+| Launch path | Environment the Tesseract sees |
+| --- | --- |
+| `Tesseract.from_tesseract_api()` | The calling Python process's environment. |
+| `Tesseract.from_source()` | The environment of the subprocess the SDK starts, which inherits the host environment. |
+| `Tesseract.from_image()`, `tesseract run`, `tesseract serve` | Only the variables baked into the image plus those passed explicitly at launch; the host environment is not inherited. |
+
+Runtime settings are read from the environment of the process that runs the
+Tesseract, so set them on the side of the boundary the Tesseract runs on.
 ## The Tesseract can't see an environment variable
 
 A containerized Tesseract does not inherit the host environment. Which environment a Tesseract sees depends on how it was launched:
