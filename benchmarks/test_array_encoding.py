@@ -3,10 +3,13 @@
 
 """Benchmarks for array encoding and decoding.
 
-Tests the performance of json, base64, and binref encoding methods
-for arrays of varying sizes, exercising the same codepaths used by the
-runtime server (output_to_bytes for encoding, model_validate_json for
-decoding).
+Times an encode + decode roundtrip of a single array for each encoding,
+exercising the same codepaths used by the runtime server (output_to_bytes for
+encoding, model_validate_json for decoding). The roundtrip is what a request
+pays, so a regression in either half shows up here.
+
+Compression is only benchmarked as base64+lz4, since lz4 runs the same code
+whichever format wraps it.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ class ArrayModel(BaseModel):
     data: Array[(None,), Float64]
 
 
-ENCODINGS = ["json", "base64", "binref", "base64+lz4", "binref+lz4"]
+ENCODINGS = ["json", "base64", "binref", "base64+lz4"]
 
 # Maps short encoding name to the format string used by output_to_bytes
 _ENCODING_TO_FORMAT: dict[str, supported_format_type] = {
@@ -39,7 +42,6 @@ _ENCODING_TO_FORMAT: dict[str, supported_format_type] = {
     "base64": "json+base64",
     "binref": "json+binref",
     "base64+lz4": "json+base64",
-    "binref+lz4": "json+binref",
 }
 
 # Maps short encoding name to extra kwargs passed to output_to_bytes
@@ -48,7 +50,6 @@ _ENCODING_TO_KWARGS: dict[str, dict] = {
     "base64": {},
     "binref": {},
     "base64+lz4": {"compression": "lz4"},
-    "binref+lz4": {"compression": "lz4"},
 }
 
 
@@ -70,7 +71,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def _binref_rounds(size: int) -> int:
     """Scale rounds inversely with array size: more rounds for smaller, faster arrays."""
-    return max(10, min(int(1e7 / max(size, 1)), 10_000))
+    return max(20, min(int(1e8 / max(size, 1)), 1000))
 
 
 def _clear_dir(path: str) -> None:
@@ -83,63 +84,6 @@ def _clear_dir(path: str) -> None:
     """
     for f in os.listdir(path):
         os.remove(os.path.join(path, f))
-
-
-def test_encoding(benchmark, encoding_and_size):
-    encoding, size = encoding_and_size
-    model = ArrayModel(data=create_test_array(size))
-    fmt = _ENCODING_TO_FORMAT[encoding]
-    extra_kwargs = _ENCODING_TO_KWARGS[encoding]
-    uses_binref = "binref" in encoding
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if uses_binref:
-
-            def setup():
-                _clear_dir(tmpdir)
-
-            benchmark.pedantic(
-                output_to_bytes,
-                args=(model, fmt),
-                kwargs={"base_dir": tmpdir, **extra_kwargs},
-                setup=setup,
-                rounds=_binref_rounds(size),
-            )
-        else:
-            benchmark(output_to_bytes, model, fmt, **extra_kwargs)
-
-
-def test_decoding(benchmark, encoding_and_size):
-    encoding, size = encoding_and_size
-    model = ArrayModel(data=create_test_array(size))
-    fmt = _ENCODING_TO_FORMAT[encoding]
-    extra_kwargs = _ENCODING_TO_KWARGS[encoding]
-    uses_binref = "binref" in encoding
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ctx: dict[str, str] = {}
-        if uses_binref:
-            ctx["base_dir"] = tmpdir
-
-        encoded = output_to_bytes(model, fmt, base_dir=tmpdir, **extra_kwargs)
-
-        if uses_binref:
-            # binref filenames are random UUIDs, so we must re-encode in setup
-            # and pass the fresh payload to the decode call via a mutable wrapper.
-            payload = [encoded]
-
-            def setup():
-                _clear_dir(tmpdir)
-                payload[0] = output_to_bytes(
-                    model, fmt, base_dir=tmpdir, **extra_kwargs
-                )
-
-            def decode():
-                ArrayModel.model_validate_json(payload[0], context=ctx)
-
-            benchmark.pedantic(decode, setup=setup, rounds=_binref_rounds(size))
-        else:
-            benchmark(ArrayModel.model_validate_json, encoded, context=ctx)
 
 
 def test_roundtrip(benchmark, encoding_and_size):

@@ -43,6 +43,17 @@ def pytest_addoption(parser):
         dest="run_endtoend",
         help="Skip end-to-end tests",
     )
+    parser.addoption(
+        "--compat-version",
+        action="append",
+        dest="compat_versions",
+        default=[],
+        metavar="X.Y.Z",
+        help=(
+            "Released tesseract-core version to run tests/compat_tests against "
+            "(repeatable). Without it, those tests are skipped."
+        ),
+    )
 
 
 def pytest_collection_modifyitems(config, items):
