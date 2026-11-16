@@ -326,6 +326,17 @@ def test_gpu_transport_option(cli, cli_runner, args, expected):
             assert get_config().gpu_transport == expected
 
 
+def test_absent_gpu_transport_option_keeps_environment(monkeypatch):
+    from tesseract_core.runtime.cli import _apply_global_options
+    from tesseract_core.runtime.config import get_config, override_config
+
+    monkeypatch.setenv("TESSERACT_GPU_TRANSPORT", "cuda_ipc")
+    monkeypatch.setattr(sys, "argv", ["tesseract-runtime", "serve"])
+    with override_config():
+        _apply_global_options()
+        assert get_config().gpu_transport == ("cuda_ipc",)
+
+
 @pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])
 def test_outputs_to_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, output_format

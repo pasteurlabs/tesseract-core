@@ -165,14 +165,10 @@ def make_callback() -> Callable:
         The Tesseract runtime can be configured via environment variables; for example,
         ``export TESSERACT_RUNTIME_PORT=8080`` sets the port to use for ``tesseract serve`` to 8080.
         """
+        # Absent options are None, or empty if repeatable
+        given = {key: val for key, val in kwargs.items() if val not in (None, (), [])}
         try:
-            update_config(
-                **{
-                    key: _enum_to_val(val)
-                    for key, val in kwargs.items()
-                    if val is not None
-                }
-            )
+            update_config(**{key: _enum_to_val(val) for key, val in given.items()})
         except ValidationError as e:
             error = e.errors()[0]
             option = "--" + str(error["loc"][0]).replace("_", "-")
