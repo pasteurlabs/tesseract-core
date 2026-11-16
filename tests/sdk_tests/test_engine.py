@@ -2127,7 +2127,7 @@ _UNSET = object()
         (None, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
         # Lists of transports reach the container as a comma-separated string.
         (["cuda_ipc"], {"gpu_transport": "none"}, "cuda_ipc"),
-        (_UNSET, {"gpu_transport": ["none", "cuda_ipc"]}, "cuda_ipc"),
+        (_UNSET, {"gpu_transport": ["cuda_ipc"]}, "cuda_ipc"),
         ([], {"gpu_transport": "cuda_ipc"}, "none"),
     ],
 )

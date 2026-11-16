@@ -584,7 +584,8 @@ def serve(
             help=(
                 "GPU transport the served Tesseract accepts. Repeat to enable "
                 "several, e.g. `--gpu-transport cuda_ipc --gpu-transport nixl`. "
-                "Default `none` copies arrays from GPU to the host. "
+                "Default `none` copies arrays from GPU to the host and cannot "
+                "be combined with other transports. "
                 "`cuda_ipc` passes them by reference and requires a shared IPC "
                 "namespace. `nixl` passes them by reference, also across hosts, "
                 "and runs the container on the host network. Any transport "

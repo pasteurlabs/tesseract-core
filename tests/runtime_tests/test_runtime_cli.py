@@ -300,6 +300,32 @@ def test_input_path_without_value(monkeypatch):
         _configure_required_file_load()
 
 
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (
+            ["--gpu-transport", "cuda_ipc", "--gpu-transport", "nixl"],
+            ("cuda_ipc", "nixl"),
+        ),
+        (["--gpu-transport", "cuda_ipc,nixl"], ("cuda_ipc", "nixl")),
+        (["--gpu-transport", "none"], ()),
+        (["--gpu-transport", "none", "--gpu-transport", "nixl"], None),
+    ],
+)
+def test_gpu_transport_option(cli, cli_runner, args, expected):
+    """--gpu-transport can be repeated or take commas, but ``none`` must stand alone."""
+    from tesseract_core.runtime.config import get_config, override_config
+
+    with override_config():
+        result = cli_runner.invoke(cli, [*args, "check"])
+        if expected is None:
+            assert result.exit_code == 2
+            assert "cannot be combined" in result.stderr
+        else:
+            assert result.exit_code == 0, result.stderr
+            assert get_config().gpu_transport == expected
+
+
 @pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])
 def test_outputs_to_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, output_format

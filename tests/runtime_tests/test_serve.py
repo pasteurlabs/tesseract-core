@@ -289,7 +289,7 @@ def test_parse_media_range(media_range, expected):
         ),
         # Several transports are spelled as in TESSERACT_GPU_TRANSPORT.
         (
-            "none,cuda_ipc",
+            "nixl,cuda_ipc",
             None,
             "application/*; gpu_transport=cuda_ipc",
             ("json", "cuda_ipc", None),

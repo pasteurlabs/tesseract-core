@@ -165,9 +165,21 @@ def make_callback() -> Callable:
         The Tesseract runtime can be configured via environment variables; for example,
         ``export TESSERACT_RUNTIME_PORT=8080`` sets the port to use for ``tesseract serve`` to 8080.
         """
-        update_config(
-            **{key: _enum_to_val(val) for key, val in kwargs.items() if val is not None}
-        )
+        try:
+            update_config(
+                **{
+                    key: _enum_to_val(val)
+                    for key, val in kwargs.items()
+                    if val is not None
+                }
+            )
+        except ValidationError as e:
+            error = e.errors()[0]
+            option = "--" + str(error["loc"][0]).replace("_", "-")
+            message = error.get("ctx", {}).get("error", error["msg"])
+            raise UsageError(
+                f"Invalid value {error['input']!r} for '{option}': {message}"
+            ) from e
 
     params = []
     for field_name, field_type in CONFIG_FIELDS.items():
@@ -194,8 +206,18 @@ def make_callback() -> Callable:
         if get_origin(field_type) is Literal:
             field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
 
-        if get_origin(field_type) in (dict, tuple):
-            # Dicts and tuples are parsed as strings, the latter comma-separated
+        metavar = None
+        if get_origin(field_type) is tuple:
+            # Tuples are repeatable string options that the config splits at
+            # commas, so a comma-separated environment variable works too. The
+            # metavar lists any choices in the help.
+            item_type = get_args(field_type)[0]
+            if get_origin(item_type) is Literal:
+                metavar = "<" + "|".join(get_args(item_type)) + ">"
+            field_type = list[str]
+
+        if get_origin(field_type) is dict:
+            # Dicts are parsed as strings
             field_type = str
 
         params.append(
@@ -209,6 +231,7 @@ def make_callback() -> Callable:
                         "--" + field_name.replace("_", "-"),
                         help=f"Overwrite the `{field_name}` config option.",
                         show_default=False,
+                        metavar=metavar,
                     ),
                 ],
             )
@@ -704,7 +727,11 @@ def _apply_global_options() -> None:
         # Malformed options raise Click's exceptions, which Typer vendors under
         # a private module, so they can't be caught by name.
         return
-    main_callback(**ctx.params)
+    try:
+        main_callback(**ctx.params)
+    except UsageError:
+        # Reported by the later parse, like malformed options
+        return
 
 
 def main() -> None:

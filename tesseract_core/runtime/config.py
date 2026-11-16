@@ -28,15 +28,21 @@ def _split_gpu_transports(obj: Any) -> Any:
     """Read ``gpu_transport`` as the transports it enables besides ``none``.
 
     Accepts one name, a comma-separated string of names (as in
-    ``TESSERACT_GPU_TRANSPORT``), or a sequence of names. Order is kept,
-    repeats and ``none`` are dropped.
+    ``TESSERACT_GPU_TRANSPORT``), or a sequence of either. Order is kept and
+    repeats are dropped. ``none`` is only valid on its own.
     """
     if isinstance(obj, str):
-        obj = obj.split(",")
+        obj = [obj]
     if not isinstance(obj, list | tuple):
         return obj
-    names = (str(name).strip() for name in obj)
-    return tuple(dict.fromkeys(name for name in names if name and name != "none"))
+    names = (name.strip() for item in obj for name in str(item).split(","))
+    names = tuple(dict.fromkeys(name for name in names if name))
+    if "none" in names and len(names) > 1:
+        raise ValueError(
+            "gpu_transport 'none' cannot be combined with other transports. "
+            "'none' is always accepted, so list only the transports to enable."
+        )
+    return tuple(name for name in names if name != "none")
 
 
 def _eval_str(obj: Any) -> Any:

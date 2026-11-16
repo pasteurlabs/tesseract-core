@@ -187,25 +187,30 @@ def parse_gpu_transports(gpu_transport: str | Sequence[str]) -> tuple[str, ...]:
     """Return the GPU transports ``gpu_transport`` enables besides ``none``, in order.
 
     Accepts one name, a comma-separated string of names (as in
-    ``TESSERACT_GPU_TRANSPORT``), or a sequence of names.
+    ``TESSERACT_GPU_TRANSPORT``), or a sequence of names. ``none`` is only
+    valid on its own.
 
     Raises:
-        ValueError: if a name is not a known GPU transport.
+        ValueError: if a name is not a known GPU transport, or ``none`` is
+            combined with other transports.
     """
     names = (
         gpu_transport.split(",") if isinstance(gpu_transport, str) else gpu_transport
     )
-    transports = []
-    for name in (str(name).strip() for name in names):
-        if not name or name == "none" or name in transports:
-            continue
-        if name not in GPU_TRANSPORTS:
+    names = (str(name).strip() for name in names)
+    names = tuple(dict.fromkeys(name for name in names if name))
+    for name in names:
+        if name != "none" and name not in GPU_TRANSPORTS:
             supported = ", ".join(repr(t) for t in ("none", *GPU_TRANSPORTS))
             raise ValueError(
                 f"Unknown gpu_transport {name!r}. Supported values: {supported}."
             )
-        transports.append(name)
-    return tuple(transports)
+    if "none" in names and len(names) > 1:
+        raise ValueError(
+            "gpu_transport 'none' cannot be combined with other transports. "
+            "'none' is always accepted, so list only the transports to enable."
+        )
+    return tuple(name for name in names if name != "none")
 
 
 def runtime_config_to_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:

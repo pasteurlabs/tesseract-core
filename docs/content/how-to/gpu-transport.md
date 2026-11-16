@@ -158,7 +158,8 @@ argument wins.
 
 `gpu_transport` also takes a list, to enable several transports at once. With
 `tesseract serve`, repeat `--gpu-transport`, and in `TESSERACT_GPU_TRANSPORT`,
-separate them with commas. Calls through the
+separate them with commas. `none` is always accepted, so it can't be part of
+the list. Calls through the
 Tesseract that enabled them ask for the first in the list. Other clients, such
 as one connecting with `from_url`, find one that works from where they run with
 `resolve_gpu_transport`, as described below.

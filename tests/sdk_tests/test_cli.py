@@ -80,7 +80,7 @@ def test_serve_accepts_valid_gpu_transport(cli_runner, mocked_docker, mocker):
     assert result.exit_code == 2
 
 
-def test_serve_passes_repeated_gpu_transports(cli_runner, mocker):
+def test_serve_passes_repeated_gpu_transports(cli_runner, mocked_docker, mocker):
     serve = mocker.patch(
         "tesseract_core.sdk.engine.serve", return_value=("name", mocker.Mock())
     )
