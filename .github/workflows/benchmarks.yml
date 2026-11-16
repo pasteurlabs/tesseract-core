@@ -23,6 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    env:
+      # PRs run the suite this many times per side (see "Run benchmarks").
+      # Pushes to main run it once, for the trend record.
+      PASSES: ${{ github.event_name == 'pull_request' && 3 || 1 }}
+
     steps:
       - name: Set up Git repository
         uses: actions/checkout@v7
@@ -34,20 +39,13 @@ jobs:
           python-version: "3.13"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
 
       - name: Install package
         run: uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
-
-      - name: Run benchmarks on current commit
-        run: |
-          uv run --no-sync pytest benchmarks/ \
-            --benchmark-json current_benchmarks.json
 
       - name: Check out baseline branch
         if: github.event_name == 'pull_request'
@@ -69,23 +67,37 @@ jobs:
         run: |
           cp -r ../benchmarks/* benchmarks/
 
-      - name: Run benchmarks on baseline
-        if: github.event_name == 'pull_request'
-        id: baseline
-        working-directory: baseline
+      # Each side runs $PASSES times, each pass in a fresh process, in the order
+      # B C C B B C so that drift over the job affects both sides alike.
+      # compare_benchmarks.py explains how the passes are compared.
+      - name: Run benchmarks
+        id: run
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          rc=0
-          uv run --no-sync pytest benchmarks/ \
-            --benchmark-json baseline_benchmarks.json \
-            || rc=$?
+          args=(-m "not slow")
+          has_baseline=$([ "$EVENT_NAME" = "pull_request" ] && echo true || echo false)
 
-          if [ "$rc" != "0" ]; then
-            echo "::warning::Baseline benchmark run failed, skipping comparison"
-            echo "has_baseline=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          for i in $(seq "$PASSES"); do
+            if [ $((i % 2)) = 1 ]; then order="baseline current"; else order="current baseline"; fi
+            for side in $order; do
+              echo "::group::Pass $i ($side)"
+              if [ "$side" = "current" ]; then
+                uv run --no-sync pytest benchmarks/ "${args[@]}" \
+                  --benchmark-json "current_benchmarks_$i.json"
+              elif [ "$has_baseline" = "true" ]; then
+                if ! (cd baseline && uv run --no-sync pytest benchmarks/ "${args[@]}" \
+                    --benchmark-json "../baseline_benchmarks_$i.json"); then
+                  echo "::warning::Baseline benchmark run failed, skipping comparison"
+                  has_baseline=false
+                  rm -f baseline_benchmarks_*.json
+                fi
+              fi
+              echo "::endgroup::"
+            done
+          done
 
-          echo "has_baseline=true" >> $GITHUB_OUTPUT
+          echo "has_baseline=$has_baseline" >> "$GITHUB_OUTPUT"
 
       # Secrets are withheld from `pull_request` runs on fork PRs, so the comment
       # is posted by the privileged `Benchmark Report` workflow instead.
@@ -93,15 +105,16 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HAS_BASELINE: ${{ steps.run.outputs.has_baseline }}
         run: |
-          baseline_flag=""
-          if [ "${{ steps.baseline.outputs.has_baseline }}" = "true" ]; then
-            baseline_flag="--baseline baseline/baseline_benchmarks.json"
+          baseline_args=()
+          if [ "$HAS_BASELINE" = "true" ]; then
+            baseline_args=(--baseline baseline_benchmarks_*.json)
           fi
 
           python benchmarks/compare_benchmarks.py \
-            $baseline_flag \
-            --current current_benchmarks.json \
+            "${baseline_args[@]}" \
+            --current current_benchmarks_*.json \
             --pr-number "$PR_NUMBER" \
             --output benchmark_report.md
 
@@ -111,8 +124,8 @@ jobs:
         with:
           name: benchmark-results
           path: |
-            current_benchmarks.json
-            baseline/baseline_benchmarks.json
+            current_benchmarks_*.json
+            baseline_benchmarks_*.json
             benchmark_report.md
           if-no-files-found: ignore
           retention-days: 30

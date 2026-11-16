@@ -246,6 +246,31 @@ def test_serve_cuda_ipc_vector_jacobian_product(gpu_image_name):
 
 
 @requires_cuda
+def test_serve_cuda_ipc_derivatives_of_device_inputs(gpu_image_name):
+    """Gradient endpoints work when the inputs arrive as device arrays."""
+    import cupy as cp
+
+    inputs = {"a": cp.arange(6, dtype=cp.float32), "b": cp.ones(6, dtype=cp.float32)}
+    vec = cp.linspace(0, 1, 6, dtype=cp.float32)
+    with _serve_cuda_ipc(gpu_image_name) as t:
+        jac = t.jacobian(inputs, jac_inputs=["a"], jac_outputs=["result"])
+        jvp = t.jacobian_vector_product(
+            inputs, jvp_inputs=["a"], jvp_outputs=["result"], tangent_vector={"a": vec}
+        )
+        vjp = t.vector_jacobian_product(
+            inputs,
+            vjp_inputs=["a"],
+            vjp_outputs=["result"],
+            cotangent_vector={"result": vec},
+        )
+
+    # The examples' default s is 3.0.
+    _assert_device_result(jac["result"]["a"], 3.0 * np.eye(6, dtype=np.float32))
+    _assert_device_result(jvp["result"], 3.0 * vec.get())
+    _assert_device_result(vjp["a"], 3.0 * vec.get())
+
+
+@requires_cuda
 def test_serve_fails_when_the_configured_transport_is_unusable(gpu_image_name):
     """A container configured with a transport it cannot serve refuses to start.
 

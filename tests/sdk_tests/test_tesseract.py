@@ -157,6 +157,85 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     assert endpoints == all_endpoints
 
 
+# Loading the runtime package is slowed down so that from_tesseract_api starts
+# while the first GPU call holds the package's import lock.
+_FROM_TESSERACT_API_DURING_FIRST_GPU_CALL_CODE = dedent(
+    """
+    import importlib.machinery
+    import sys
+    import threading
+    import time
+
+    from tesseract_core import Tesseract
+    from tesseract_core.sdk import tesseract as sdk
+
+    assert "tesseract_core.runtime" not in sys.modules
+
+    class SlowLoader(importlib.machinery.SourceFileLoader):
+        def create_module(self, spec):
+            # Runs under the package's import lock, before the package is in
+            # sys.modules.
+            time.sleep(0.2)
+
+    class SlowRuntimeFinder:
+        def find_spec(self, name, path=None, target=None):
+            if name != "tesseract_core.runtime":
+                return None
+            spec = importlib.machinery.PathFinder.find_spec(name, path)
+            spec.loader = SlowLoader(spec.loader.name, spec.loader.path)
+            return spec
+
+    sys.meta_path.insert(0, SlowRuntimeFinder())
+    errors = []
+
+    def first_gpu_call():
+        try:
+            sdk._import_cuda_arrays()
+        except Exception as exc:
+            errors.append(repr(exc))
+
+    def create_tesseract():
+        time.sleep(0.05)
+        try:
+            Tesseract.from_tesseract_api(sys.argv[1])
+        except Exception as exc:
+            errors.append(repr(exc))
+
+    threads = [
+        threading.Thread(target=first_gpu_call),
+        threading.Thread(target=create_tesseract),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
+    """
+)
+
+
+def test_Tesseract_from_tesseract_api_during_a_first_gpu_call(
+    dummy_tesseract_location,
+):
+    """Creating an in-process Tesseract doesn't deadlock with a first GPU call on another thread.
+
+    The run needs a fresh interpreter, so that the runtime is not imported yet.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _FROM_TESSERACT_API_DURING_FIRST_GPU_CALL_CODE,
+            str(dummy_tesseract_location / "tesseract_api.py"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
 def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
     dummy_tesseract_module, tmp_path
 ):
