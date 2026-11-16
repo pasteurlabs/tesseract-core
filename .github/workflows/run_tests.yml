@@ -182,6 +182,55 @@ jobs:
           flags: base-${{ matrix.os }}-py${{ matrix.python-version }}-${{ matrix.runtime-deps }}
           fail_ci_if_error: true
 
+  # Runs this SDK against older runtimes and older SDKs against this runtime,
+  # each served from its own environment (no Docker needed). "oldest" is
+  # tesseract_core.__oldest_supported_version__, "latest" the newest
+  # tesseract-core release on PyPI.
+  tests-compat:
+    needs: [plan]
+
+    strategy:
+      matrix:
+        compat-version: ["oldest", "latest"]
+
+      fail-fast: false
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Install package
+        run: |
+          cp production.uv.lock uv.lock
+          uv sync --python 3.12 --extra dev --frozen
+
+      - name: Run version compatibility tests
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          compat_version="${{ matrix.compat-version }}"
+          if [ "$compat_version" == "oldest" ]; then
+            compat_version=$(uv run --no-sync python -c "import tesseract_core; print(tesseract_core.__oldest_supported_version__)")
+          elif [ "$compat_version" == "latest" ]; then
+            compat_version=$(curl -fsSL https://pypi.org/pypi/tesseract-core/json | jq -r .info.version)
+          fi
+          uv run --no-sync pytest \
+            -o addopts="--durations=10" \
+            -v \
+            --timeout=300 \
+            --compat-version "$compat_version" \
+            tests/compat_tests
+
   tests-e2e:
     needs: [plan]
 
@@ -524,7 +573,15 @@ jobs:
   all-ok:
     if: always()
     needs:
-      [plan, tests-base, tests-e2e, tests-demos, tests-gpu, tests-pip-install]
+      [
+        plan,
+        tests-base,
+        tests-compat,
+        tests-e2e,
+        tests-demos,
+        tests-gpu,
+        tests-pip-install,
+      ]
 
     runs-on: ubuntu-latest
     timeout-minutes: 60
