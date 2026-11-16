@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.experimental import (
+    estimate_eps,
     finite_difference_jacobian,
     finite_difference_jvp,
     finite_difference_vjp,
@@ -419,6 +420,43 @@ class TestPerInputEps:
         )
         assert np.allclose(jac["from_big"]["big"], 3 * BIG**2, rtol=1e-6)
         assert np.allclose(jac["from_small"]["small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
+
+    @pytest.mark.parametrize("output_scale", [1.0, 1e-12])
+    def test_estimated_eps_recovers_both_derivatives(
+        self, scale_spread_inputs, output_scale
+    ):
+        """The estimate is relative, so tiny outputs need no other tolerance."""
+
+        def apply(inputs):
+            out = scale_spread_apply(inputs)
+            return ScaleSpreadOutputSchema(
+                from_big=output_scale * out.from_big,
+                from_small=output_scale * out.from_small,
+            )
+
+        eps = estimate_eps(
+            apply,
+            scale_spread_inputs,
+            input_paths={"big", "small"},
+            output_paths={"from_big", "from_small"},
+            rtol=1e-7,
+        )
+        jac = finite_difference_jacobian(
+            apply,
+            scale_spread_inputs,
+            jac_inputs={"big", "small"},
+            jac_outputs={"from_big", "from_small"},
+            eps=eps,
+        )
+        assert np.allclose(
+            jac["from_big"]["big"], output_scale * 3 * BIG**2, rtol=1e-6, atol=0
+        )
+        assert np.allclose(
+            jac["from_small"]["small"],
+            output_scale * 0.5 / np.sqrt(SMALL),
+            rtol=1e-6,
+            atol=0,
+        )
 
     @pytest.mark.parametrize("algorithm", ["central", "forward", "stochastic"])
     def test_scalar_and_uniform_dict_agree_exactly(self, simple_inputs, algorithm):
