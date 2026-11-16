@@ -1480,6 +1480,25 @@ def _gpu_array_to_host(arr: Any) -> np.ndarray:
 # transport.
 _HOST_ENCODINGS = ("base64", "raw", "binref")
 
+# What the server reads a JSON number back as.
+_JSON_NUMBER_DTYPES = ("bool", "int64", "float64")
+
+
+def _is_json_number(x: Any) -> bool:
+    """Whether ``x`` is a NumPy scalar that a JSON number carries as is.
+
+    Sent as an encoded array, such a scalar fails validation for a plain
+    ``int`` / ``float`` / ``bool`` field, and inside a list for an array field,
+    both of which take it in-process. A JSON number is read back as bool, int64
+    or float64, so other dtypes stay arrays to keep their dtype, as do NaN and
+    infinity, which a JSON number cannot hold.
+    """
+    return (
+        isinstance(x, np.generic)
+        and x.dtype.name in _JSON_NUMBER_DTYPES
+        and bool(np.isfinite(x))
+    )
+
 
 def _export_gpu_array(
     arr: Any, gpu_transport: str, ctx: EncodingContext | None
@@ -1580,7 +1599,10 @@ def _encode_payload(
         resolved_input_path is not None or binref_pool is not None
     )
 
-    def _encode_leaf(x: Any) -> dict:
+    def _encode_leaf(x: Any) -> dict | bool | int | float:
+        if _is_json_number(x):
+            return x.item()
+
         if _is_gpu_array(x) and gpu_transport != "none":
             return _encode_array(x, encoding=gpu_transport, ctx=ctx)
 

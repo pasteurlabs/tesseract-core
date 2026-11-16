@@ -844,6 +844,28 @@ def test_HTTPClient_only_decodes_what_the_server_marks_as_an_array(mocker):
     )
 
 
+def test_served_tesseract_takes_numpy_scalars_like_an_in_process_one(
+    dummy_tesseract_package, free_port, serve_in_subprocess
+):
+    """NumPy scalars reach plain int / float / bool fields, and lists for arrays."""
+    api_file = dummy_tesseract_package / "tesseract_api.py"
+    inputs = {
+        "a": list(np.array([1.0, 2.0])),
+        "b": np.array([3.0, 4.0], dtype=np.float32),
+        "s": np.int64(2),
+        "normalize": np.bool_(True),
+    }
+    expected = Tesseract.from_tesseract_api(api_file).apply(inputs)
+
+    with (
+        serve_in_subprocess(api_file, free_port) as url,
+        Tesseract.from_url(url, timeout=10) as tess,
+    ):
+        result = tess.apply(inputs)
+
+    np.testing.assert_array_equal(result["result"], expected["result"], strict=True)
+
+
 @pytest.mark.parametrize(
     "run_id",
     [None, "fizzbuzz"],
@@ -1573,6 +1595,29 @@ def test_tree_map_with_foreign_tensor():
 
     decoded = _decode_array(encoded["inputs"]["x"])
     np.testing.assert_array_equal(decoded, [4.0, 5.0])
+
+
+def test_encode_payload_sends_only_json_exact_numpy_scalars_as_numbers():
+    """float64, int64 and bool scalars become numbers; NaN and other dtypes stay arrays."""
+    payload = {
+        "f": np.float64(1.5),
+        "i": np.int64(2),
+        "b": np.bool_(True),
+        "nan": np.float64(np.nan),
+        "f32": np.float32(1.5),
+        "i32": np.int32(2),
+    }
+    with _encode_payload(payload) as encoded:
+        assert [(type(encoded[k]), encoded[k]) for k in "fib"] == [
+            (float, 1.5),
+            (int, 2),
+            (bool, True),
+        ]
+        assert {k: encoded[k]["dtype"] for k in ("nan", "f32", "i32")} == {
+            "nan": "float64",
+            "f32": "float32",
+            "i32": "int32",
+        }
 
 
 def test_encode_payload_binref(tmp_path):
