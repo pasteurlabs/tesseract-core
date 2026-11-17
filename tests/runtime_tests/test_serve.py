@@ -497,6 +497,7 @@ def test_openapi_schema_advertises_encodings(dummy_tesseract_module):
         "json+binref",
     ]
     assert schema["x-supported-gpu-transports"] == ["none"]
+    assert schema["x-supported-compressions"] == ["none", "lz4"]
 
     update_config(gpu_transport="cuda_ipc")
     client = TestClient(create_rest_api(dummy_tesseract_module))

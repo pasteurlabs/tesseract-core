@@ -311,10 +311,9 @@ def jax_vjp(
     inputs_dict = as_jax_arrays(inputs.model_dump())
     cotangent_vector = as_jax_arrays(cotangent_vector)
 
-    # Use get (not pop) so the cached residuals can serve multiple sequential
-    # vjp calls on the same inputs -- for example, when tesseract-jax's
-    # value_and_grad is followed by jax.jacrev, which decomposes into many
-    # vjp calls per output basis vector.
+    # Use get (not pop) so the cached residuals can serve several vjp calls
+    # on the same inputs, e.g. jax.jacrev through tesseract-jax with
+    # vmap_method="sequential" on a Tesseract without a jacobian endpoint.
     if (
         _jax_vjp_cache is not None
         and (cached := _jax_vjp_cache.get((apply_jit, _cache_key(inputs_dict))))
