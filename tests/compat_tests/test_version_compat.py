@@ -115,14 +115,16 @@ def test_sdk_output_formats(old_runtime, reference, output_format):
 
 
 @pytest.mark.parametrize("compression", ["none", "lz4"])
-def test_sdk_compression(old_runtime, reference, compression):
+def test_sdk_compression(old_runtime, reference, compat_version, compression):
     url, _ = old_runtime
     with Tesseract.from_url(url) as tess:
-        if tess.server_capabilities.compressions is None:
-            # Runtimes before 1.15 do not advertise compressions
-            expect_warning = pytest.warns(UserWarning, match="advertise")
-        else:
+        if _version(compat_version) >= (1, 15):
+            assert {"none", "lz4"} <= set(tess.server_capabilities.compressions or ())
             expect_warning = nullcontext()
+        else:
+            # Runtimes before 1.15 do not advertise compressions
+            assert tess.server_capabilities.compressions is None
+            expect_warning = pytest.warns(UserWarning, match="advertise")
         with expect_warning:
             view = tess.with_encoding(
                 output_format="json+base64", compression=compression
@@ -150,9 +152,14 @@ def test_runtime_honours_compression(old_runtime, compat_version):
         assert data.get("compression") is None
 
 
-def test_sdk_gpu_transport_none(old_runtime, reference):
+def test_sdk_gpu_transport_none(old_runtime, reference, compat_version):
     url, _ = old_runtime
     with Tesseract.from_url(url) as tess:
+        if _version(compat_version) >= (1, 15):
+            assert "none" in (tess.server_capabilities.gpu_transports or ())
+        else:
+            # Runtimes before 1.15 do not advertise GPU transports
+            assert tess.server_capabilities.gpu_transports is None
         assert tess.resolve_gpu_transport() == "none"
         view = tess.with_encoding(gpu_transport="none")
         _assert_tree_close(_call(view, "apply"), reference["apply"])
