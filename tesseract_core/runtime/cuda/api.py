@@ -128,8 +128,8 @@ def validate_gpu_transport_config() -> None:
     if not configured or has_device():
         return
     raise ValueError(
-        f"gpu_transport={','.join(configured)!r} is configured, but this "
-        "Tesseract cannot use a CUDA device, so it cannot serve GPU transports."
+        f"Requested gpu_transport={','.join(configured)!r}, but this Tesseract "
+        "cannot access a supported CUDA device, so it cannot serve GPU transports."
     )
 
 

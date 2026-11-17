@@ -28,8 +28,9 @@ def _split_gpu_transports(obj: Any) -> Any:
     """Read ``gpu_transport`` as the transports it enables besides ``none``.
 
     Accepts one name, a comma-separated string of names (as in
-    ``TESSERACT_GPU_TRANSPORT``), or a sequence of either. Order is kept and
-    repeats are dropped. ``none`` is only valid on its own.
+    ``TESSERACT_GPU_TRANSPORT``), or a list or tuple of such strings (as from
+    a repeated ``--gpu-transport``). Order is kept and repeats are dropped.
+    ``none`` is only valid on its own.
     """
     if isinstance(obj, str):
         obj = [obj]

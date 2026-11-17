@@ -309,21 +309,32 @@ def test_input_path_without_value(monkeypatch):
         ),
         (["--gpu-transport", "cuda_ipc,nixl"], ("cuda_ipc", "nixl")),
         (["--gpu-transport", "none"], ()),
-        (["--gpu-transport", "none", "--gpu-transport", "nixl"], None),
     ],
 )
 def test_gpu_transport_option(cli, cli_runner, args, expected):
-    """--gpu-transport can be repeated or take commas, but ``none`` must stand alone."""
+    """--gpu-transport can be repeated or take commas."""
     from tesseract_core.runtime.config import get_config, override_config
 
     with override_config():
         result = cli_runner.invoke(cli, [*args, "check"])
-        if expected is None:
-            assert result.exit_code == 2
-            assert "cannot be combined" in result.stderr
-        else:
-            assert result.exit_code == 0, result.stderr
-            assert get_config().gpu_transport == expected
+        assert result.exit_code == 0, result.stderr
+        assert get_config().gpu_transport == expected
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--gpu-transport", "none", "--gpu-transport", "nixl"],
+        ["--gpu-transport", "none,nixl"],
+    ],
+)
+def test_gpu_transport_option_rejects_none_with_others(cli, cli_runner, args):
+    from tesseract_core.runtime.config import override_config
+
+    with override_config():
+        result = cli_runner.invoke(cli, [*args, "check"])
+        assert result.exit_code == 2
+        assert "cannot be combined" in result.stderr
 
 
 def test_absent_gpu_transport_option_keeps_environment(monkeypatch):
