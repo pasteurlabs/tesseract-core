@@ -321,6 +321,10 @@ def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binre
         )
 
 
+# Every call starts a container, so this mostly times Docker, and its rounds
+# take seconds each. CI skips it; it stays in the suite for the plots in the
+# docs.
+@pytest.mark.slow
 @pytest.mark.docker
 def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
     """Benchmark containerized Tesseract via CLI, binref on disk."""

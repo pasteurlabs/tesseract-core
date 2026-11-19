@@ -9,7 +9,7 @@ from typing import Annotated
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
@@ -22,6 +22,7 @@ from tesseract_core.runtime.schema_generation import (
     create_apply_schema,
     create_gradient_schema,
 )
+from tesseract_core.runtime.schema_types import ShapeDType
 from tesseract_core.runtime.tree_transforms import escape_dict_key, path_to_index_op
 
 
@@ -179,6 +180,126 @@ def test_abstract_eval_schema_array_defaults():
         "z": None,
         "sub": {"s": {"shape": (), "dtype": "float32"}},
     }
+
+
+def test_abstract_eval_schema_array_default_factory():
+    class Model(BaseModel):
+        s: Array[..., Float32] = Field(default_factory=lambda: np.float32(1.0))
+        y: Array[(None,), Float64] = Field(default_factory=lambda: np.zeros(3))
+        n: list[int] = Field(default_factory=list)
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+
+    assert isinstance(inputs.s, ShapeDType)
+    assert inputs.model_dump() == {
+        "s": {"shape": (), "dtype": "float32"},
+        "y": {"shape": (3,), "dtype": "float64"},
+        "n": [],
+    }
+
+    # Factories still run per instance, so mutable defaults are not shared
+    other = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+    assert other.n is not inputs.n
+
+    # Values the caller sets are left alone
+    inputs = AbstractInputSchema.model_validate(
+        {"inputs": {"y": {"shape": [5], "dtype": "float64"}}}
+    ).inputs
+    assert inputs.y == ShapeDType(shape=(5,), dtype="float64")
+
+
+@pytest.mark.parametrize("use_factory", [False, True])
+def test_abstract_eval_schema_nested_array_defaults(use_factory):
+    class Sub(BaseModel):
+        v: Array[(None,), Float32]
+
+    class Aliased(BaseModel):
+        v: Array[(None,), Float32] = Field(alias="vee")
+
+    class Root(RootModel):
+        root: list[Array[(None,), Float64]]
+
+    def default(value):
+        if use_factory:
+            return Field(default_factory=lambda: deepcopy(value))
+        return value
+
+    class Model(BaseModel):
+        seq: list[Array[(None,), Float64]] = default([[1, 2]])
+        opt: Array[(None,), Float64] | None = default([1, 2, 3])
+        mapping: dict[str, Array[(None,), Float64]] = default({"a": [1]})
+        sub: Sub = default(Sub(v=np.zeros(4, dtype=np.float32)))
+        aliased: Aliased = default(Aliased(vee=np.zeros(2, dtype=np.float32)))
+        root: Root = default(Root([np.zeros(5)]))
+        lazy: LazySequence[Array[(None,), Float64]] = default([[1.0, 2.0]])
+        none: Array[(None,), Float64] | None = default(None)
+        # Unhashable metadata must not break building the converter
+        meta: Annotated[Array[(2,), Float64], {"unhashable": "metadata"}] = default(
+            [1, 2]
+        )
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate({"inputs": {}}).inputs
+
+    # Dumping an abstract LazySequence fails regardless of defaults, so check it apart
+    assert list(inputs.lazy) == [ShapeDType(shape=(2,), dtype="float64")]
+    assert inputs.model_dump(exclude={"lazy"}) == {
+        # Cast to the declared dtype, not the dtype NumPy would infer
+        "seq": [{"shape": (2,), "dtype": "float64"}],
+        "opt": {"shape": (3,), "dtype": "float64"},
+        "mapping": {"a": {"shape": (1,), "dtype": "float64"}},
+        "sub": {"v": {"shape": (4,), "dtype": "float32"}},
+        "aliased": {"v": {"shape": (2,), "dtype": "float32"}},
+        "root": [{"shape": (5,), "dtype": "float64"}],
+        "none": None,
+        "meta": {"shape": (2,), "dtype": "float64"},
+    }
+    # A model default becomes an instance of the abstract model
+    assert type(inputs.sub).__name__ == "AbstractEval_Sub"
+
+
+def test_abstract_eval_schema_rejects_real_arrays():
+    """Defaults are converted, but callers still have to send shape and dtype."""
+
+    class Model(BaseModel):
+        x: Array[(None,), Float64] = Field(default_factory=lambda: np.zeros(3))
+        seq: list[Array[(None,), Float64]] = [[1.0]]
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    for inputs in ({"x": np.zeros(3)}, {"x": [1.0, 2.0]}, {"seq": [np.zeros(2)]}):
+        with pytest.raises(ValidationError):
+            AbstractInputSchema.model_validate({"inputs": inputs})
+
+
+def test_abstract_eval_schema_advertises_abstract_defaults():
+    class Model(BaseModel):
+        y: Array[(2,), Float64] = [1, 2]
+        seq: list[Array[(None,), Float64]] = [[1, 2]]
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    props = AbstractInputSchema.model_json_schema()["$defs"]["AbstractEval_Model"][
+        "properties"
+    ]
+    assert props["y"]["default"] == {"shape": [2], "dtype": "float64"}
+    assert props["seq"]["default"] == [{"shape": [2], "dtype": "float64"}]
+
+
+def test_apply_function_to_model_tree_default_factory_takes_data():
+    class Model(BaseModel):
+        a: int = 1
+        b: int = Field(default_factory=lambda data: data["a"] + 1)
+
+    NewModel = apply_function_to_model_tree(
+        Model,
+        lambda obj, _: obj,
+        make_default_converter=lambda _, __: lambda default: default * 10,
+    )
+    # a's default becomes 10; b's factory sees a=10 and its output is scaled too
+    assert NewModel().model_dump() == {"a": 10, "b": 110}
+    assert NewModel(a=2).model_dump() == {"a": 2, "b": 30}
+    # An explicitly set value is never converted
+    assert NewModel(b=5).model_dump() == {"a": 10, "b": 5}
 
 
 def test_create_jacobian_schema():

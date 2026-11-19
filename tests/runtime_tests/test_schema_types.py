@@ -512,6 +512,38 @@ def test_lazy_sequence_remote_glob():
         fs.rm("/lazy", recursive=True)
 
 
+def test_lazy_sequence_remote_glob_relative_binref(tmpdir):
+    import fsspec
+
+    class MyLazyModel(BaseModel):
+        array_int_seq: LazySequence[Array[(2, 3), Int64]]
+
+    encoded_array = {
+        "object_type": "array",
+        "shape": [2, 3],
+        "dtype": "int64",
+        "data": {"buffer": "inputs_0.bin:0", "encoding": "binref"},
+    }
+    item_dir = tmpdir.mkdir("items")
+    (item_dir / "inputs_0.bin").write_binary(arr_int.tobytes())
+    (item_dir / "inputs_0.json").write(json.dumps(encoded_array))
+    model = MyLazyModel(array_int_seq=f"@file://{item_dir}/inputs_*.json")
+    assert np.array_equal(model.array_int_seq[0], arr_int)
+
+    fs = fsspec.filesystem("memory")
+    fs.pipe(
+        {
+            "/lazy/items/inputs_0.json": json.dumps(encoded_array).encode(),
+            "/lazy/items/inputs_0.bin": arr_int.tobytes(),
+        }
+    )
+    try:
+        model = MyLazyModel(array_int_seq="@memory://lazy/items/inputs_*.json")
+        assert np.array_equal(model.array_int_seq[0], arr_int)
+    finally:
+        fs.rm("/lazy", recursive=True)
+
+
 def test_lazy_sequence_json_schema():
     class MyLazyModel(BaseModel):
         array_int_seq: LazySequence[Array[(2, 3), Int64]]

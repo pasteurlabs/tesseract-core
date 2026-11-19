@@ -219,6 +219,13 @@ def test_create_container(
             container.image.id
         )
 
+        status = container.wait()
+        status_py = container_py.wait()
+        assert status["StatusCode"] == 0
+        assert status_py["StatusCode"] == 0
+
+        # Look the containers up only once they have exited, so that their state
+        # cannot change between two lookups.
         container_get = docker_client.containers.get(container.id)
         container_name_get = docker_client.containers.get(container.name)
         container_py_get = docker_py_client.containers.get(container.id)
@@ -238,11 +245,6 @@ def test_create_container(
         assert container_get.short_id == container_py_get.short_id
         assert container_get.name == container_py_get.name
         assert container_get.id == container_py_name_get.id
-
-        status = container.wait()
-        status_py = container_py.wait()
-        assert status["StatusCode"] == 0
-        assert status_py["StatusCode"] == 0
 
         stdout = container.logs(stdout=True, stderr=False)
         stderr = container.logs(stdout=False, stderr=True)

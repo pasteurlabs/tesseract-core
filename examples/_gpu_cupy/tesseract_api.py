@@ -55,7 +55,7 @@ def abstract_eval(abstract_inputs: Any) -> dict:
 
 def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
     """Return the Jacobian blocks as device memory."""
-    eye = cp.eye(len(inputs.a), dtype=cp.float32)
+    eye = cp.eye(inputs.a.shape[0], dtype=cp.float32)
     scales = _partial_scales(inputs)
     return {"result": {name: scales[name] * eye for name in jac_inputs}}
 

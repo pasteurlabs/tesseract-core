@@ -1294,7 +1294,7 @@ def test_serve_fails_when_the_configured_transport_is_unusable(
 
         server_env = {"TESSERACT_GPU_TRANSPORT": "cuda_ipc", "CUDA_VISIBLE_DEVICES": ""}
         with (
-            pytest.raises(RuntimeError, match="cannot use a CUDA device"),
+            pytest.raises(RuntimeError, match="cannot access a supported CUDA device"),
             serve_in_subprocess(api_path, free_port, env=server_env),
         ):
             pass
