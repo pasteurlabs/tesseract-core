@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.16.0] - 2026-11-11
+## [1.16.0] - 2026-11-19
 
 ### Features
 
@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - Add check_gradients endpoint and Tesseract.check_gradients (#912)
 - Add an experimental nixl GPU transport that keeps GPU arrays on the device across hosts (#723)
 - *(sdk)* Pin Python 3.11 for container builds on the default base image (#908)
+- *(sdk)* Offer base_image and python_version pins in tesseract init, commented out (#909)
+- Let a served Tesseract enable several GPU transports at once (#925)
 
 ### Bug Fixes
 
@@ -49,18 +51,28 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Stage an editable local requirement (-e ./pkg) in tesseract build (#916)
 - *(runtime)* [**breaking**] Accept only letters, digits, '-' and '_' in a run_id (#915)
 - *(sdk)* Don't let a lockfile's requires-python change from_source's Python (#931)
+- *(runtime)* Resolve relative binrefs of a LazySequence loaded from a URL glob (#917)
+- *(runtime)* Replace default_factory array defaults with ShapeDType in abstract eval schema (#913)
+- Concurrent first GPU calls, log streaming output, and interrupted docker builds (and unflake tests) (#930)
+- Support len() on device arrays and use shapes in GPU examples (#936)
 
 ### Documentation
 
 - Lead with `from_source` instead of Docker, add a gradient-checking guide and project gallery (#821)
 - Add a `cuda_ipc` GPU transport how-to and a "Tesseract is now GPU-native" blog post (#791)
 - Improve search and link previews of the landing page, fix blog posts overflowing on mobile (#884)
+- *(runtime)* Describe when tesseract-jax hits the VJP cache (#941)
 
 ### Performance
 
 - Improve podman runtime (#826)
 - *(runtime)* Skip zero tangents in finite_difference_jvp (#873)
 - *(runtime)* Cut the per-call overhead of the JAX recipe's VJP cache (#860)
+
+### Testing
+
+- Check SDK and runtime versions against each other in CI (#874)
+- Check advertised capabilities by release in compat tests (#940)
 
 ## [1.15.0] - 2026-10-15
 
