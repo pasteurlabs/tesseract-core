@@ -997,3 +997,47 @@ def test_eps_mapping_must_name_every_checked_path():
 def test_eps_mapping_rejects_paths_that_are_not_being_checked():
     with pytest.raises(ValueError, match="not being checked"):
         _cubic_failures(eps={"small": 1e-5, "large": 1e-5, "nonexistent": 1e-5})
+
+
+class Float32IdentityModule(ModuleType):
+    """y = x in float32, with the exact Jacobian."""
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(None,), Float32]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(None,), Float32]]
+
+    def apply(self, inputs: InputSchema) -> OutputSchema:
+        return {"y": inputs.x}
+
+    def jacobian(
+        self, inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]
+    ):
+        return {"y": {"x": np.eye(inputs.x.shape[0], dtype=np.float32)}}
+
+
+def _float32_identity_failures(value):
+    ((_, failures, _),) = check_gradients(
+        Float32IdentityModule("float32_identity"),
+        {"inputs": {"x": np.full(4, value, dtype=np.float32)}},
+        base_dir=None,
+        endpoints=["jacobian"],
+        max_evals=4,
+        eps=1e-4,
+        seed=0,
+        show_progress=False,
+    )
+    return failures
+
+
+def test_exact_float32_jacobian_passes_when_dtype_rounds_the_step():
+    """At 1000, float32 rounds a 1e-4 step to 1.22e-4."""
+    assert _float32_identity_failures(1000.0) == []
+
+
+def test_step_that_rounds_to_zero_is_reported_as_an_exception():
+    """At 3000, x + 1e-4 == x in float32, so there is no difference to take."""
+    failures = _float32_identity_failures(3000.0)
+    assert failures
+    assert all(f.exception and "eps" in f.exception for f in failures)

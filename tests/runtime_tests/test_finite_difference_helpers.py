@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel, Field
 
-from tesseract_core.runtime import Array, Differentiable, Float64
+from tesseract_core.runtime import Array, Differentiable, Float32, Float64
 from tesseract_core.runtime.experimental import (
     finite_difference_jacobian,
     finite_difference_jvp,
@@ -596,3 +596,128 @@ class TestPerInputEps:
         )
         assert np.allclose(jac["from_big"]["big"], 3 * BIG**2, rtol=1e-6)
         assert np.allclose(jac["from_small"]["small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
+
+
+class Float32InputSchema(BaseModel):
+    x: Differentiable[Array[(None,), Float32]]
+
+
+class Float32OutputSchema(BaseModel):
+    y: Differentiable[Array[(None,), Float32]]
+
+
+def float32_identity_apply(inputs: Float32InputSchema) -> Float32OutputSchema:
+    return Float32OutputSchema(y=inputs.x)
+
+
+def _float32_inputs(value):
+    return Float32InputSchema(x=np.full(2, value, dtype=np.float32))
+
+
+class TestStepRoundedByInputDtype:
+    """At 1000, float32 rounds a 1e-4 step to 1.22e-4; at 3000, to zero."""
+
+    @pytest.mark.parametrize("algorithm", ["central", "forward"])
+    def test_jacobian_of_identity_is_identity(self, algorithm):
+        jac = finite_difference_jacobian(
+            float32_identity_apply,
+            _float32_inputs(1000.0),
+            {"x"},
+            {"y"},
+            algorithm=algorithm,
+            eps=1e-4,
+        )
+        assert np.allclose(jac["y"]["x"], np.eye(2), rtol=1e-6)
+
+    @pytest.mark.parametrize("algorithm", ["central", "forward"])
+    def test_vjp_of_identity_is_the_cotangent(self, algorithm):
+        cotangent = np.array([1.0, 2.0], dtype=np.float32)
+        vjp = finite_difference_vjp(
+            float32_identity_apply,
+            _float32_inputs(1000.0),
+            {"x"},
+            {"y"},
+            {"y": cotangent},
+            algorithm=algorithm,
+            eps=1e-4,
+        )
+        assert np.allclose(vjp["x"], cotangent, rtol=1e-6)
+
+    @pytest.mark.parametrize(("value", "eps"), [(1000.0, 1e-4), (2.0, 1e-7)])
+    def test_stochastic_jacobian_diagonal_of_identity_is_one(self, value, eps):
+        """Fewer samples than elements, so the SPSA estimator itself runs.
+
+        At 2.0, x + 1e-7 rounds to x and only x - 1e-7 moves.
+        """
+        jac = finite_difference_jacobian(
+            float32_identity_apply,
+            Float32InputSchema(x=np.full(4, value, dtype=np.float32)),
+            {"x"},
+            {"y"},
+            algorithm="stochastic",
+            num_samples=2,
+            eps=eps,
+            seed=0,
+        )
+        assert np.allclose(np.diagonal(jac["y"]["x"]), 1.0, rtol=1e-6)
+
+    def test_stochastic_vjp_of_identity_with_one_hot_cotangent(self):
+        """Element 0 of the estimate is the applied step divided by itself.
+
+        The other elements also pick up the other inputs' steps, which is SPSA
+        noise, so only element 0 has an exact expected value.
+        """
+        vjp = finite_difference_vjp(
+            float32_identity_apply,
+            Float32InputSchema(x=np.full(4, 1000.0, dtype=np.float32)),
+            {"x"},
+            {"y"},
+            {"y": np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)},
+            algorithm="stochastic",
+            num_samples=2,
+            eps=1e-4,
+            seed=0,
+        )
+        assert np.isclose(vjp["x"][0], 1.0, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("algorithm", "kwargs"),
+        [("central", {}), ("forward", {}), ("stochastic", {"num_samples": 2})],
+    )
+    def test_step_that_rounds_to_zero_raises(self, algorithm, kwargs):
+        with pytest.raises(ValueError, match="eps"):
+            finite_difference_jacobian(
+                float32_identity_apply,
+                Float32InputSchema(x=np.full(4, 3000.0, dtype=np.float32)),
+                {"x"},
+                {"y"},
+                algorithm=algorithm,
+                eps=1e-4,
+                **kwargs,
+            )
+
+    def test_jvp_perturbation_that_rounds_to_zero_raises(self):
+        with pytest.raises(ValueError, match="eps"):
+            finite_difference_jvp(
+                float32_identity_apply,
+                _float32_inputs(1000.0),
+                {"x"},
+                {"y"},
+                {"x": np.full(2, 0.3, dtype=np.float32)},
+                eps=1e-4,
+            )
+
+    def test_jvp_runs_when_some_tangent_components_round_away(self):
+        """A tangent component of 1e-5 moves its element by 1e-9, below float32.
+
+        rtol allows for float32 rounding of the outputs at eps=1e-4.
+        """
+        jvp = finite_difference_jvp(
+            float32_identity_apply,
+            _float32_inputs(1.0),
+            {"x"},
+            {"y"},
+            {"x": np.array([1.0, 1e-5], dtype=np.float32)},
+            eps=1e-4,
+        )
+        assert np.isclose(jvp["y"][0], 1.0, rtol=1e-3)

@@ -207,7 +207,7 @@ def _perturb_input(
     input_path: str,
     idx: tuple[int, ...],
     eps: float,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], float]:
     """Perturb a single element of an input array by eps.
 
     Args:
@@ -217,14 +217,44 @@ def _perturb_input(
         eps: Perturbation magnitude (can be negative).
 
     Returns:
-        A new dictionary with the perturbed input.
+        A new dictionary with the perturbed input, and the step that was applied
+        after rounding to the input's dtype.
     """
-    input_val = np.asarray(get_at_path(inputs_dict, input_path)).copy()
-    if idx:
-        input_val[idx] += eps
-    else:
-        input_val = input_val + eps
-    return set_at_path(inputs_dict, {input_path: input_val})
+    original = np.asarray(get_at_path(inputs_dict, input_path))
+    input_val = original.copy()
+    input_val[idx] += eps
+    step = float(input_val[idx]) - float(original[idx])
+    return set_at_path(inputs_dict, {input_path: input_val}), step
+
+
+def _step_too_small(eps: float, what: str, spacing: float | None = None) -> ValueError:
+    """Error for a step that rounding to the input's dtype cancelled."""
+    hint = (
+        f"Values of its dtype are {spacing:.3g} apart there, so use an eps well "
+        "above that."
+        if spacing is not None
+        else "Use a larger eps."
+    )
+    return ValueError(
+        f"A step of eps={eps} does not change {what}, because it is below the "
+        f"precision of the input's dtype at that value. {hint}"
+    )
+
+
+def _check_step(
+    step: float,
+    inputs_dict: dict[str, Any],
+    input_path: str,
+    idx: tuple[int, ...],
+    eps: float,
+) -> float:
+    """Raise if rounding to the input's dtype cancelled the step."""
+    if step == 0:
+        value = np.asarray(get_at_path(inputs_dict, input_path))[idx]
+        raise _step_too_small(
+            eps, f"input '{input_path}' at index {idx}", float(np.spacing(value))
+        )
+    return step
 
 
 def _compute_central_diff_row(
@@ -253,15 +283,16 @@ def _compute_central_diff_row(
     Returns:
         The gradient of output_path with respect to input_path[idx].
     """
-    inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
-    inputs_minus = _perturb_input(inputs_dict, input_path, idx, -eps)
+    inputs_plus, step_plus = _perturb_input(inputs_dict, input_path, idx, eps)
+    inputs_minus, step_minus = _perturb_input(inputs_dict, input_path, idx, -eps)
+    step = _check_step(step_plus - step_minus, inputs_dict, input_path, idx, eps)
 
     outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
     outputs_minus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_minus)))
 
     return (
         get_at_path(outputs_plus, output_path) - get_at_path(outputs_minus, output_path)
-    ) / (2 * eps)
+    ) / step
 
 
 def _compute_forward_diff_row(
@@ -289,12 +320,13 @@ def _compute_forward_diff_row(
     Returns:
         The gradient of output_path with respect to input_path[idx].
     """
-    inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
+    inputs_plus, step = _perturb_input(inputs_dict, input_path, idx, eps)
+    step = _check_step(step, inputs_dict, input_path, idx, eps)
     outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
 
     return (
         get_at_path(outputs_plus, output_path) - get_at_path(base_outputs, output_path)
-    ) / eps
+    ) / step
 
 
 @_cached_function(key_fn=_by_index)

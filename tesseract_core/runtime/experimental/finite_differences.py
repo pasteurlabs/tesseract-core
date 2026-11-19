@@ -22,6 +22,7 @@ from tesseract_core.runtime.testing.finite_differences import (
     _compute_central_diff_row,
     _compute_forward_diff_row,
     _dump_outputs,
+    _step_too_small,
 )
 from tesseract_core.runtime.tree_transforms import get_at_path, set_at_path
 
@@ -177,6 +178,14 @@ def finite_difference_jacobian(
     return result
 
 
+def _perturb_in_dtype(
+    in_val: ArrayLike, direction: ArrayLike, eps: float
+) -> np.ndarray:
+    """Return ``in_val + eps * direction``, rounded to the dtype of ``in_val``."""
+    in_val = np.asarray(in_val)
+    return np.asarray(in_val + eps * np.asarray(direction)).astype(in_val.dtype)
+
+
 def _compute_jacobian_elementwise(
     apply_fn: Callable,
     inputs: BaseModel,
@@ -317,14 +326,18 @@ def _compute_jacobian_stochastic(
         inputs_plus_dict = inputs_dict.copy()
         inputs_minus_dict = inputs_dict.copy()
 
+        applied_steps = {}
         for in_path, delta in perturbations.items():
             in_arr = input_info[in_path]["array"]
-            inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_arr + eps[in_path] * delta}
-            )
-            inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_arr - eps[in_path] * delta}
-            )
+            plus = _perturb_in_dtype(in_arr, delta, eps[in_path])
+            minus = _perturb_in_dtype(in_arr, -delta, eps[in_path])
+            applied_steps[in_path] = plus.astype(np.float64) - minus.astype(np.float64)
+            frozen = applied_steps[in_path] == 0
+            if np.any(frozen):
+                spacing = float(np.max(np.spacing(np.abs(in_arr[frozen]))))
+                raise _step_too_small(eps[in_path], f"input '{in_path}'", spacing)
+            inputs_plus_dict = set_at_path(inputs_plus_dict, {in_path: plus})
+            inputs_minus_dict = set_at_path(inputs_minus_dict, {in_path: minus})
 
         # Evaluate function at perturbed points
         outputs_plus = _dump_outputs(
@@ -344,22 +357,21 @@ def _compute_jacobian_stochastic(
             # the difference quotient is formed per input rather than once for
             # the whole simultaneous perturbation.
             for in_path in jac_inputs:
-                delta = perturbations[in_path]
-                output_diff = out_delta / (2 * eps[in_path])
+                step = applied_steps[in_path]
 
-                # SPSA gradient estimate: (f(x+eps*delta) - f(x-eps*delta)) / (2*eps*delta)
-                # For Jacobian: J[i,j] contribution = output_diff[i] / delta[j]
+                # SPSA gradient estimate: (f(x+h) - f(x-h)) / step[j], where step is
+                # (x+h) - (x-h) after rounding to the input's dtype.
                 # We accumulate and average over samples
                 if input_info[in_path]["shape"]:
                     # For each output element, divide by each input perturbation
                     # Result shape: (*output_shape, *input_shape)
-                    jac_contrib = np.outer(output_diff.ravel(), 1.0 / delta.ravel())
+                    jac_contrib = np.outer(out_delta.ravel(), 1.0 / step.ravel())
                     jac_contrib = jac_contrib.reshape(
                         *output_info[out_path]["shape"], *input_info[in_path]["shape"]
                     )
                 else:
                     # Scalar input
-                    jac_contrib = output_diff / delta
+                    jac_contrib = out_delta / step
 
                 result[out_path][in_path] += jac_contrib / num_samples
 
@@ -463,17 +475,22 @@ def finite_difference_jvp(
         inputs_plus_dict = inputs_dict.copy()
         inputs_minus_dict = inputs_dict.copy()
 
+        moved = False
         for in_path in group_paths:
             in_val = np.asarray(get_at_path(inputs_dict, in_path))
             tangent = np.asarray(tangent_vector[in_path])
 
-            inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_val + group_eps * tangent}
-            )
+            plus = _perturb_in_dtype(in_val, tangent, group_eps)
+            inputs_plus_dict = set_at_path(inputs_plus_dict, {in_path: plus})
+            reference = in_val
             if algorithm == "central":
-                inputs_minus_dict = set_at_path(
-                    inputs_minus_dict, {in_path: in_val - group_eps * tangent}
-                )
+                reference = _perturb_in_dtype(in_val, -tangent, group_eps)
+                inputs_minus_dict = set_at_path(inputs_minus_dict, {in_path: reference})
+            moved = moved or bool(np.any(plus != reference))
+
+        # Each step-size group is one pair of evaluations, so the check is per group.
+        if not moved:
+            raise _step_too_small(group_eps, "any input along the tangent")
 
         # Evaluate at perturbed points
         outputs_plus = _dump_outputs(
@@ -662,8 +679,9 @@ def _compute_vjp_stochastic(
 
     Using SPSA, we can estimate this efficiently by:
     1. Generating random perturbation directions delta (Rademacher: ±1)
-    2. Computing output differences: (f(x + eps*delta) - f(x - eps*delta)) / (2*eps)
-    3. Computing gradient estimate: (output_diff · cotangent) / delta
+    2. Computing the cotangent-weighted output difference f(x + h) - f(x - h),
+       with h = eps * delta
+    3. Dividing it by the step (x + h) - (x - h) that the input's dtype applied
 
     This requires only 2 function evaluations per sample, regardless of dimension.
     """
@@ -732,14 +750,18 @@ def _compute_vjp_stochastic(
         inputs_plus_dict = inputs_dict.copy()
         inputs_minus_dict = inputs_dict.copy()
 
+        applied_steps = {}
         for in_path, delta in perturbations.items():
             in_arr = input_info[in_path]["array"]
-            inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_arr + eps[in_path] * delta}
-            )
-            inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_arr - eps[in_path] * delta}
-            )
+            plus = _perturb_in_dtype(in_arr, delta, eps[in_path])
+            minus = _perturb_in_dtype(in_arr, -delta, eps[in_path])
+            applied_steps[in_path] = plus.astype(np.float64) - minus.astype(np.float64)
+            frozen = applied_steps[in_path] == 0
+            if np.any(frozen):
+                spacing = float(np.max(np.spacing(np.abs(in_arr[frozen]))))
+                raise _step_too_small(eps[in_path], f"input '{in_path}'", spacing)
+            inputs_plus_dict = set_at_path(inputs_plus_dict, {in_path: plus})
+            inputs_minus_dict = set_at_path(inputs_minus_dict, {in_path: minus})
 
         # Evaluate function at perturbed points
         outputs_plus = _dump_outputs(
@@ -763,7 +785,5 @@ def _compute_vjp_stochastic(
         # difference quotient is formed per input rather than once for the whole
         # simultaneous perturbation.
         for in_path in vjp_inputs:
-            delta = perturbations[in_path]
-            weighted_output_diff = weighted_output_delta / (2 * eps[in_path])
-            vjp_contrib = weighted_output_diff / delta
+            vjp_contrib = weighted_output_delta / applied_steps[in_path]
             result[in_path] += vjp_contrib / num_samples
