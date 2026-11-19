@@ -685,12 +685,24 @@ class TestStepRoundedByInputDtype:
         [("central", {}), ("forward", {}), ("stochastic", {"num_samples": 2})],
     )
     def test_step_that_rounds_to_zero_raises(self, algorithm, kwargs):
+        inputs = Float32InputSchema(x=np.full(4, 3000.0, dtype=np.float32))
         with pytest.raises(ValueError, match="eps"):
             finite_difference_jacobian(
                 float32_identity_apply,
-                Float32InputSchema(x=np.full(4, 3000.0, dtype=np.float32)),
+                inputs,
                 {"x"},
                 {"y"},
+                algorithm=algorithm,
+                eps=1e-4,
+                **kwargs,
+            )
+        with pytest.raises(ValueError, match="eps"):
+            finite_difference_vjp(
+                float32_identity_apply,
+                inputs,
+                {"x"},
+                {"y"},
+                {"y": np.ones(4, dtype=np.float32)},
                 algorithm=algorithm,
                 eps=1e-4,
                 **kwargs,
