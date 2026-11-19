@@ -281,7 +281,9 @@ def test_serve_fails_when_the_configured_transport_is_unusable(gpu_image_name):
     with (
         # The traceback in the startup logs wraps the message, so allow any
         # whitespace between its words.
-        pytest.raises(RuntimeError, match=r"cannot\s+use\s+a\s+CUDA\s+device"),
+        pytest.raises(
+            RuntimeError, match=r"cannot\s+access\s+a\s+supported\s+CUDA\s+device"
+        ),
         Tesseract.from_image(
             gpu_image_name,
             gpus=["all"],
