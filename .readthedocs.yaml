@@ -11,6 +11,10 @@ build:
     python: "3.13"
 
   jobs:
+    post_checkout:
+      # RTD clones shallow and without tags, so hatch-vcs can't find the last
+      # release and the docs title falls back to version 0.0.1.
+      - git fetch --unshallow --tags || true
     create_environment:
       - asdf plugin add uv
       - asdf install uv latest
