@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.16.0] - 2026-11-19
+## [1.16.0] - 2026-11-20
 
 ### Features
 
@@ -62,6 +62,7 @@ All notable changes to this project will be documented in this file.
 - Add a `cuda_ipc` GPU transport how-to and a "Tesseract is now GPU-native" blog post (#791)
 - Improve search and link previews of the landing page, fix blog posts overflowing on mobile (#884)
 - *(runtime)* Describe when tesseract-jax hits the VJP cache (#941)
+- Fetch git tags on Read the Docs so latest shows the right version (#946)
 
 ### Performance
 
@@ -73,6 +74,7 @@ All notable changes to this project will be documented in this file.
 
 - Check SDK and runtime versions against each other in CI (#874)
 - Check advertised capabilities by release in compat tests (#940)
+- Copy only the dummy Tesseract's own files into each test (#945)
 
 ## [1.15.0] - 2026-10-15
 
