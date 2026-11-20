@@ -286,6 +286,27 @@ def test_build_inherit_base_image_packages_with_uv_config(
         )
 
 
+def test_build_python_headers_at_sysconfig_include(
+    dummy_tesseract_package, docker_client, docker_cleanup
+):
+    """C extensions built in custom_build_steps can find the bundled Python's headers."""
+    config_path = dummy_tesseract_package / "tesseract_config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    build_config = config.setdefault("build_config", {})
+    check = (
+        "import os, sysconfig; "
+        "assert os.path.isfile(os.path.join(sysconfig.get_paths()['include'], 'Python.h'))"
+    )
+    build_config["custom_build_steps"] = [f'RUN python -c "{check}"']
+    config_path.write_text(yaml.dump(config))
+
+    image_name = build_tesseract(
+        docker_client, dummy_tesseract_package, "python_headers"
+    )
+    docker_cleanup["images"].append(image_name)
+    assert image_exists(docker_client, image_name)
+
+
 def test_build_extra_index_url_with_local_dep(
     cli_runner, dummy_tesseract_package, docker_cleanup
 ):
