@@ -1,11 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+from typing import Any, Literal, NamedTuple
+
 import jsonschema
 from pydantic import BaseModel, Field
 from schema_example_generator import generate_example
 
-from tesseract_core.runtime import Array, Differentiable, Float32, Int32
+from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int32
 
 # NOTE: This is a "test for a test" - not something we do often, but it gives us confidence
 # that the example generator is producing valid examples for real-world schemas.
@@ -66,3 +69,33 @@ def test_generate_example_structure():
     # dict[str, Array] fields produce empty dicts (no required keys)
     assert mesh["cell_data"] == {}
     assert mesh["point_data"] == {}
+
+
+class _Pair(NamedTuple):
+    a: Array[(2,), Float64]
+    n: int
+
+
+class _Sub(BaseModel):
+    x: Array[(None,), Float32]
+    label: str
+
+
+class EveryFieldKind(BaseModel):
+    scalar_arr: Array[(), Int32]
+    anydim: Array[..., None]
+    opt: Array[(None,), Float32] | None
+    tup: tuple[Array[(None,), Float32], int]
+    pair: _Pair
+    table: dict[str, list[_Sub]]
+    subs: list[_Sub]
+    either: _Sub | Array[(None,), Float32]
+    mode: Literal["fast", "slow"]
+    ratio: float = Field(gt=0)
+    flag: bool
+    extra: Any
+
+
+def test_generate_example_validates_for_every_field_kind():
+    schema = EveryFieldKind.model_json_schema()
+    EveryFieldKind.model_validate_json(json.dumps(generate_example(schema)))

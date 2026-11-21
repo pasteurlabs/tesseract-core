@@ -9,81 +9,89 @@ schemas in this project.
 
 from __future__ import annotations
 
+import base64
+from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
 
-def generate_example(schema: dict) -> Any:
-    """Generate a structurally valid example object from a JSON Schema."""
-    defs = schema.get("$defs", {})
-    return _generate(schema, defs)
-
-
-def _resolve(schema: dict, defs: dict) -> dict:
-    if "$ref" in schema:
-        ref_path = schema["$ref"]
-        # Assume ref_path is in the format #/$defs/Name
-        ref_name = ref_path.split("/")[-1]
-        return defs[ref_name]
-    return schema
+from tesseract_core.sdk.schema_tree import (
+    ArraySchema,
+    LiteralSchema,
+    ObjectSchema,
+    ScalarSchema,
+    SchemaNode,
+    SequenceSchema,
+    UnionSchema,
+    parse_schema,
+)
 
 
-def _generate(schema: dict, defs: dict) -> Any:
-    schema = _resolve(schema, defs)
+def generate_example(
+    schema: Mapping, definitions: Mapping | None = None, seed: int = 42
+) -> Any:
+    """Generate an example object that validates against a JSON Schema.
 
-    # const / enum / examples take priority
-    if "const" in schema:
-        return schema["const"]
-    if "enum" in schema:
-        return schema["enum"][0]
-    if schema.get("examples"):
-        return schema["examples"][0]
+    Arrays get random data in [0, 100) of their declared dtype (float64 if
+    open), base64-encoded, with every dimension of size 1 so it broadcasts to
+    any fixed size. ``definitions`` are the schemas ``$ref`` entries point to,
+    ``schema["$defs"]`` by default.
+    """
+    rng = np.random.RandomState(seed)
+    return _generate(parse_schema(schema, definitions), rng)
 
-    # Composition keywords
-    if "oneOf" in schema:
-        return _generate(schema["oneOf"][0], defs)
 
-    if "anyOf" in schema:
-        for variant in schema["anyOf"]:
-            resolved = _resolve(variant, defs)
-            if resolved.get("type") != "null":
-                return _generate(variant, defs)
+def _generate(node: SchemaNode, rng: np.random.RandomState) -> Any:
+    raw = node.schema
+
+    if isinstance(node, ArraySchema):
+        return _generate_array(node, rng)
+    if isinstance(node, LiteralSchema):
+        return node.values[0]
+    if raw.get("examples"):
+        return raw["examples"][0]
+
+    if isinstance(node, UnionSchema):
+        for member in node.members:
+            if not (isinstance(member, ScalarSchema) and member.type == "null"):
+                return _generate(member, rng)
         return None
 
-    # Type dispatch
-    typ = schema.get("type")
+    if isinstance(node, ObjectSchema):
+        return {k: _generate(v, rng) for k, v in node.properties.items()}
 
-    if typ == "object" or (typ is None and "properties" in schema):
-        result = {}
-        for prop_name, prop_schema in schema.get("properties", {}).items():
-            result[prop_name] = _generate(prop_schema, defs)
-        return result
+    if isinstance(node, SequenceSchema):
+        if node.prefix:
+            return [_generate(item, rng) for item in node.prefix]
+        return [_generate(node.items, rng) for _ in range(raw.get("minItems", 1))]
 
-    if typ == "array":
-        if "prefixItems" in schema:
-            return [_generate(item, defs) for item in schema["prefixItems"]]
-        items_schema = schema.get("items", {})
-        count = schema.get("minItems", 1)
-        return [_generate(items_schema, defs) for _ in range(count)]
+    if isinstance(node, ScalarSchema):
+        if node.type == "string":
+            return "a" * max(raw.get("minLength", 1), 1)
+        if node.type == "integer":
+            if "exclusiveMinimum" in raw:
+                return raw["exclusiveMinimum"] + 1
+            return raw.get("minimum", 0)
+        if node.type == "number":
+            if "exclusiveMinimum" in raw:
+                return raw["exclusiveMinimum"] + 0.1
+            return float(raw.get("minimum", 0.0))
+        if node.type == "boolean":
+            return True
 
-    if typ == "string":
-        min_len = max(schema.get("minLength", 1), 1)
-        return "a" * min_len
-
-    if typ == "integer":
-        if "exclusiveMinimum" in schema:
-            return schema["exclusiveMinimum"] + 1
-        return schema.get("minimum", 0)
-
-    if typ == "number":
-        if "exclusiveMinimum" in schema:
-            return schema["exclusiveMinimum"] + 0.1
-        return float(schema.get("minimum", 0.0))
-
-    if typ == "boolean":
-        return True
-
-    if typ == "null":
-        return None
-
-    # Fallback
     return None
+
+
+def _generate_array(node: ArraySchema, rng: np.random.RandomState) -> dict:
+    shape = (1,) if node.shape is None else (1,) * len(node.shape)
+    dtype = node.dtype or "float64"
+    data = rng.uniform(0, 100, shape).astype(dtype)
+    return {
+        "object_type": "array",
+        "shape": list(shape),
+        "dtype": dtype,
+        "data": {
+            "buffer": base64.b64encode(data.tobytes()).decode(),
+            "encoding": "base64",
+        },
+    }
