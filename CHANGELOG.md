@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.16.1] - 2026-11-20
+
+### Bug Fixes
+
+- *(sdk)* Let custom build steps compile C extensions against the bundled Python (#947)
+
 ## [1.16.0] - 2026-11-20
 
 ### Features
