@@ -291,9 +291,9 @@ def _compute_central_diff_row(
     """
     inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
     inputs_minus = _perturb_input(inputs_dict, input_path, idx, -eps)
-    step = _element(inputs_plus, input_path, idx) - _element(
-        inputs_minus, input_path, idx
-    )
+    step = (
+        _element(inputs_plus, input_path, idx) - _element(inputs_minus, input_path, idx)
+    ).real
     _check_step(step, inputs_dict, input_path, idx, eps)
 
     outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
@@ -330,9 +330,9 @@ def _compute_forward_diff_row(
         The gradient of output_path with respect to input_path[idx].
     """
     inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
-    step = _element(inputs_plus, input_path, idx) - _element(
-        inputs_dict, input_path, idx
-    )
+    step = (
+        _element(inputs_plus, input_path, idx) - _element(inputs_dict, input_path, idx)
+    ).real
     _check_step(step, inputs_dict, input_path, idx, eps)
     outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
 
