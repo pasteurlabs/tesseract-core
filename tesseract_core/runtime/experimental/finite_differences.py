@@ -178,14 +178,6 @@ def finite_difference_jacobian(
     return result
 
 
-def _perturb_in_dtype(
-    in_val: ArrayLike, direction: ArrayLike, eps: float
-) -> np.ndarray:
-    """Return ``in_val + eps * direction``, rounded to the dtype of ``in_val``."""
-    in_val = np.asarray(in_val)
-    return np.asarray(in_val + eps * np.asarray(direction)).astype(in_val.dtype)
-
-
 def _compute_jacobian_elementwise(
     apply_fn: Callable,
     inputs: BaseModel,
@@ -319,7 +311,7 @@ def _compute_jacobian_stochastic(
         for in_path, info in input_info.items():
             perturbation_size = None if info["shape"] == () else info["shape"]
             perturbations[in_path] = rng.choice(
-                np.array([-1, 1], dtype=np.float64), size=perturbation_size
+                np.array([-1, 1], dtype=info["array"].dtype), size=perturbation_size
             )
 
         # Compute perturbed inputs
@@ -329,9 +321,11 @@ def _compute_jacobian_stochastic(
         applied_steps = {}
         for in_path, delta in perturbations.items():
             in_arr = input_info[in_path]["array"]
-            plus = _perturb_in_dtype(in_arr, delta, eps[in_path])
-            minus = _perturb_in_dtype(in_arr, -delta, eps[in_path])
-            applied_steps[in_path] = plus.astype(np.float64) - minus.astype(np.float64)
+            # eps in the input's dtype keeps scalar inputs in that dtype on NumPy 1.x
+            in_eps = in_arr.dtype.type(eps[in_path])
+            plus = in_arr + in_eps * delta
+            minus = in_arr - in_eps * delta
+            applied_steps[in_path] = (plus - minus).real.astype(np.float64)
             frozen = applied_steps[in_path] == 0
             if np.any(frozen):
                 spacing = float(np.max(np.spacing(np.abs(in_arr[frozen]))))
@@ -478,13 +472,15 @@ def finite_difference_jvp(
         moved = False
         for in_path in group_paths:
             in_val = np.asarray(get_at_path(inputs_dict, in_path))
-            tangent = np.asarray(tangent_vector[in_path])
+            tangent = np.asarray(tangent_vector[in_path], dtype=in_val.dtype)
+            # eps in the input's dtype keeps scalar inputs in that dtype on NumPy 1.x
+            in_eps = in_val.dtype.type(group_eps)
 
-            plus = _perturb_in_dtype(in_val, tangent, group_eps)
+            plus = in_val + in_eps * tangent
             inputs_plus_dict = set_at_path(inputs_plus_dict, {in_path: plus})
             reference = in_val
             if algorithm == "central":
-                reference = _perturb_in_dtype(in_val, -tangent, group_eps)
+                reference = in_val - in_eps * tangent
                 inputs_minus_dict = set_at_path(inputs_minus_dict, {in_path: reference})
             moved = moved or bool(np.any(plus != reference))
 
@@ -743,7 +739,7 @@ def _compute_vjp_stochastic(
         for in_path, info in input_info.items():
             perturbation_size = None if info["shape"] == () else info["shape"]
             perturbations[in_path] = rng.choice(
-                np.array([-1, 1], dtype=np.float64), size=perturbation_size
+                np.array([-1, 1], dtype=info["array"].dtype), size=perturbation_size
             )
 
         # Compute perturbed inputs
@@ -753,9 +749,11 @@ def _compute_vjp_stochastic(
         applied_steps = {}
         for in_path, delta in perturbations.items():
             in_arr = input_info[in_path]["array"]
-            plus = _perturb_in_dtype(in_arr, delta, eps[in_path])
-            minus = _perturb_in_dtype(in_arr, -delta, eps[in_path])
-            applied_steps[in_path] = plus.astype(np.float64) - minus.astype(np.float64)
+            # eps in the input's dtype keeps scalar inputs in that dtype on NumPy 1.x
+            in_eps = in_arr.dtype.type(eps[in_path])
+            plus = in_arr + in_eps * delta
+            minus = in_arr - in_eps * delta
+            applied_steps[in_path] = (plus - minus).real.astype(np.float64)
             frozen = applied_steps[in_path] == 0
             if np.any(frozen):
                 spacing = float(np.max(np.spacing(np.abs(in_arr[frozen]))))
