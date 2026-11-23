@@ -196,7 +196,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             encoding = negotiate_encoding(accept)
 
             exports = None
-            if config.gpu_transport != "none":
+            if config.gpu_transport:
                 exports = ResponseExports(
                     encoding.gpu_transport, acknowledged=exports_done is not None
                 )
@@ -282,7 +282,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
 
-    if config.gpu_transport != "none":
+    if config.gpu_transport:
         add_gpu_transport_handling(app)
 
     generate_openapi = app.openapi
@@ -302,8 +302,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
 def serve(host: str, port: int, num_workers: int) -> None:
     """Start the REST API."""
-    gpu_transport = get_config().gpu_transport
-    if gpu_transport != "none" and num_workers > 1:
+    gpu_transport = ",".join(get_config().gpu_transport)
+    if gpu_transport and num_workers > 1:
         # A client names the responses it is done with on a later request,
         # which may reach a different worker than the one keeping their GPU
         # memory, so that memory would only be freed when it times out.
