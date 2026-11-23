@@ -1,8 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from collections import namedtuple
 
+import jsonschema
 import numpy as np
 import pytest
 
@@ -15,8 +17,12 @@ from tesseract_core.sdk.schema_tree import (
     ScalarSchema,
     SequenceSchema,
     UnionSchema,
-    map_arrays,
+    UnsupportedSchema,
+    _example,
+    iter_nodes,
     parse_schema,
+    schema_map,
+    schema_map_with_path,
 )
 
 TESSERACT_API = """
@@ -131,7 +137,12 @@ def test_parse_schema_reconstructs_field_types(input_schema, field, expected):
     assert input_schema.properties[field] == expected
 
 
-def test_map_arrays_reaches_every_array_and_keeps_containers(input_schema):
+def _array_dtypes(node, leaf):
+    """Replace arrays with their declared dtype, so tests can see which node each got."""
+    return ("array", node.dtype) if isinstance(node, ArraySchema) else leaf
+
+
+def test_schema_map_reaches_every_array_and_keeps_containers(input_schema):
     NT = namedtuple("NT", "a n")
     x = np.ones(3)
     payload = {
@@ -148,43 +159,105 @@ def test_map_arrays_reaches_every_array_and_keeps_containers(input_schema):
         "count": 3,
         "extra": {"not": "an array"},
     }
-    seen = {}
+    out = schema_map(_array_dtypes, input_schema, payload)
 
-    def record(leaf, array_schema, path):
-        seen[path] = array_schema.dtype
-        return ("mapped", leaf)
-
-    out = map_arrays(record, payload, input_schema)
-
-    assert seen == {
-        ("vec",): "float32",
-        ("scalar_arr",): "int32",
-        ("anydim",): None,
-        ("opt",): "float32",
-        ("seq", 0): "float32",
-        ("seq", 1): "float32",
-        ("tup", 0): "float32",
-        ("nt", 0): "float64",
-        ("table", "k", 0, "x"): "float32",
-        ("either", "x"): "float32",
+    f32 = ("array", "float32")
+    assert out == {
+        "vec": f32,
+        "scalar_arr": ("array", "int32"),
+        "anydim": ("array", None),
+        "opt": f32,
+        "seq": [f32, f32],
+        "tup": (f32, 5),
+        "nt": NT(("array", "float64"), 5),
+        "table": {"k": [{"x": f32, "label": "b"}]},
+        "either": {"x": f32},
+        "mode": "slow",
+        "count": 3,
+        "extra": {"not": "an array"},
     }
     assert type(out["nt"]) is NT
-    assert out["nt"].n == 5
-    assert type(out["tup"]) is tuple
-    assert out["table"]["k"][0]["label"] == "b"
-    assert out["either"]["x"][0] == "mapped"
-    assert out["extra"] == {"not": "an array"}
 
 
-def test_map_arrays_picks_union_member_by_value(input_schema):
-    def mark(leaf, array_schema, path):
-        return "mapped"
+def test_schema_map_with_path_gives_the_keys_and_indices_to_each_leaf(input_schema):
+    payload = {"table": {"k": [{"x": np.ones(3)}]}, "tup": (np.ones(3), 5)}
+    out = schema_map_with_path(
+        lambda path, node, leaf: path if isinstance(node, ArraySchema) else leaf,
+        input_schema,
+        payload,
+    )
+    assert out == {"table": {"k": [{"x": "table.{k}.[0].x"}]}, "tup": ("tup.[0]", 5)}
 
+
+def test_schema_map_with_path_escapes_dict_keys(input_schema):
+    """A dict key can hold dots and braces; Tesseract's path format escapes it."""
+    out = schema_map_with_path(
+        lambda path, node, leaf: path,
+        input_schema,
+        {"table": {"a.b{c}": [{"x": np.ones(3)}]}},
+    )
+    path = out["table"]["a.b{c}"][0]["x"]
+    assert path == r"table.{a.b\{c\}}.[0].x"
+
+
+def test_schema_map_with_path_matches_the_runtime_path_format(input_schema):
+    """The runtime's own path lookup finds each leaf from the path it was given."""
+    from tesseract_core.runtime.tree_transforms import get_at_path
+
+    payload = {
+        "vec": np.ones((2, 3)),
+        "tup": (np.ones(3), 5),
+        "table": {"a.b{c}": [{"x": np.ones(3), "label": "b"}]},
+    }
+    paths = []
+    schema_map_with_path(
+        lambda path, node, leaf: paths.append((path, leaf)), input_schema, payload
+    )
+    assert len(paths) == 5
+    for path, leaf in paths:
+        assert get_at_path(payload, path) is leaf
+
+
+def test_schema_map_pairs_every_leaf_with_its_node(input_schema):
+    payload = {
+        "mode": "slow",
+        "count": 3,
+        "extra": {"not": "an array"},
+        "table": {"k": [{"x": np.ones(3), "label": "b"}]},
+        "undeclared": 1,
+    }
+    out = schema_map(lambda node, leaf: type(node).__name__, input_schema, payload)
+    assert out == {
+        "mode": "LiteralSchema",
+        "count": "ScalarSchema",
+        "extra": "AnySchema",  # not walked into: the schema doesn't describe it
+        "table": {"k": [{"x": "ArraySchema", "label": "ScalarSchema"}]},
+        "undeclared": "NoneType",  # a key the schema doesn't declare
+    }
+
+
+def test_schema_map_is_leaf_stops_the_walk(input_schema):
+    out = schema_map(
+        lambda node, leaf: (type(node).__name__, len(leaf)),
+        input_schema,
+        {"seq": [np.ones(3), np.ones(3)]},
+        is_leaf=lambda value: isinstance(value, list),
+    )
+    assert out == {"seq": ("SequenceSchema", 2)}
+
+
+def test_schema_map_picks_union_member_by_value(input_schema):
     either = input_schema.properties["either"]
-    assert map_arrays(mark, np.ones(3), either) == "mapped"
-    assert map_arrays(mark, {"x": np.ones(3)}, either) == {"x": "mapped"}
+    assert schema_map(_array_dtypes, either, np.ones(3)) == (
+        "array",
+        "float32",
+    )
+    assert schema_map(_array_dtypes, either, {"x": np.ones(3)}) == {
+        "x": ("array", "float32")
+    }
     # None is a valid value of an optional array, not an array
-    assert map_arrays(mark, None, input_schema.properties["opt"]) is None
+    opt = input_schema.properties["opt"]
+    assert schema_map(_array_dtypes, opt, None) is None
 
 
 @pytest.mark.parametrize(
@@ -215,14 +288,12 @@ def test_array_dtype_takes_precedence(array_dtype):
 
 @pytest.mark.parametrize("field", ["pet", "tagged_pet"])
 @pytest.mark.parametrize("kind, dtype", [("cat", "float32"), ("dog", "float64")])
-def test_map_arrays_picks_model_by_literal_tag(input_schema, field, kind, dtype):
+def test_schema_map_picks_model_by_literal_tag(input_schema, field, kind, dtype):
     """Models with the same keys are told apart by their ``Literal`` field."""
-    out = map_arrays(
-        lambda leaf, array_schema, path: array_schema.dtype,
-        {"kind": kind, "x": np.ones(3)},
-        input_schema.properties[field],
+    out = schema_map(
+        _array_dtypes, input_schema.properties[field], {"kind": kind, "x": np.ones(3)}
     )
-    assert out == {"kind": kind, "x": dtype}
+    assert out == {"kind": kind, "x": ("array", dtype)}
 
 
 def _union_fields_schema():
@@ -248,52 +319,189 @@ def _union_fields_schema():
     return parse_schema(Fields.model_json_schema())
 
 
+F32_LEAF, F64_LEAF = ("array", "float32"), ("array", "float64")
+
+
 @pytest.mark.parametrize(
     "field, value, expected",
     [
-        ("rank", np.ones(3), "float32"),  # told apart by number of dimensions
-        ("rank", np.ones((2, 3)), "float64"),
-        ("tuples", (np.ones(3), 1), ("float32", 1)),  # by length
-        ("tuples", (np.ones(3), 1, 2), ("float64", 1, 2)),
-        ("sub_or_any", {"x": np.ones(3)}, {"x": "float32"}),  # Any is the fallback
+        ("rank", np.ones(3), F32_LEAF),  # told apart by number of dimensions
+        ("rank", np.ones((2, 3)), F64_LEAF),
+        ("tuples", (np.ones(3), 1), (F32_LEAF, 1)),  # by length
+        ("tuples", (np.ones(3), 1, 2), (F64_LEAF, 1, 2)),
+        ("sub_or_any", {"x": np.ones(3)}, {"x": F32_LEAF}),  # Any is the fallback
         ("scalar_or_arr", 1.5, 1.5),  # a Python float is a JSON number
         (
             "scalar_or_arr",
             np.float64(1.5),
-            "float32",
-        ),  # a numpy scalar is sent as an array
+            F32_LEAF,
+        ),  # numpy scalars are sent as arrays
         ("lit_or_arr", "auto", "auto"),
-        ("lit_or_arr", np.ones(3), "float32"),
+        ("lit_or_arr", np.ones(3), F32_LEAF),
     ],
 )
-def test_map_arrays_picks_union_member_that_accepts_value(field, value, expected):
-    schema = _union_fields_schema()
-    out = map_arrays(
-        lambda leaf, array_schema, path: array_schema.dtype,
-        {field: value},
-        schema,
-    )
+def test_schema_map_picks_union_member_that_accepts_value(field, value, expected):
+    out = schema_map(_array_dtypes, _union_fields_schema(), {field: value})
     assert out[field] == expected
 
 
-def test_unsupported_part_is_treated_as_any_and_the_rest_still_parsed():
+ARRAY = {"array_flags": [], "array_dtype": "float32"}
+INT, STR, NULL = ScalarSchema("integer"), ScalarSchema("string"), ScalarSchema("null")
+
+
+@pytest.mark.parametrize(
+    "schema, expected",
+    [
+        ({"type": ["string", "null"]}, UnionSchema((STR, NULL))),
+        (
+            {"type": "integer", "nullable": True},
+            UnionSchema((INT, NULL)),
+        ),  # OpenAPI 3.0
+        ({"oneOf": [{"type": "integer"}, {"type": "string"}]}, UnionSchema((INT, STR))),
+        (
+            {"allOf": [{"$ref": "#/components/schemas/Arr"}], "description": "x"},
+            ArraySchema((None,), "float32", False),
+        ),
+        ({"type": "array", "items": {"type": "integer"}}, SequenceSchema((), INT)),
+        (
+            {"type": "array", "prefixItems": [{"type": "integer"}], "items": False},
+            SequenceSchema((INT,), None),
+        ),
+        ({"type": "object"}, ObjectSchema({}, frozenset(), AnySchema())),
+        (
+            {"type": "object", "additionalProperties": {"type": "integer"}},
+            ObjectSchema({}, frozenset(), INT),
+        ),
+        ({"const": 3}, LiteralSchema((3,))),
+        ({}, AnySchema()),
+        (True, AnySchema()),
+        (
+            {
+                "array_flags": [],
+                "array_dtype": "int8",
+                "properties": {
+                    "shape": {
+                        "prefixItems": [
+                            {"const": 1},
+                            {"enum": [1, 3]},
+                            {"type": "integer"},
+                        ]
+                    }
+                },
+            },
+            ArraySchema((1, 3, None), "int8", False),
+        ),
+        (  # an array from a Tesseract built before array_flags/array_dtype
+            {
+                "properties": {
+                    "object_type": {"const": "array"},
+                    "shape": {"items": {"type": "integer"}},
+                    "dtype": {"examples": ["int8"], "enum": ["int8"]},
+                }
+            },
+            ArraySchema(None, "int8", False),
+        ),
+    ],
+)
+def test_parse_schemas_pydantic_does_not_emit(schema, expected):
+    """OpenAPI and JSON Schema written by hand, or by other tools than pydantic."""
+    arr = {**ARRAY, "properties": {"shape": {"prefixItems": [{"type": "integer"}]}}}
+    assert parse_schema(schema, {"Arr": arr}) == expected
+
+
+def test_union_member_picked_by_json_type_and_closed_keys():
+    ints_or_bools = parse_schema({"type": ["integer", "boolean"]})
+    pick = lambda node, leaf: node.type if node else None
+    assert schema_map(pick, ints_or_bools, 1) == "integer"
+    assert schema_map(pick, ints_or_bools, True) == "boolean"
+
+    closed = {"type": "object", "additionalProperties": False}
+    a_or_b = parse_schema(
+        {
+            "anyOf": [
+                {**closed, "properties": {"a": {"type": "integer"}}},
+                {**closed, "properties": {"b": {"type": "string"}}},
+            ]
+        }
+    )
+    assert schema_map(pick, a_or_b, {"a": 1}) == {"a": "integer"}
+
+
+def test_iter_nodes_lists_every_node(input_schema):
+    kinds = {type(n).__name__ for n in iter_nodes(input_schema)}
+    assert kinds == {
+        "ObjectSchema",
+        "ArraySchema",
+        "UnionSchema",
+        "SequenceSchema",
+        "LiteralSchema",
+        "ScalarSchema",
+        "AnySchema",
+    }
+    arrays = [n for n in iter_nodes(input_schema) if isinstance(n, ArraySchema)]
+    # vec, scalar_arr, anydim, opt, seq, tup, nt, table, 2 in either, 2 in each pet
+    assert len(arrays) == 14
+
+
+def test_unsupported_part_is_reported_and_the_rest_still_parsed():
     """A schema the parser can't handle shouldn't stop other arrays being found."""
-    array = {"array_flags": [], "array_dtype": "float32"}
     defs = {"Loop": {"properties": {"again": {"$ref": "#/$defs/Loop"}}}}
     schema = {
         "properties": {
-            "x": array,
+            "x": ARRAY,
             "loop": {"$ref": "#/$defs/Loop"},
             "both": {"allOf": [{"type": "object"}, {"type": "object"}]},
         }
     }
-    with (
-        pytest.warns(UserWarning, match="cannot parse the recursive definition 'Loop'"),
-        pytest.warns(UserWarning, match="cannot parse the 'allOf' with 2 members"),
-    ):
-        node = parse_schema(schema, defs)
+    node = parse_schema(schema, defs)
 
-    assert node.properties["both"] == AnySchema()
-    assert node.properties["loop"].properties["again"] == AnySchema()
-    out = map_arrays(lambda leaf, a, path: a.dtype, {"x": np.ones(2)}, node)
-    assert out == {"x": "float32"}
+    unsupported = [n for n in iter_nodes(node) if isinstance(n, UnsupportedSchema)]
+    assert [n.reason for n in unsupported] == [
+        "cannot parse the recursive definition 'Loop'",
+        "cannot parse the 'allOf' with 2 members",
+    ]
+    out = schema_map(_array_dtypes, node, {"x": np.ones(2)})
+    assert out == {"x": ("array", "float32")}
+
+
+def _every_field_kind_model():
+    from typing import Any, Literal, NamedTuple
+
+    from pydantic import BaseModel, Field
+
+    from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int32
+
+    class Pair(NamedTuple):
+        a: Array[(2,), Float64]
+        n: int
+
+    class Sub(BaseModel):
+        x: Differentiable[Array[(None,), Float32]]
+        label: str
+
+    class EveryFieldKind(BaseModel):
+        scalar_arr: Array[(), Int32]
+        anydim: Array[..., None]
+        opt: Array[(None,), Float32] | None
+        tup: tuple[Array[(None,), Float32], int]
+        pair: Pair
+        table: dict[str, list[Sub]]
+        subs: list[Sub]
+        either: Sub | Array[(None,), Float32]
+        mode: Literal["fast", "slow"]
+        ratio: float = Field(gt=0)
+        scale: float
+        count: int = Field(gt=0)
+        name: str = Field(examples=["a name"])
+        flag: bool
+        extra: Any
+
+    return EveryFieldKind
+
+
+def test_example_validates_against_its_model():
+    model = _every_field_kind_model()
+    schema = model.model_json_schema()
+    example = _example(parse_schema(schema))
+    jsonschema.validate(instance=example, schema=schema)
+    model.model_validate_json(json.dumps(example))

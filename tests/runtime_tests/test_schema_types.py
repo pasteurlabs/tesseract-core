@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pydantic import BaseModel, ValidationError
-from schema_example_generator import generate_example
 
 from tesseract_core.runtime.array_encoding import get_array_model
 from tesseract_core.runtime.experimental import LazySequence
@@ -27,6 +26,7 @@ from tesseract_core.runtime.schema_types import (
     UInt8,
     is_differentiable,
 )
+from tesseract_core.sdk.schema_tree import _example, parse_schema
 
 
 class MyModel(BaseModel):
@@ -306,7 +306,7 @@ def test_json_schema(mode):
     """Test that array JSON schemas produce valid payloads."""
     schema = MyModel.model_json_schema(mode=mode)
 
-    payload = generate_example(schema)
+    payload = _example(parse_schema(schema))
 
     try:
         MyModel.model_validate_json(json.dumps(payload))

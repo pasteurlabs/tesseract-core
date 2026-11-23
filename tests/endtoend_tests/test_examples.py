@@ -167,10 +167,10 @@ def print_debug_info(result):
 
 def example_from_openapi(openapi_schema):
     """Generate a random example input for a Tesseract's apply endpoint."""
-    from schema_example_generator import generate_example
+    from tesseract_core.sdk.schema_tree import _example, parse_schema
 
     schemas = openapi_schema["components"]["schemas"]
-    return generate_example(schemas["ApplyInputSchema"], schemas)
+    return _example(parse_schema(schemas["ApplyInputSchema"], schemas))
 
 
 def test_unit_tesseract_from_source(unit_tesseract_path, unit_tesseract_config):
