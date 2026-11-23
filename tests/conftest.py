@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from shutil import copytree
 from textwrap import indent
 from traceback import format_exception
 from typing import Any
@@ -249,8 +248,15 @@ def dummy_tesseract_location():
 
 @pytest.fixture
 def dummy_tesseract_package(tmpdir, dummy_tesseract_location):
-    """Create a dummy tesseract package on disk for testing."""
-    copytree(dummy_tesseract_location, tmpdir, dirs_exist_ok=True)
+    """Create a dummy tesseract package on disk for testing.
+
+    Only the ``tesseract_*`` files are copied. Serving from a checkout leaves a
+    ``.tesseract-venv`` and ``run_*`` output next to them, and copying those
+    into every test makes each copy hundreds of MB and breaks tests that
+    expect a clean package.
+    """
+    for path in dummy_tesseract_location.glob("tesseract_*"):
+        shutil.copy(path, tmpdir)
     return Path(tmpdir)
 
 

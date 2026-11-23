@@ -57,6 +57,9 @@ if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
     rm -rf "$UV_PYTHON_DIR"/lib/python3*/site-packages \
         "$UV_PYTHON_DIR"/lib/python3*/EXTERNALLY-MANAGED
     cp -a "$UV_PYTHON_DIR"/lib/* /python-env/lib/
+    # A venv has no include/. Without it, cp would create include/ as a copy of
+    # python3.X/, which puts Python.h one level above where sysconfig looks.
+    mkdir -p /python-env/include
     cp -a "$UV_PYTHON_DIR"/include/* /python-env/include/
 
     # pyvenv.cfg still points `home` at the uv-managed installation, which does
