@@ -220,11 +220,47 @@ def _perturb_input(
         A new dictionary with the perturbed input.
     """
     input_val = np.asarray(get_at_path(inputs_dict, input_path)).copy()
-    if idx:
-        input_val[idx] += eps
-    else:
-        input_val = input_val + eps
+    # In place, so the step is rounded to the input's dtype, also for scalars
+    input_val[idx] += eps
     return set_at_path(inputs_dict, {input_path: input_val})
+
+
+def _element(
+    inputs_dict: dict[str, Any], input_path: str, idx: tuple[int, ...]
+) -> np.number:
+    """The element of an input at idx (empty tuple for scalars)."""
+    return np.asarray(get_at_path(inputs_dict, input_path))[idx]
+
+
+def _step_too_small(eps: float, what: str, spacing: float | None = None) -> ValueError:
+    """Error for a step that rounding to the input's dtype cancelled."""
+    hint = (
+        f"Values of its dtype are {spacing:.3g} apart there, so use an eps well "
+        "above that."
+        if spacing is not None
+        else "Use a larger eps."
+    )
+    return ValueError(
+        f"A step of eps={eps} does not change {what}, because it is below the "
+        f"precision of the input's dtype at that value. {hint}"
+    )
+
+
+def _check_step(
+    step: np.number,
+    inputs_dict: dict[str, Any],
+    input_path: str,
+    idx: tuple[int, ...],
+    eps: float,
+) -> None:
+    """Raise if rounding to the input's dtype cancelled the step."""
+    if step == 0:
+        value = _element(inputs_dict, input_path, idx)
+        raise _step_too_small(
+            eps,
+            f"input '{input_path}' at index {idx}",
+            float(np.abs(np.spacing(value))),
+        )
 
 
 def _compute_central_diff_row(
@@ -255,13 +291,17 @@ def _compute_central_diff_row(
     """
     inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
     inputs_minus = _perturb_input(inputs_dict, input_path, idx, -eps)
+    step = (
+        _element(inputs_plus, input_path, idx) - _element(inputs_minus, input_path, idx)
+    ).real
+    _check_step(step, inputs_dict, input_path, idx, eps)
 
     outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
     outputs_minus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_minus)))
 
     return (
         get_at_path(outputs_plus, output_path) - get_at_path(outputs_minus, output_path)
-    ) / (2 * eps)
+    ) / step
 
 
 def _compute_forward_diff_row(
@@ -290,11 +330,15 @@ def _compute_forward_diff_row(
         The gradient of output_path with respect to input_path[idx].
     """
     inputs_plus = _perturb_input(inputs_dict, input_path, idx, eps)
+    step = (
+        _element(inputs_plus, input_path, idx) - _element(inputs_dict, input_path, idx)
+    ).real
+    _check_step(step, inputs_dict, input_path, idx, eps)
     outputs_plus = _dump_outputs(apply_fn(input_schema.model_validate(inputs_plus)))
 
     return (
         get_at_path(outputs_plus, output_path) - get_at_path(base_outputs, output_path)
-    ) / eps
+    ) / step
 
 
 @_cached_function(key_fn=_by_index)
