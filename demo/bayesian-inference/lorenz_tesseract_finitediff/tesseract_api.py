@@ -108,7 +108,7 @@ def jacobian(
 ) -> Any:
     """Jacobian via central finite differences."""
     return finite_difference_jacobian(
-        apply, inputs, jac_inputs, jac_outputs, algorithm="central", eps=1e-5
+        apply, inputs, jac_inputs, jac_outputs, algorithm="central", eps=1e-3
     )
 
 
@@ -126,7 +126,7 @@ def jacobian_vector_product(
         jvp_outputs,
         tangent_vector,
         algorithm="central",
-        eps=1e-5,
+        eps=1e-3,
     )
 
 
@@ -144,5 +144,5 @@ def vector_jacobian_product(
         vjp_outputs,
         cotangent_vector,
         algorithm="central",
-        eps=1e-5,
+        eps=1e-3,
     )
