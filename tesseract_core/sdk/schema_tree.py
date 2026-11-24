@@ -3,10 +3,10 @@
 """A typed view of the JSON Schema a Tesseract publishes for its endpoints.
 
 Clients only receive a Tesseract's OpenAPI schema, not the pydantic models it
-was generated from. :func:`parse_schema` turns that schema into a tree of
+was generated from. :func:`parse` turns that schema into a tree of
 plain dataclasses, one per kind of type pydantic emits, so client code can ask
 where a payload's arrays are and what shape and dtype they should have without
-re-implementing JSON Schema traversal. :func:`schema_map` maps a function
+re-implementing JSON Schema traversal. :func:`map` maps a function
 over a payload's leaves alongside that tree, and :func:`iter_nodes` lists its
 nodes.
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Literal
 
@@ -36,9 +36,9 @@ __all__ = [
     "UnionSchema",
     "UnsupportedSchema",
     "iter_nodes",
-    "parse_schema",
-    "schema_map",
-    "schema_map_with_path",
+    "map",
+    "map_with_path",
+    "parse",
 ]
 
 ScalarType = Literal["string", "number", "integer", "boolean", "null"]
@@ -46,10 +46,10 @@ ScalarType = Literal["string", "number", "integer", "boolean", "null"]
 
 @dataclass(frozen=True)
 class SchemaNode:
-    """Base class of the nodes :func:`parse_schema` returns.
+    """Base class of the nodes :func:`parse` returns.
 
     Each subclass says which schemas it describes (``_matches``) and how to
-    build itself from one (``_from_schema``). :func:`parse_schema` tries them
+    build itself from one (``_from_schema``). :func:`parse` tries them
     in the order of ``_NODE_TYPES``.
     """
 
@@ -199,7 +199,8 @@ class UnionSchema(SchemaNode):
         if schema.get("nullable") is True:
             alternatives.append({"type": "null"})
         members = []
-        for node in map(parser.parse, alternatives):
+        for alternative in alternatives:
+            node = parser.parse(alternative)
             # Flatten nested unions, such as an optional discriminated union
             members.extend(node.members if isinstance(node, UnionSchema) else [node])
         return cls(tuple(members), schema=schema)
@@ -363,36 +364,42 @@ _NODE_TYPES: tuple[type[SchemaNode], ...] = (
 )
 
 
-def parse_schema(
-    schema: Mapping, definitions: Mapping[str, Mapping] | None = None
-) -> SchemaNode:
-    """Parse a JSON Schema as emitted by pydantic into a :class:`SchemaNode` tree.
+def parse(document: Any, pointer: str = "#") -> SchemaNode:
+    """Parse the JSON Schema at ``pointer`` in ``document`` into a :class:`SchemaNode` tree.
 
     Args:
-        schema: The schema to parse, for example
-            ``openapi["components"]["schemas"]["Apply_InputSchema"]``.
-        definitions: The schemas that ``$ref`` entries point to, by name, for
-            example ``openapi["components"]["schemas"]`` or a JSON Schema's
-            ``$defs``. A ``$ref`` is resolved by its last path segment, so
-            both ``#/components/schemas/Name`` and ``#/$defs/Name`` work.
-            Defaults to ``schema["$defs"]``.
+        document: A JSON Schema, or a document that contains one, such as a
+            Tesseract's OpenAPI schema (``Tesseract.openapi_schema``). Each
+            ``$ref`` is followed as a JSON Pointer from the root of
+            ``document``, so definitions can live under ``$defs``,
+            ``definitions``, ``components/schemas`` or anywhere else in it.
+        pointer: Where the schema to parse is in ``document``, written like a
+            ``$ref``, for example ``"#/components/schemas/Apply_InputSchema"``.
+            Defaults to ``"#"``, the whole document.
+
+    Raises:
+        ValueError: If ``pointer`` doesn't point into ``document``.
     """
-    if definitions is None:
-        definitions = schema.get("$defs", {})
-    return _SchemaParser(definitions).parse(schema)
+    try:
+        _resolve_pointer(document, pointer)
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError(f"{pointer!r} does not point into the document") from exc
+    # Parsed like any other $ref, so a schema that refers back to itself is caught
+    return _SchemaParser(document).parse({"$ref": pointer})
 
 
-@dataclass(frozen=True)
 class _SchemaParser:
-    """Parses schemas against shared ``definitions``.
+    """Parses the schemas in ``document``, following each ``$ref`` into it.
 
-    ``visiting`` holds the names of the ``$ref`` definitions being expanded
-    on the way to the current schema, to catch a definition that contains
-    itself.
+    Each ``$ref`` is parsed once, and its node is reused wherever it appears.
+    ``_expanding`` holds the ``$ref`` pointers being parsed on the way to the
+    current schema, to catch one that contains itself.
     """
 
-    definitions: Mapping[str, Mapping]
-    visiting: frozenset[str] = frozenset()
+    def __init__(self, document: Any) -> None:
+        self.document = document
+        self._expanding: set[str] = set()
+        self._parsed: dict[str, SchemaNode] = {}
 
     def parse(self, schema: Any) -> SchemaNode:
         """Parse ``schema`` into the first node type in ``_NODE_TYPES`` that matches it."""
@@ -402,11 +409,7 @@ class _SchemaParser:
             return AnySchema()
 
         if "$ref" in schema:
-            name = schema["$ref"].rsplit("/", 1)[-1]
-            if name in self.visiting:
-                return _unsupported(f"recursive definition {name!r}", schema)
-            inner = replace(self, visiting=self.visiting | {name})
-            return inner.parse(self.definitions[name])
+            return self._parse_ref(schema["$ref"], schema)
 
         all_of = schema.get("allOf", ())
         if len(all_of) > 1:
@@ -417,12 +420,46 @@ class _SchemaParser:
         node_type = next(t for t in _NODE_TYPES if t._matches(schema))
         return node_type._from_schema(schema, self)
 
+    def _parse_ref(self, pointer: str, schema: Mapping) -> SchemaNode:
+        if pointer in self._parsed:
+            return self._parsed[pointer]
+        if pointer in self._expanding:
+            return _unsupported(f"recursive $ref {pointer!r}", schema)
+        try:
+            target = _resolve_pointer(self.document, pointer)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return _unsupported(
+                f"$ref {pointer!r}, which doesn't point into the document", schema
+            )
+        self._expanding.add(pointer)
+        try:
+            node = self.parse(target)
+        finally:
+            self._expanding.remove(pointer)
+        # A $ref on a cycle is cached with the cycle cut where it was first
+        # reached; any other way into it is the same cycle, cut elsewhere.
+        self._parsed[pointer] = node
+        return node
+
+
+def _resolve_pointer(document: Any, pointer: str) -> Any:
+    """Follow a JSON Pointer within ``document``, such as ``"#/$defs/Name"``."""
+    if pointer != "#" and not pointer.startswith("#/"):
+        raise ValueError(
+            f"only pointers within the document are supported: {pointer!r}"
+        )
+    node = document
+    for token in pointer.split("/")[1:]:
+        token = token.replace("~1", "/").replace("~0", "~")
+        node = node[int(token)] if isinstance(node, list) else node[token]
+    return node
+
 
 def _unsupported(construct: str, schema: Mapping) -> UnsupportedSchema:
     return UnsupportedSchema(f"cannot parse the {construct}", schema=schema)
 
 
-def schema_map(
+def map(
     func: Callable[[SchemaNode | None, Any], Any],
     schema: SchemaNode | None,
     tree: Any,
@@ -441,7 +478,7 @@ def schema_map(
             array field. It is ``None`` where the schema doesn't say, such as a
             key it doesn't declare or a union with no single member that
             accepts the value.
-        schema: The parsed schema of ``tree``, from :func:`parse_schema`.
+        schema: The parsed schema of ``tree``, from :func:`parse`.
         tree: A payload such as the inputs to :meth:`Tesseract.apply`: nested
             dicts, lists and tuples (NamedTuples included), with arrays and
             scalars as leaves. A leaf is any value the schema doesn't describe
@@ -453,30 +490,30 @@ def schema_map(
         ``tree`` with each leaf replaced, rebuilt with the same container types
         (dicts become plain dicts).
     """
-    return schema_map_with_path(partial(_drop_path, func), schema, tree, is_leaf)
+    return map_with_path(partial(_drop_path, func), schema, tree, is_leaf)
 
 
-def schema_map_with_path(
+def map_with_path(
     func: Callable[[str, SchemaNode | None, Any], Any],
     schema: SchemaNode | None,
     tree: Any,
     is_leaf: Callable[[Any], bool] | None = None,
 ) -> Any:
-    """Like :func:`schema_map`, but calls ``func(path, node, leaf)``.
+    """Like :func:`map`, but calls ``func(path, node, leaf)``.
 
     ``path`` locates the leaf in Tesseract's path format, the one
     ``vjp_inputs`` and ``differentiable_arrays`` use: model fields as they
     are, dict keys in braces and indices in brackets, as in
     ``"table.{k}.[0].x"``. The root of ``tree`` is ``""``.
     """
-    return _schema_map(func, schema, tree, is_leaf, "")
+    return _map(func, schema, tree, is_leaf, "")
 
 
 def _drop_path(func: Callable, path: str, node: SchemaNode | None, leaf: Any) -> Any:
     return func(node, leaf)
 
 
-def _schema_map(
+def _map(
     func: Callable[[str, SchemaNode | None, Any], Any],
     schema: SchemaNode | None,
     tree: Any,
@@ -489,7 +526,7 @@ def _schema_map(
         return func(path, schema, tree)
     if isinstance(schema, ObjectSchema) and isinstance(tree, Mapping):
         return {
-            key: _schema_map(
+            key: _map(
                 func,
                 schema.properties.get(key, schema.additional),
                 item,
@@ -500,7 +537,7 @@ def _schema_map(
         }
     if isinstance(schema, SequenceSchema) and _is_sequence(tree):
         out = [
-            _schema_map(
+            _map(
                 func,
                 schema.prefix[i] if i < len(schema.prefix) else schema.items,
                 item,

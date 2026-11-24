@@ -26,7 +26,7 @@ from tesseract_core.runtime.schema_types import (
     UInt8,
     is_differentiable,
 )
-from tesseract_core.sdk.schema_tree import _example, parse_schema
+from tesseract_core.sdk import schema_tree
 
 
 class MyModel(BaseModel):
@@ -306,7 +306,7 @@ def test_json_schema(mode):
     """Test that array JSON schemas produce valid payloads."""
     schema = MyModel.model_json_schema(mode=mode)
 
-    payload = _example(parse_schema(schema))
+    payload = schema_tree._example(schema_tree.parse(schema))
 
     try:
         MyModel.model_validate_json(json.dumps(payload))

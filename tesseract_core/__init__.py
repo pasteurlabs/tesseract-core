@@ -24,17 +24,7 @@ __oldest_supported_version__ = "1.13.0"
 # import public API of the package
 # from . import <obj>
 from .sdk.engine import build_tesseract, run_tesseract, serve, teardown
-from .sdk.schema_tree import parse_schema, schema_map, schema_map_with_path
 from .sdk.tesseract import Tesseract
 
 # add public API as strings here, for example __all__ = ["obj"]
-__all__ = [
-    "Tesseract",
-    "build_tesseract",
-    "parse_schema",
-    "run_tesseract",
-    "schema_map",
-    "schema_map_with_path",
-    "serve",
-    "teardown",
-]
+__all__ = ["Tesseract", "build_tesseract", "run_tesseract", "serve", "teardown"]
