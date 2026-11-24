@@ -126,7 +126,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       - name: Install package
         run: |
@@ -207,7 +207,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       - name: Install package
         run: |
@@ -262,7 +262,7 @@ jobs:
           channels: defaults
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
@@ -359,7 +359,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       # Test with the oldest supported Python version only (for slow tests)
       - name: Set up Python
@@ -436,7 +436,7 @@ jobs:
           docker run --rm --gpus all ${{ matrix.cuda.base_image }} nvidia-smi
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
 
       - name: Install package
         run: |
