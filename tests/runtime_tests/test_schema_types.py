@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pydantic import BaseModel, ValidationError
-from schema_example_generator import generate_example
 
 from tesseract_core.runtime.array_encoding import get_array_model
 from tesseract_core.runtime.experimental import LazySequence
@@ -27,6 +26,7 @@ from tesseract_core.runtime.schema_types import (
     UInt8,
     is_differentiable,
 )
+from tesseract_core.sdk import schema_tree
 
 
 class MyModel(BaseModel):
@@ -301,49 +301,12 @@ def test_model_from_json(tmpdir):
         assert np.array_equal(getattr(model, field), getattr(ref_model, field))
 
 
-def fix_fake_arrays(fakedata, seed=42):
-    is_array = lambda x: (
-        isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
-    )
-    rng = np.random.RandomState(seed)
-
-    def _walk(data):
-        if is_array(data):
-            if data["shape"]:  # don't touch scalars
-                data["shape"] = (1,) * len(data["shape"])
-
-            new_data = rng.uniform(0, 100, data["shape"]).astype(data["dtype"])
-
-            if data["data"]["encoding"] == "base64":
-                data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
-            elif data["data"]["encoding"] == "json":
-                data["data"]["buffer"] = new_data.flatten().tolist()
-            elif data["data"]["encoding"] == "binref":
-                # replace binref with base64 so we don't need to write files
-                data["data"]["encoding"] = "base64"
-                data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
-                data["data"].pop("compression", None)
-        elif isinstance(data, dict):
-            for key, value in data.items():
-                data[key] = _walk(value)
-        elif isinstance(data, list):
-            for idx, value in enumerate(data):
-                data[idx] = _walk(value)
-
-        return data
-
-    return _walk(fakedata)
-
-
 @pytest.mark.parametrize("mode", ["validation", "serialization"])
 def test_json_schema(mode):
     """Test that array JSON schemas produce valid payloads."""
     schema = MyModel.model_json_schema(mode=mode)
 
-    payload = generate_example(schema)
-
-    # Fix fake arrays to match the expected shape and be properly encoded
-    payload = fix_fake_arrays(payload)
+    payload = schema_tree._example(schema_tree.parse(schema))
 
     try:
         MyModel.model_validate_json(json.dumps(payload))

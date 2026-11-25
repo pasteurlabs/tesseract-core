@@ -165,48 +165,12 @@ def print_debug_info(result):
         traceback.print_exception(*result.exc_info)
 
 
-def fix_fake_arrays(fakedata, seed=42):
-    is_array = lambda x: (
-        isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
-    )
-    rng = np.random.RandomState(seed)
+def example_from_openapi(openapi_schema):
+    """Generate a random example input for a Tesseract's apply endpoint."""
+    from tesseract_core.sdk import schema_tree
 
-    def _walk(data):
-        if is_array(data):
-            # Use broadcasting to minimize surface for shape errors
-            data["shape"] = (1,) * len(data["shape"])
-
-            new_data = rng.uniform(0, 100, data["shape"]).astype(data["dtype"])
-
-            if data["data"]["encoding"] == "base64":
-                data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
-            elif data["data"]["encoding"] == "json":
-                data["data"]["buffer"] = new_data.flatten().tolist()
-            elif data["data"]["encoding"] == "binref":
-                # FIXME: overriding with base64 to not have to create files
-                # in the tesseract
-                data["data"]["encoding"] = "base64"
-                data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
-                data["data"].pop("compression", None)
-        elif isinstance(data, dict):
-            for key, value in data.items():
-                data[key] = _walk(value)
-        elif isinstance(data, list):
-            for idx, value in enumerate(data):
-                data[idx] = _walk(value)
-
-        return data
-
-    return _walk(fakedata)
-
-
-def example_from_json_schema(schema):
-    """Generate a random example JSON object from a JSON schema."""
-    from schema_example_generator import generate_example
-
-    payload = generate_example(schema)
-    payload = fix_fake_arrays(payload)
-    return payload
+    pointer = "#/components/schemas/ApplyInputSchema"
+    return schema_tree._example(schema_tree.parse(openapi_schema, pointer))
 
 
 def test_unit_tesseract_from_source(unit_tesseract_path, unit_tesseract_config):
@@ -280,18 +244,6 @@ def test_unit_tesseract_endtoend(
     assert result.exit_code == 0, result.output
     openapi_schema = json.loads(result.stdout)
 
-    def _input_schema_from_openapi(openapi_schema):
-        input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
-        # Convert OpenAPI-style references to JSON Schema $defs
-        input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
-        input_schema["$defs"].pop("ApplyInputSchema", None)
-        input_schema = json.loads(
-            json.dumps(input_schema).replace("components/schemas", "$defs")
-        )
-        return input_schema
-
-    input_schema = _input_schema_from_openapi(openapi_schema)
-
     mount_args, input_args, output_args = [], [], []
 
     if unit_tesseract_config.volume_mounts:
@@ -320,7 +272,7 @@ def test_unit_tesseract_endtoend(
         output_args.extend(["--output-path", str(output_dir)])
 
     if unit_tesseract_config.test_with_random_inputs:
-        random_input = example_from_json_schema(input_schema)
+        random_input = example_from_openapi(openapi_schema)
 
         result = cli_runner.invoke(
             app,
@@ -419,10 +371,8 @@ def test_unit_tesseract_endtoend(
     response = requests.get(f"http://localhost:{free_port}/openapi.json")
     assert response.status_code == 200
     openapi_schema = response.json()
-    input_schema = _input_schema_from_openapi(openapi_schema)
-
     if unit_tesseract_config.test_with_random_inputs:
-        payload_from_schema = example_from_json_schema(input_schema)
+        payload_from_schema = example_from_openapi(openapi_schema)
         response = requests.post(
             f"http://localhost:{free_port}/apply", json=payload_from_schema
         )
