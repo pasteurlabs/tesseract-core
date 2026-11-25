@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
 import json
 import re
 from collections.abc import Iterable
@@ -1179,8 +1180,10 @@ _CONTAINER_API = """
 import dataclasses
 from typing import NamedTuple
 
+from typing import Annotated
+
 import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing_extensions import NotRequired, TypedDict
 
 from tesseract_core.runtime import Array, Differentiable, Float32
@@ -1197,6 +1200,7 @@ class NT(NamedTuple):
 class DC:
     a: A
     n: int = 3
+    tags: list = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1212,6 +1216,7 @@ class PDC:
 class TD(TypedDict):
     a: A
     n: NotRequired[int]
+    scale: NotRequired[Annotated[float, Field(gt=0)]]
 
 
 class InputSchema(BaseModel):
@@ -1307,9 +1312,20 @@ def test_abstract_eval_schema_reaches_arrays_in_containers(container_api):
     for value in (inputs.nt.a, inputs.dc.a, inputs.frozen_dc.a, inputs.pdc.a):
         assert isinstance(value, ShapeDType)
     assert isinstance(inputs.td["a"], ShapeDType)
-    # Defaults of the rebuilt containers are kept
+    # Defaults and constraints of the rebuilt containers are kept
     assert inputs.nt.n == 3
     assert inputs.dc.n == 3
+    assert inputs.dc.tags == []
+    with pytest.raises(ValidationError, match="greater than 0"):
+        AbstractInputSchema.model_validate(
+            {
+                "inputs": {
+                    "nt": [_abstract((2,))],
+                    **{k: {"a": _abstract((2,))} for k in ("dc", "frozen_dc", "pdc")},
+                    "td": {"a": _abstract((2,)), "scale": -1.0},
+                }
+            }
+        )
 
 
 def test_tesseract_differentiates_arrays_in_containers(container_api):
@@ -1336,3 +1352,54 @@ def test_tesseract_differentiates_arrays_in_containers(container_api):
     vjp_inputs = ["nt.[0]", "dc.a", "frozen_dc.a", "pdc.a", "td.a"]
     vjp = tesseract.vector_jacobian_product(inputs, vjp_inputs, ["y"], {"y": x})
     assert set(vjp) == set(vjp_inputs)
+
+
+def test_dropping_fields_inside_containers(container_api):
+    """A function returning None removes a field, inside these containers too."""
+    from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
+    from tesseract_core.runtime.schema_types import (
+        PydanticArrayAnnotation,
+        safe_issubclass,
+    )
+
+    _, api = container_api
+    Stripped = apply_function_to_model_tree(
+        api.InputSchema,
+        lambda t, _: None if safe_issubclass(t, PydanticArrayAnnotation) else t,
+    )
+    fields = Stripped.model_fields
+    assert fields["nt"].annotation._fields == ("n",)
+    assert fields["nt"].annotation._field_defaults == {"n": 3}
+    assert [f.name for f in dataclasses.fields(fields["dc"].annotation)] == [
+        "n",
+        "tags",
+    ]
+    assert set(fields["td"].annotation.__annotations__) == {"n", "scale"}
+
+
+def test_check_gradients_reaches_arrays_in_containers(container_api):
+    """Gradient checks now cover arrays inside these containers, frozen ones too."""
+    from tesseract_core.runtime.testing.finite_differences import check_gradients
+
+    _, api = container_api
+    x = [1.0, 2.0]
+    inputs = {
+        "inputs": {
+            "nt": [x],
+            "dc": {"a": x},
+            "frozen_dc": {"a": x},
+            "pdc": {"a": x},
+            "td": {"a": x},
+        }
+    }
+    [(endpoint, failures, _)] = check_gradients(
+        api,
+        inputs,
+        endpoints=["vector_jacobian_product"],
+        input_paths=[*sorted(_CONTAINER_PATHS - {"nt.[]"}), "nt.[0]"],
+        max_evals=50,
+        show_progress=False,
+        seed=0,
+    )
+    assert endpoint == "vector_jacobian_product"
+    assert failures == []

@@ -156,8 +156,10 @@ def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type 
             options["default_factory"] = f.default_factory
         fields.append((f.name, kept[f.name], dataclasses.field(**options)))
     new = dataclasses.make_dataclass(
-        name, fields, frozen=cls.__dataclass_params__.frozen, module=cls.__module__
+        name, fields, frozen=cls.__dataclass_params__.frozen
     )
+    # make_dataclass only takes `module=` from Python 3.12
+    new.__module__ = cls.__module__
     if is_pydantic_dataclass(cls):
         new = pydantic_dataclass(new, config=cls.__pydantic_config__)
     return new
@@ -168,7 +170,10 @@ def _rebuild_typeddict(cls: type, new_types: dict[str, Any], name: str) -> type 
     kept = {k: t for k, t in new_types.items() if t is not None}
     if not kept:
         return None
-    hints = get_type_hints(cls)  # Required / NotRequired already stripped
+    hints = {
+        k: _without_required(t)
+        for k, t in get_type_hints(cls, include_extras=True).items()
+    }
     if kept == hints:
         return cls
     fields = {
@@ -325,8 +330,9 @@ def apply_function_to_model_tree(
             )
 
         elif _is_typeddict(treeobj):
-            # Recurse into TypedDicts; their keys are fixed, so path them like fields
-            hints = get_type_hints(treeobj)
+            # Recurse into TypedDicts; their keys are fixed, so path them like fields.
+            # Keep Annotated metadata; Required / NotRequired is restored on rebuild.
+            hints = get_type_hints(treeobj, include_extras=True)
             new_types = {
                 key: _recurse_over_model_tree(_without_required(t), [*path, key])
                 for key, t in hints.items()
