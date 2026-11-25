@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
 import re
 import threading
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -156,6 +157,9 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 )
                 if isinstance(tree, tuple) and hasattr(tree, "_fields"):
                     return tree._replace(**{key: child})
+                if dataclasses.is_dataclass(tree) and tree.__dataclass_params__.frozen:
+                    # Frozen dataclasses cannot be assigned to, so rebuild this one
+                    return dataclasses.replace(tree, **{key: child})
                 setattr(tree, key, child)
                 return tree
             else:

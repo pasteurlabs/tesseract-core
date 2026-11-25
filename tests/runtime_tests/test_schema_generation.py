@@ -1173,3 +1173,166 @@ def test_advertised_dict_keys_are_resolvable(key):
     segment = "{" + escape_dict_key(key) + "}"
     assert re.fullmatch(pattern, segment), f"pattern refuses {segment}"
     assert path_to_index_op(segment) == ("dict", key)
+
+
+_CONTAINER_API = """
+import dataclasses
+from typing import NamedTuple
+
+import pydantic
+from pydantic import BaseModel
+from typing_extensions import NotRequired, TypedDict
+
+from tesseract_core.runtime import Array, Differentiable, Float32
+
+A = Differentiable[Array[(None,), Float32]]
+
+
+class NT(NamedTuple):
+    a: A
+    n: int = 3
+
+
+@dataclasses.dataclass
+class DC:
+    a: A
+    n: int = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class FrozenDC:
+    a: A
+
+
+@pydantic.dataclasses.dataclass
+class PDC:
+    a: A
+
+
+class TD(TypedDict):
+    a: A
+    n: NotRequired[int]
+
+
+class InputSchema(BaseModel):
+    nt: NT
+    dc: DC
+    frozen_dc: FrozenDC
+    pdc: PDC
+    td: TD
+
+
+class OutputSchema(BaseModel):
+    y: A
+
+
+def apply(inputs):
+    total = inputs.nt.a + inputs.dc.a + inputs.frozen_dc.a + inputs.pdc.a + inputs.td["a"]
+    return OutputSchema(y=total)
+
+
+def vector_jacobian_product(inputs, vjp_inputs, vjp_outputs, cotangent_vector):
+    return {path: cotangent_vector["y"] for path in vjp_inputs}
+
+
+def abstract_eval(abstract_inputs):
+    return {"y": {"shape": abstract_inputs.nt.a.shape, "dtype": "float32"}}
+"""
+
+_CONTAINER_PATHS = {"nt.[]", "dc.a", "frozen_dc.a", "pdc.a", "td.a"}
+
+
+@pytest.fixture(scope="module")
+def container_api(tmp_path_factory):
+    """A Tesseract whose only differentiable arrays sit inside non-model containers."""
+    import importlib.util
+
+    path = tmp_path_factory.mktemp("containers") / "tesseract_api.py"
+    path.write_text(_CONTAINER_API)
+    spec = importlib.util.spec_from_file_location("container_tesseract_api", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return path, module
+
+
+def _abstract(shape):
+    return {"shape": list(shape), "dtype": "float32"}
+
+
+def test_arrays_in_namedtuples_dataclasses_and_typeddicts_are_differentiable(
+    container_api,
+):
+    _, api = container_api
+    ApplyInputSchema, _ = create_apply_schema(api.InputSchema, api.OutputSchema)
+    assert set(ApplyInputSchema.differentiable_arrays) == _CONTAINER_PATHS
+
+
+def test_apply_schema_keeps_the_user_container_types(container_api):
+    _, api = container_api
+    ApplyInputSchema, _ = create_apply_schema(api.InputSchema, api.OutputSchema)
+    x = np.ones(2, dtype=np.float32)
+    inputs = ApplyInputSchema.model_validate(
+        {
+            "inputs": {
+                "nt": [x],
+                "dc": {"a": x},
+                "frozen_dc": {"a": x},
+                "pdc": {"a": x},
+                "td": {"a": x},
+            }
+        }
+    ).inputs
+    assert type(inputs.nt) is api.NT
+    assert type(inputs.dc) is api.DC
+    assert type(inputs.frozen_dc) is api.FrozenDC
+    assert type(inputs.pdc) is api.PDC
+
+
+def test_abstract_eval_schema_reaches_arrays_in_containers(container_api):
+    _, api = container_api
+    AbstractInputSchema, _ = create_abstract_eval_schema(
+        api.InputSchema, api.OutputSchema
+    )
+    inputs = AbstractInputSchema.model_validate(
+        {
+            "inputs": {
+                "nt": [_abstract((2,))],
+                "dc": {"a": _abstract((2,))},
+                "frozen_dc": {"a": _abstract((2,))},
+                "pdc": {"a": _abstract((2,))},
+                "td": {"a": _abstract((2,))},
+            }
+        }
+    ).inputs
+    for value in (inputs.nt.a, inputs.dc.a, inputs.frozen_dc.a, inputs.pdc.a):
+        assert isinstance(value, ShapeDType)
+    assert isinstance(inputs.td["a"], ShapeDType)
+    # Defaults of the rebuilt containers are kept
+    assert inputs.nt.n == 3
+    assert inputs.dc.n == 3
+
+
+def test_tesseract_differentiates_arrays_in_containers(container_api):
+    from tesseract_core import Tesseract
+
+    path, _ = container_api
+    tesseract = Tesseract.from_tesseract_api(path)
+    x = np.ones(2, dtype=np.float32)
+    inputs = {
+        "nt": [x],
+        "dc": {"a": x},
+        "frozen_dc": {"a": x},
+        "pdc": {"a": x},
+        "td": {"a": x},
+    }
+    abstract = tesseract.abstract_eval(
+        {
+            "nt": [_abstract((2,))],
+            **{k: {"a": _abstract((2,))} for k in ("dc", "frozen_dc", "pdc", "td")},
+        }
+    )
+    assert tuple(abstract["y"]["shape"]) == (2,)
+
+    vjp_inputs = ["nt.[0]", "dc.a", "frozen_dc.a", "pdc.a", "td.a"]
+    vjp = tesseract.vector_jacobian_product(inputs, vjp_inputs, ["y"], {"y": x})
+    assert set(vjp) == set(vjp_inputs)

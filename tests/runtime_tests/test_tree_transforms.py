@@ -863,3 +863,17 @@ class TestIsArraylike:
 class _Pair(NamedTuple):
     a: int
     b: int
+
+
+def test_set_at_path_rebuilds_frozen_dataclasses():
+    import dataclasses
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        a: object
+
+    tree = {"f": Frozen(np.ones(2))}
+    out = set_at_path(tree, {"f.a": 5})
+    assert type(out["f"]) is Frozen
+    assert out["f"].a == 5
+    assert tree["f"].a.tolist() == [1.0, 1.0]

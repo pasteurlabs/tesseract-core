@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
 import functools
 import re
 import types
@@ -11,10 +12,12 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    NamedTuple,
     TypeVar,
     Union,
     get_args,
     get_origin,
+    get_type_hints,
 )
 
 import numpy as np
@@ -31,7 +34,11 @@ from pydantic import (
     create_model,
     field_validator,
 )
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+from pydantic.dataclasses import is_pydantic_dataclass
 from pydantic_core import PydanticSerializationError
+from typing_extensions import NotRequired, Required
+from typing_extensions import TypedDict as ExtTypedDict
 
 from .schema_types import (
     Array,
@@ -83,6 +90,95 @@ def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
 def _is_annotated(obj: Any) -> bool:
     """Check if an object is typing.Annotated or typing_extensions.Annotated."""
     return get_origin(obj) is Annotated
+
+
+def _is_namedtuple(obj: Any) -> bool:
+    return isinstance(obj, type) and issubclass(obj, tuple) and hasattr(obj, "_fields")
+
+
+def _is_typeddict(obj: Any) -> bool:
+    # Duck-typed, so it covers both typing.TypedDict and typing_extensions.TypedDict
+    return (
+        isinstance(obj, type)
+        and issubclass(obj, dict)
+        and hasattr(obj, "__required_keys__")
+    )
+
+
+def _without_required(annotation: Any) -> Any:
+    """Strip a ``Required[...]`` / ``NotRequired[...]`` wrapper from a TypedDict field."""
+    origin = get_origin(annotation)
+    if origin is not None and getattr(origin, "_name", None) in (
+        "Required",
+        "NotRequired",
+    ):
+        return get_args(annotation)[0]
+    return annotation
+
+
+def _rebuild_namedtuple(cls: type, new_types: dict[str, Any], name: str) -> type | None:
+    """A NamedTuple like ``cls`` with its fields' types replaced (``None`` drops one)."""
+    kept = {k: t for k, t in new_types.items() if t is not None}
+    if not kept:
+        return None
+    if kept == get_type_hints(cls, include_extras=True):
+        return cls
+    new = NamedTuple(name, list(kept.items()))
+    defaults = {k: v for k, v in cls._field_defaults.items() if k in kept}
+    if defaults:
+        # Defaults are always the trailing fields of a NamedTuple
+        new.__new__.__defaults__ = tuple(defaults.values())
+        new._field_defaults = defaults
+    new.__module__ = cls.__module__
+    return new
+
+
+def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type | None:
+    """A dataclass like ``cls`` with its fields' types replaced (``None`` drops one)."""
+    kept = {k: t for k, t in new_types.items() if t is not None}
+    if not kept:
+        return None
+    if kept == get_type_hints(cls, include_extras=True):
+        return cls
+    fields = []
+    for f in dataclasses.fields(cls):
+        if f.name not in kept:
+            continue
+        options = {
+            "init": f.init,
+            "repr": f.repr,
+            "compare": f.compare,
+            "kw_only": f.kw_only,
+        }
+        if f.default is not dataclasses.MISSING:
+            options["default"] = f.default
+        if f.default_factory is not dataclasses.MISSING:
+            options["default_factory"] = f.default_factory
+        fields.append((f.name, kept[f.name], dataclasses.field(**options)))
+    new = dataclasses.make_dataclass(
+        name, fields, frozen=cls.__dataclass_params__.frozen, module=cls.__module__
+    )
+    if is_pydantic_dataclass(cls):
+        new = pydantic_dataclass(new, config=cls.__pydantic_config__)
+    return new
+
+
+def _rebuild_typeddict(cls: type, new_types: dict[str, Any], name: str) -> type | None:
+    """A TypedDict like ``cls`` with its fields' types replaced (``None`` drops one)."""
+    kept = {k: t for k, t in new_types.items() if t is not None}
+    if not kept:
+        return None
+    hints = get_type_hints(cls)  # Required / NotRequired already stripped
+    if kept == hints:
+        return cls
+    fields = {
+        k: Required[t] if k in cls.__required_keys__ else NotRequired[t]
+        for k, t in kept.items()
+    }
+    # pydantic needs typing_extensions' TypedDict before Python 3.12
+    new = ExtTypedDict(name, fields)
+    new.__module__ = cls.__module__
+    return new
 
 
 def _wrap_default_factory(
@@ -203,6 +299,40 @@ def apply_function_to_model_tree(
                 **new_fields,
                 model_config=(ConfigDict, model_config),
                 __base__=treeobj,
+            )
+
+        elif _is_namedtuple(treeobj):
+            # Recurse into NamedTuples; on the wire they are tuples, so index like one
+            hints = get_type_hints(treeobj, include_extras=True)
+            new_path = [*path, SEQ_INDEX_SENTINEL]
+            new_types = {
+                name: _recurse_over_model_tree(hints[name], new_path)
+                for name in treeobj._fields
+            }
+            return _rebuild_namedtuple(
+                treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
+            )
+
+        elif dataclasses.is_dataclass(treeobj) and isinstance(treeobj, type):
+            # Recurse into dataclasses (standard library and pydantic) like into models
+            hints = get_type_hints(treeobj, include_extras=True)
+            new_types = {
+                f.name: _recurse_over_model_tree(hints[f.name], [*path, f.name])
+                for f in dataclasses.fields(treeobj)
+            }
+            return _rebuild_dataclass(
+                treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
+            )
+
+        elif _is_typeddict(treeobj):
+            # Recurse into TypedDicts; their keys are fixed, so path them like fields
+            hints = get_type_hints(treeobj)
+            new_types = {
+                key: _recurse_over_model_tree(_without_required(t), [*path, key])
+                for key, t in hints.items()
+            }
+            return _rebuild_typeddict(
+                treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
             )
 
         elif _is_annotated(treeobj):
