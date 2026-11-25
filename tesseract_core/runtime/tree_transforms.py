@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
+import functools
+import inspect
 import re
 import threading
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -157,9 +159,14 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 )
                 if isinstance(tree, tuple) and hasattr(tree, "_fields"):
                     return tree._replace(**{key: child})
-                if dataclasses.is_dataclass(tree) and tree.__dataclass_params__.frozen:
-                    # Frozen dataclasses cannot be assigned to, so rebuild this one
-                    return dataclasses.replace(tree, **{key: child})
+                if dataclasses.is_dataclass(tree):
+                    try:
+                        setattr(tree, key, child)
+                    except dataclasses.FrozenInstanceError:
+                        # Frozen dataclasses and equinox Modules cannot be assigned
+                        # to, so rebuild this one
+                        return replace_dataclass_field(tree, key, child)
+                    return tree
                 setattr(tree, key, child)
                 return tree
             else:
@@ -172,6 +179,62 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
         tree = _set_recursive(tree, path_parts, value)
 
     return tree
+
+
+def unrebuildable_attributes(obj: Any) -> set[str]:
+    """Attributes of dataclass instance ``obj`` that a rebuild could not carry over.
+
+    :func:`replace_dataclass_field` rebuilds an instance from its fields. Cached
+    properties are dropped, so they are recomputed, and dunder metadata (such
+    as what ``functools.wraps`` sets) is copied. Any other attribute set on the
+    instance is returned here.
+    """
+    if not hasattr(obj, "__dict__"):
+        return set()
+    names = set(vars(obj)) - {f.name for f in dataclasses.fields(obj)}
+    return {
+        name
+        for name in names
+        if not (name.startswith("__") and name.endswith("__"))
+        and not isinstance(
+            inspect.getattr_static(type(obj), name, None), functools.cached_property
+        )
+    }
+
+
+def replace_dataclass_field(obj: Any, name: str, value: Any) -> Any:
+    """A copy of dataclass instance ``obj`` with field ``name`` set to ``value``.
+
+    Like ``equinox.tree_at``, the copy is built from ``obj``'s fields without
+    calling ``__init__``, ``__post_init__`` or any validators, so it works for
+    frozen dataclasses, custom constructors and equinox Modules alike. Fields
+    derived from others are not recomputed. ``obj`` is left unchanged.
+
+    Raises:
+        AttributeError: If ``name`` is not one of ``obj``'s fields.
+        TypeError: If ``obj`` has attributes besides its fields that cannot be
+            carried over (see :func:`unrebuildable_attributes`).
+    """
+    cls = type(obj)
+    if name not in {f.name for f in dataclasses.fields(obj)}:
+        raise AttributeError(f"{name!r} is not a field of {cls.__name__}")
+    if extra := unrebuildable_attributes(obj):
+        raise TypeError(
+            f"Cannot replace {name!r} in a {cls.__name__}: it has attributes that "
+            f"are not dataclass fields ({', '.join(sorted(extra))}), so it cannot "
+            "be rebuilt from its fields."
+        )
+    new = object.__new__(cls)
+    if hasattr(obj, "__dict__"):
+        for key, val in vars(obj).items():
+            if key.startswith("__") and key.endswith("__"):
+                new.__dict__[key] = val
+    for f in dataclasses.fields(obj):
+        if f.name == name:
+            object.__setattr__(new, f.name, value)
+        elif hasattr(obj, f.name):
+            object.__setattr__(new, f.name, getattr(obj, f.name))
+    return new
 
 
 def flatten_with_paths(

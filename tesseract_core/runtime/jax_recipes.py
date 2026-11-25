@@ -9,6 +9,7 @@ These functions remove the boilerplate from a JAX-backed Tesseract
 ``vector_jacobian_product`` and ``abstract_eval`` endpoints.
 """
 
+import dataclasses
 from collections.abc import Callable, Hashable
 from typing import Any
 
@@ -24,6 +25,7 @@ from tesseract_core.runtime.tree_transforms import (
     filter_func,
     flatten_with_paths,
     set_at_path,
+    unrebuildable_attributes,
 )
 
 
@@ -235,20 +237,37 @@ def _check_cacheable_outputs(tree: Any, path: tuple[str, ...] = ()) -> None:
     """Raise if ``tree`` nests a container that the VJP cache cannot rebuild.
 
     A cache hit rebuilds the cotangent with ``set_at_path``, which supports
-    dicts, lists, tuples and NamedTuples only.
+    dicts, lists, tuples, NamedTuples and dataclasses (equinox Modules
+    included), as long as a frozen dataclass holds nothing but its fields.
     """
+    where = ".".join(path) or "the top level"
     if isinstance(tree, dict):
         children = ((f"{{{k}}}" if path else str(k), v) for k, v in tree.items())
     elif isinstance(tree, list | tuple):
         children = ((f"[{i}]", v) for i, v in enumerate(tree))
     elif jax.tree_util.treedef_is_leaf(jax.tree.structure(tree)):
         return
+    elif dataclasses.is_dataclass(tree):
+        if tree.__dataclass_params__.frozen and (
+            extra := unrebuildable_attributes(tree)
+        ):
+            raise TypeError(
+                f"apply returned a {type(tree).__name__} at {where} with attributes "
+                f"that are not dataclass fields ({', '.join(sorted(extra))}). With "
+                "the VJP cache enabled, it must be rebuildable from its fields; "
+                "make them fields, or disable the cache."
+            )
+        children = (
+            (f.name, getattr(tree, f.name))
+            for f in dataclasses.fields(tree)
+            if hasattr(tree, f.name)
+        )
     else:
-        where = ".".join(path) or "the top level"
         raise TypeError(
             f"apply returned a {type(tree).__name__} at {where}. With the VJP cache "
-            "enabled, outputs may only nest dicts, lists, tuples and NamedTuples; "
-            "convert it to one of those, or disable the cache."
+            "enabled, outputs may only nest dicts, lists, tuples, NamedTuples and "
+            "dataclasses (such as equinox Modules); convert it to one of those, or "
+            "disable the cache."
         )
     for key, child in children:
         _check_cacheable_outputs(child, (*path, key))

@@ -1311,6 +1311,10 @@ def test_abstract_eval_schema_reaches_arrays_in_containers(container_api):
     ).inputs
     for value in (inputs.nt.a, inputs.dc.a, inputs.frozen_dc.a, inputs.pdc.a):
         assert isinstance(value, ShapeDType)
+    # Rebuilt dataclasses subclass the user's own, so methods and isinstance work
+    assert isinstance(inputs.dc, api.DC)
+    assert isinstance(inputs.frozen_dc, api.FrozenDC)
+    assert isinstance(inputs.pdc, api.PDC)
     assert isinstance(inputs.td["a"], ShapeDType)
     # Defaults and constraints of the rebuilt containers are kept
     assert inputs.nt.n == 3
@@ -1355,7 +1359,7 @@ def test_tesseract_differentiates_arrays_in_containers(container_api):
 
 
 def test_dropping_fields_inside_containers(container_api):
-    """A function returning None removes a field, inside these containers too."""
+    """A function returning None removes a NamedTuple or TypedDict field."""
     from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
     from tesseract_core.runtime.schema_types import (
         PydanticArrayAnnotation,
@@ -1370,7 +1374,10 @@ def test_dropping_fields_inside_containers(container_api):
     fields = Stripped.model_fields
     assert fields["nt"].annotation._fields == ("n",)
     assert fields["nt"].annotation._field_defaults == {"n": 3}
+    # A dataclass is rebuilt as a subclass, which cannot remove an inherited field,
+    # just as for pydantic models
     assert [f.name for f in dataclasses.fields(fields["dc"].annotation)] == [
+        "a",
         "n",
         "tags",
     ]
@@ -1403,3 +1410,108 @@ def test_check_gradients_reaches_arrays_in_containers(container_api):
     )
     assert endpoint == "vector_jacobian_product"
     assert failures == []
+
+
+_EQUINOX_API = """
+import equinox as eqx
+import numpy as np
+from pydantic import BaseModel
+
+from tesseract_core.runtime import Array, Differentiable, Float32
+
+A = Differentiable[Array[(None,), Float32]]
+
+
+class Params(eqx.Module):
+    w: A
+    b: A
+
+    def combined(self):
+        return np.asarray(self.w) + np.asarray(self.b)
+
+
+class Scaled(eqx.Module):
+    w: A
+    scale: float
+
+    def __init__(self, w, scale=2.0):
+        self.w = w
+        self.scale = scale
+
+
+class InputSchema(BaseModel):
+    params: Params
+    scaled: Scaled
+
+
+class OutputSchema(BaseModel):
+    y: A
+
+
+def apply(inputs):
+    assert isinstance(inputs.params, Params) and isinstance(inputs.scaled, Scaled)
+    y = inputs.params.combined() + inputs.scaled.scale * np.asarray(inputs.scaled.w)
+    return OutputSchema(y=y)
+
+
+def vector_jacobian_product(inputs, vjp_inputs, vjp_outputs, cotangent_vector):
+    return {path: cotangent_vector["y"] for path in vjp_inputs}
+
+
+def abstract_eval(abstract_inputs):
+    assert isinstance(abstract_inputs.params, Params)
+    return {"y": {"shape": abstract_inputs.params.w.shape, "dtype": "float32"}}
+"""
+
+
+def test_equinox_modules_as_schema_fields(tmp_path):
+    """Modules work as inputs: validated, abstractly evaluated and differentiated."""
+    pytest.importorskip("equinox")
+    from tesseract_core import Tesseract
+
+    path = tmp_path / "tesseract_api.py"
+    path.write_text(_EQUINOX_API)
+    tesseract = Tesseract.from_tesseract_api(path)
+    published = tesseract.openapi_schema["components"]["schemas"]["ApplyInputSchema"]
+    assert set(published["differentiable_arrays"]) == {
+        "params.w",
+        "params.b",
+        "scaled.w",
+    }
+
+    x = np.ones(2, dtype=np.float32)
+    inputs = {"params": {"w": x, "b": x}, "scaled": {"w": x, "scale": 3.0}}
+    np.testing.assert_allclose(tesseract.apply(inputs)["y"], [5.0, 5.0])
+    abstract = {"shape": [2], "dtype": "float32"}
+    tesseract.abstract_eval(
+        {
+            "params": {"w": abstract, "b": abstract},
+            "scaled": {"w": abstract, "scale": 3.0},
+        }
+    )
+    vjp = tesseract.vector_jacobian_product(
+        inputs, ["params.w", "scaled.w"], ["y"], {"y": x}
+    )
+    assert set(vjp) == {"params.w", "scaled.w"}
+
+
+def test_containers_with_unresolvable_annotations_are_leaves():
+    """If get_type_hints can't resolve a container's annotations, it isn't recursed into.
+
+    pydantic can still resolve names defined in the enclosing function, so such
+    a schema keeps working as it did before containers were recursed into.
+    """
+
+    class Local(BaseModel):
+        n: int
+
+    @dataclasses.dataclass
+    class Holder:
+        local: "Local"
+
+    class Model(BaseModel):
+        holder: Holder
+
+    InputSchema, _ = create_apply_schema(Model, Model)
+    value = InputSchema.model_validate({"inputs": {"holder": {"local": {"n": 1}}}})
+    assert value.inputs.holder.local.n == 1

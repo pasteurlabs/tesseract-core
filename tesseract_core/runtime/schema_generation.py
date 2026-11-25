@@ -134,35 +134,71 @@ def _rebuild_namedtuple(cls: type, new_types: dict[str, Any], name: str) -> type
 
 
 def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type | None:
-    """A dataclass like ``cls`` with its fields' types replaced (``None`` drops one)."""
+    """A subclass of dataclass ``cls`` that re-declares the fields whose types changed.
+
+    Subclassing keeps the original's methods and ``isinstance`` checks, as for
+    pydantic models. A field whose new type is ``None`` cannot be removed from
+    a subclass, so it is inherited unchanged; the class is dropped only if
+    every field is.
+    """
     kept = {k: t for k, t in new_types.items() if t is not None}
     if not kept:
         return None
-    if kept == get_type_hints(cls, include_extras=True):
+    hints = get_type_hints(cls, include_extras=True)
+    changed = {k: t for k, t in kept.items() if t != hints[k]}
+    if not changed:
         return cls
-    fields = []
-    for f in dataclasses.fields(cls):
-        if f.name not in kept:
-            continue
-        options = {
-            "init": f.init,
-            "repr": f.repr,
-            "compare": f.compare,
-            "kw_only": f.kw_only,
-        }
-        if f.default is not dataclasses.MISSING:
-            options["default"] = f.default
-        if f.default_factory is not dataclasses.MISSING:
-            options["default_factory"] = f.default_factory
-        fields.append((f.name, kept[f.name], dataclasses.field(**options)))
-    new = dataclasses.make_dataclass(
-        name, fields, frozen=cls.__dataclass_params__.frozen
-    )
-    # make_dataclass only takes `module=` from Python 3.12
-    new.__module__ = cls.__module__
+    fields = {f.name: f for f in dataclasses.fields(cls)}
+    namespace: dict[str, Any] = {
+        "__annotations__": changed,
+        "__module__": cls.__module__,
+    }
+    for key in changed:
+        namespace[key] = _copy_field(fields[key])
+    new = types.new_class(name, (cls,), exec_body=lambda ns: ns.update(namespace))
     if is_pydantic_dataclass(cls):
-        new = pydantic_dataclass(new, config=cls.__pydantic_config__)
+        return pydantic_dataclass(new, config=cls.__pydantic_config__)
+    if "__dataclass_fields__" not in new.__dict__:
+        # A plain subclass isn't a dataclass yet. Classes whose metaclass makes
+        # them dataclasses (such as equinox Modules) already are.
+        params = cls.__dataclass_params__
+        new = dataclasses.dataclass(
+            eq=params.eq,
+            order=params.order,
+            unsafe_hash=params.unsafe_hash,
+            frozen=params.frozen,
+        )(new)
     return new
+
+
+def _copy_field(f: dataclasses.Field) -> dataclasses.Field:
+    """A new ``dataclasses.field`` with the same options as ``f``."""
+    options = {
+        "init": f.init,
+        "repr": f.repr,
+        "hash": f.hash,
+        "compare": f.compare,
+        "metadata": f.metadata,
+        "kw_only": f.kw_only,
+    }
+    if f.default is not dataclasses.MISSING:
+        options["default"] = f.default
+    if f.default_factory is not dataclasses.MISSING:
+        options["default_factory"] = f.default_factory
+    return dataclasses.field(**options)
+
+
+def _type_hints(obj: type) -> dict[str, Any] | None:
+    """``obj``'s annotations with ``Annotated`` metadata, or None if unresolvable.
+
+    pydantic can resolve some forward references that ``get_type_hints`` can't,
+    such as names defined inside a function. Such a container is then treated
+    as a leaf, as it was before containers were recursed into.
+    """
+    try:
+        return get_type_hints(obj, include_extras=True)
+    except (NameError, TypeError):
+        return None
 
 
 def _rebuild_typeddict(cls: type, new_types: dict[str, Any], name: str) -> type | None:
@@ -306,9 +342,8 @@ def apply_function_to_model_tree(
                 __base__=treeobj,
             )
 
-        elif _is_namedtuple(treeobj):
+        elif _is_namedtuple(treeobj) and (hints := _type_hints(treeobj)) is not None:
             # Recurse into NamedTuples; on the wire they are tuples, so index like one
-            hints = get_type_hints(treeobj, include_extras=True)
             new_path = [*path, SEQ_INDEX_SENTINEL]
             new_types = {
                 name: _recurse_over_model_tree(hints[name], new_path)
@@ -318,9 +353,12 @@ def apply_function_to_model_tree(
                 treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
             )
 
-        elif dataclasses.is_dataclass(treeobj) and isinstance(treeobj, type):
-            # Recurse into dataclasses (standard library and pydantic) like into models
-            hints = get_type_hints(treeobj, include_extras=True)
+        elif (
+            dataclasses.is_dataclass(treeobj)
+            and isinstance(treeobj, type)
+            and (hints := _type_hints(treeobj)) is not None
+        ):
+            # Recurse into dataclasses (standard library, pydantic, equinox Modules)
             new_types = {
                 f.name: _recurse_over_model_tree(hints[f.name], [*path, f.name])
                 for f in dataclasses.fields(treeobj)
@@ -329,10 +367,9 @@ def apply_function_to_model_tree(
                 treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
             )
 
-        elif _is_typeddict(treeobj):
+        elif _is_typeddict(treeobj) and (hints := _type_hints(treeobj)) is not None:
             # Recurse into TypedDicts; their keys are fixed, so path them like fields.
             # Keep Annotated metadata; Required / NotRequired is restored on rebuild.
-            hints = get_type_hints(treeobj, include_extras=True)
             new_types = {
                 key: _recurse_over_model_tree(_without_required(t), [*path, key])
                 for key, t in hints.items()

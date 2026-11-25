@@ -865,15 +865,135 @@ class _Pair(NamedTuple):
     b: int
 
 
-def test_set_at_path_rebuilds_frozen_dataclasses():
+def _frozen_dataclass_cases():
+    import dataclasses
+
+    @dataclasses.dataclass(frozen=True)
+    class Plain:
+        a: object
+
+    @dataclasses.dataclass(frozen=True)
+    class CustomInit:
+        a: object
+        scale: float
+
+        def __init__(self, a, factor=2.0):
+            object.__setattr__(self, "a", a)
+            object.__setattr__(self, "scale", factor)
+
+    @dataclasses.dataclass(frozen=True)
+    class WithInitVar:
+        a: object
+        seed: dataclasses.InitVar[int]
+
+        def __post_init__(self, seed):
+            pass
+
+    @dataclasses.dataclass(frozen=True)
+    class InitFalse:
+        a: object
+        label: str = dataclasses.field(init=False, default="kept")
+
+    @dataclasses.dataclass(frozen=True, slots=True)
+    class Slots:
+        a: object
+
+    cases = {
+        "plain": Plain(np.ones(2)),
+        "custom __init__": CustomInit(np.ones(2)),
+        "InitVar": WithInitVar(np.ones(2), 0),
+        "init=False field": InitFalse(np.ones(2)),
+        "slots": Slots(np.ones(2)),
+    }
+    try:
+        import equinox as eqx
+    except ImportError:
+        return cases
+
+    class Module(eqx.Module):
+        a: object
+        scale: float
+
+        def __init__(self, a, factor=2.0):
+            self.a = a
+            self.scale = factor
+
+    cases["equinox Module"] = Module(np.ones(2))
+    return cases
+
+
+@pytest.mark.parametrize("case", list(_frozen_dataclass_cases()))
+def test_set_at_path_rebuilds_frozen_dataclasses(case):
+    """Without calling __init__, so custom constructors and InitVars are fine."""
+    import dataclasses
+
+    obj = _frozen_dataclass_cases()[case]
+    out = set_at_path({"f": obj}, {"f.a": 5})["f"]
+    assert type(out) is type(obj)
+    assert out.a == 5
+    for f in dataclasses.fields(obj):
+        if f.name != "a":
+            assert getattr(out, f.name) == getattr(obj, f.name)
+    assert obj.a.tolist() == [1.0, 1.0]
+
+
+@pytest.mark.parametrize("case", list(_frozen_dataclass_cases()))
+def test_replace_dataclass_field_without_calling_init(case):
+    """The rebuild set_at_path falls back to when assignment is refused."""
+    import dataclasses
+
+    from tesseract_core.runtime.tree_transforms import replace_dataclass_field
+
+    obj = _frozen_dataclass_cases()[case]
+    out = replace_dataclass_field(obj, "a", 5)
+    assert type(out) is type(obj)
+    assert out is not obj
+    assert out.a == 5
+    for f in dataclasses.fields(obj):
+        if f.name != "a":
+            assert getattr(out, f.name) == getattr(obj, f.name)
+    assert obj.a.tolist() == [1.0, 1.0]
+
+
+def test_set_at_path_does_not_change_a_shared_frozen_dataclass():
     import dataclasses
 
     @dataclasses.dataclass(frozen=True)
     class Frozen:
         a: object
 
-    tree = {"f": Frozen(np.ones(2))}
-    out = set_at_path(tree, {"f.a": 5})
-    assert type(out["f"]) is Frozen
-    assert out["f"].a == 5
-    assert tree["f"].a.tolist() == [1.0, 1.0]
+    shared = Frozen(1)
+    out = set_at_path({"x": shared, "y": shared}, {"x.a": 2})
+    assert (out["x"].a, out["y"].a) == (2, 1)
+
+
+def test_set_at_path_recomputes_cached_properties_of_frozen_dataclasses():
+    import dataclasses
+    import functools
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        a: int
+
+        @functools.cached_property
+        def doubled(self):
+            return 2 * self.a
+
+    obj = Frozen(1)
+    assert obj.doubled == 2
+    out = set_at_path({"f": obj}, {"f.a": 5})["f"]
+    assert out.doubled == 10
+
+
+def test_set_at_path_refuses_frozen_dataclasses_it_cannot_rebuild():
+    import dataclasses
+
+    @dataclasses.dataclass(frozen=True)
+    class Stash:
+        a: object
+
+        def __post_init__(self):
+            object.__setattr__(self, "extra", "not a field")
+
+    with pytest.raises(TypeError, match=r"not dataclass fields \(extra\)"):
+        set_at_path({"f": Stash(1)}, {"f.a": 2})

@@ -3,6 +3,8 @@
 
 """Tests for tesseract_core.runtime.jax_recipes."""
 
+import dataclasses
+import functools
 import os
 import subprocess
 import sys
@@ -310,13 +312,58 @@ class TestCacheCorrectness:
 
         @eqx.filter_jit
         def apply_jit(inputs):
-            return {"p": [_Pair(2.0 * inputs["x"], 3.0 * inputs["x"])]}
+            return {"p": [_Box(2.0 * inputs["x"], 3.0 * inputs["x"])]}
 
         inp = Inputs(x=np.ones(2, dtype=np.float32))
         jax_apply(apply_jit, inp)
         set_jax_vjp_cache_size(1)
         try:
-            with pytest.raises(TypeError, match=r"_Pair at p\.\[0\]"):
+            with pytest.raises(TypeError, match=r"_Box at p\.\[0\]"):
+                jax_apply(apply_jit, inp)
+        finally:
+            set_jax_vjp_cache_size(0)
+
+    @pytest.mark.parametrize("container", ["module", "registered dataclass"])
+    def test_cache_hit_with_dataclass_output(self, monkeypatch, container):
+        """Modules and dataclasses registered as pytrees are rebuilt from their fields."""
+
+        class Inputs(BaseModel):
+            x: Differentiable[Array[(None,), Float32]]
+
+        out_type = _Pair if container == "module" else _RegisteredPair
+
+        @eqx.filter_jit
+        def apply_jit(inputs):
+            return {"p": out_type(2.0 * inputs["x"], 3.0 * inputs["x"])}
+
+        def no_fallback(*args, **kwargs):
+            raise AssertionError("vjp missed the cache")
+
+        inp = Inputs(x=np.ones(2, dtype=np.float32))
+        ct = {"p.b": np.ones(2, dtype=np.float32)}
+        set_jax_vjp_cache_size(1)
+        try:
+            jax_apply(apply_jit, inp)
+            monkeypatch.setattr(jax_recipes, "_vjp_jit", no_fallback)
+            got = jax_vjp(apply_jit, inp, {"x"}, {"p.b"}, ct)
+        finally:
+            set_jax_vjp_cache_size(0)
+        np.testing.assert_allclose(np.asarray(got["x"]), [3.0, 3.0])
+
+    def test_cache_rejects_dataclasses_it_cannot_rebuild(self):
+        """A frozen dataclass holding more than its fields fails in jax_apply."""
+
+        class Inputs(BaseModel):
+            x: Differentiable[Array[(None,), Float32]]
+
+        @eqx.filter_jit
+        def apply_jit(inputs):
+            return {"p": _StashingPair(2.0 * inputs["x"], 3.0 * inputs["x"])}
+
+        inp = Inputs(x=np.ones(2, dtype=np.float32))
+        set_jax_vjp_cache_size(1)
+        try:
+            with pytest.raises(TypeError, match=r"_StashingPair at p with attributes"):
                 jax_apply(apply_jit, inp)
         finally:
             set_jax_vjp_cache_size(0)
@@ -652,3 +699,43 @@ class _TwoOutputs(NamedTuple):
 class _Pair(eqx.Module):
     a: Any
     b: Any
+
+    def __init__(self, a, b):  # a custom __init__, which a rebuild must not call
+        self.a = a
+        self.b = b
+
+
+@functools.partial(
+    jax.tree_util.register_dataclass, data_fields=["a", "b"], meta_fields=[]
+)
+@dataclasses.dataclass(frozen=True)
+class _RegisteredPair:
+    a: Any
+    b: Any
+
+
+@functools.partial(
+    jax.tree_util.register_dataclass, data_fields=["a", "b"], meta_fields=[]
+)
+@dataclasses.dataclass(frozen=True)
+class _StashingPair:
+    a: Any
+    b: Any
+
+    def __post_init__(self):
+        object.__setattr__(self, "note", "not a field")
+
+
+@jax.tree_util.register_pytree_node_class
+class _Box:
+    """A pytree container that is not a dataclass."""
+
+    def __init__(self, a, b):
+        self.a, self.b = a, b
+
+    def tree_flatten(self):
+        return (self.a, self.b), None
+
+    @classmethod
+    def tree_unflatten(cls, aux, children):
+        return cls(*children)

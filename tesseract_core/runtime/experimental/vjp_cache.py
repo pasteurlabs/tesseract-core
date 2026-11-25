@@ -3,7 +3,7 @@
 
 
 def set_jax_vjp_cache_size(size: int) -> None:
-    """Enable or resize the VJP residual cache, discarding existing entries.
+    r"""Enable or resize the VJP residual cache, discarding existing entries.
 
     **Experimental.** The cache is opt-in and disabled by default; its
     performance characteristics are problem-dependent (see below) and the
@@ -33,11 +33,12 @@ def set_jax_vjp_cache_size(size: int) -> None:
         them): JAX drops the ``apply()`` call, so nothing fills the cache.
 
     **Supported outputs.** With the cache enabled, ``apply`` may only nest its
-    outputs in dicts, lists, tuples and NamedTuples, because a cache hit
-    rebuilds the cotangent in the same structure. Any other pytree container
-    (for example an ``equinox.Module`` or a dataclass registered as a pytree)
-    makes ``jax_apply`` raise a ``TypeError``; such outputs work with the
-    cache disabled.
+    outputs in dicts, lists, tuples, NamedTuples and dataclasses (including
+    ``equinox.Module``\ s and dataclasses registered as pytrees), because a
+    cache hit rebuilds the cotangent in the same structure. A frozen dataclass
+    is rebuilt from its fields without calling ``__init__``, so it must not
+    hold other attributes. Any other pytree container makes ``jax_apply`` raise
+    a ``TypeError``; such outputs work with the cache disabled.
 
     Args:
         size: Number of cache slots. ``0`` (the default) disables caching
