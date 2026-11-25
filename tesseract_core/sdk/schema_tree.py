@@ -571,7 +571,11 @@ def _join(path: str, segment: str) -> str:
 
 
 def iter_nodes(schema: SchemaNode) -> Iterator[SchemaNode]:
-    """Yield ``schema`` and every node below it, parents before children."""
+    """Yield ``schema`` and every node below it, parents before children.
+
+    Similar to :func:`ast.walk`. A ``$ref`` used in several places is a single
+    shared node, so it is yielded once per use.
+    """
     yield schema
     for child in schema._children().values():
         yield from iter_nodes(child)
