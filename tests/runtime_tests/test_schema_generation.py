@@ -1515,3 +1515,63 @@ def test_containers_with_unresolvable_annotations_are_leaves():
     InputSchema, _ = create_apply_schema(Model, Model)
     value = InputSchema.model_validate({"inputs": {"holder": {"local": {"n": 1}}}})
     assert value.inputs.holder.local.n == 1
+
+
+def test_rebuilt_dataclass_fields_keep_their_options():
+    """A re-declared field keeps its default or default factory."""
+    from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
+
+    @dataclasses.dataclass
+    class Settings:
+        count: int = 3
+        tags: list = dataclasses.field(default_factory=list)
+
+    class Model(BaseModel):
+        settings: Settings
+
+    Retyped = apply_function_to_model_tree(
+        Model, lambda t, _: float if t is int else (tuple if t is list else t)
+    )
+    new = Retyped.model_fields["settings"].annotation
+    assert issubclass(new, Settings)
+    assert {f.name: f.type for f in dataclasses.fields(new)} == {
+        "count": float,
+        "tags": tuple,
+    }
+    assert new().count == 3
+    assert new().tags == []
+
+
+def test_containers_left_without_fields_are_dropped():
+    """A NamedTuple or TypedDict whose every field is removed is removed itself."""
+    from typing import NamedTuple
+
+    from typing_extensions import TypedDict
+
+    from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
+    from tesseract_core.runtime.schema_types import (
+        PydanticArrayAnnotation,
+        safe_issubclass,
+    )
+
+    A = Array[(None,), Float32]
+
+    class OnlyArrayTuple(NamedTuple):
+        a: A
+
+    class OnlyArrayDict(TypedDict):
+        a: A
+
+    class Outer(NamedTuple):
+        inner_tuple: OnlyArrayTuple
+        inner_dict: OnlyArrayDict
+        n: int
+
+    class Model(BaseModel):
+        outer: Outer
+
+    Stripped = apply_function_to_model_tree(
+        Model,
+        lambda t, _: None if safe_issubclass(t, PydanticArrayAnnotation) else t,
+    )
+    assert Stripped.model_fields["outer"].annotation._fields == ("n",)

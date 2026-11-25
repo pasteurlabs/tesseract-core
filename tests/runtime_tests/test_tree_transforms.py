@@ -997,3 +997,25 @@ def test_set_at_path_refuses_frozen_dataclasses_it_cannot_rebuild():
 
     with pytest.raises(TypeError, match=r"not dataclass fields \(extra\)"):
         set_at_path({"f": Stash(1)}, {"f.a": 2})
+
+
+def test_replace_dataclass_field_keeps_metadata_and_unset_fields():
+    import dataclasses
+
+    from tesseract_core.runtime.tree_transforms import replace_dataclass_field
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        a: object
+        late: int = dataclasses.field(init=False)
+
+        def __post_init__(self):
+            # Dunder metadata, as functools.wraps would set, is carried over
+            object.__setattr__(self, "__wrapped__", print)
+
+    out = replace_dataclass_field(Frozen(1), "a", 2)
+    assert out.a == 2
+    assert out.__wrapped__ is print
+    assert not hasattr(out, "late")  # never set on the original either
+    with pytest.raises(AttributeError, match="'nope' is not a field of Frozen"):
+        replace_dataclass_field(out, "nope", 3)
