@@ -7,8 +7,8 @@ was generated from. :func:`parse` turns that schema into a tree of
 plain dataclasses, one per kind of type pydantic emits, so client code can ask
 where a payload's arrays are and what shape and dtype they should have without
 re-implementing JSON Schema traversal. :func:`map` maps a function
-over a payload's leaves alongside that tree, and :func:`iter_nodes` lists its
-nodes.
+over a payload's leaves alongside that tree, :func:`iter_nodes` lists its
+nodes, and :func:`fold` computes a value from them, children first.
 
 Every node keeps the (resolved) JSON Schema it was parsed from as ``schema``,
 for constraints that aren't modelled here, such as ``minimum`` or
@@ -35,6 +35,7 @@ __all__ = [
     "SequenceSchema",
     "UnionSchema",
     "UnsupportedSchema",
+    "fold",
     "iter_nodes",
     "map",
     "map_with_path",
@@ -581,13 +582,25 @@ def iter_nodes(schema: SchemaNode) -> Iterator[SchemaNode]:
         yield from iter_nodes(child)
 
 
-def _fold_schema(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
-    """Call ``func(node, results)`` on every node, children first.
+def fold(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
+    """Compute a value for ``schema`` from the values computed for its children.
 
-    ``results`` maps each of ``node._children()``'s keys to the value
-    ``func`` returned for that child.
+    ``func(node, results)`` is called on every node, children first, and the
+    value it returns for ``schema`` itself is the result. ``results`` holds
+    what ``func`` returned for each child of ``node``, keyed by:
+
+    - property name, for an :class:`ObjectSchema`'s ``properties``;
+    - position, for a :class:`SequenceSchema`'s ``prefix`` or a
+      :class:`UnionSchema`'s ``members``;
+    - ``...``, for any other key or item (``additional`` or ``items``).
+
+    Other nodes have no children, so ``results`` is empty for them. Every
+    child is computed, including union members ``func`` then ignores.
+
+    For example, an example payload for a schema (see ``_example``), or the
+    paths of its differentiable arrays.
     """
-    results = {k: _fold_schema(func, c) for k, c in schema._children().items()}
+    results = {k: fold(func, c) for k, c in schema._children().items()}
     return func(schema, results)
 
 
@@ -598,7 +611,7 @@ def _example(schema: SchemaNode, seed: int = 42) -> Any:
     open), base64-encoded, with every dimension of size 1 so it broadcasts to
     any fixed size.
     """
-    return _fold_schema(partial(_example_of, np.random.RandomState(seed)), schema)
+    return fold(partial(_example_of, np.random.RandomState(seed)), schema)
 
 
 def _example_of(rng: np.random.RandomState, node: SchemaNode, results: dict) -> Any:
