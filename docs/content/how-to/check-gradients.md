@@ -72,11 +72,11 @@ Here the VJP returns `3 * x * cotangent` where it should return `2 * x * cotange
 First 2 failures:
   Input path: 'x', Output path: 'y', Index: (0,)
   vector_jacobian_product value: [3. 0. 0.]
-  Finite difference value: [2.0003319 0.        0.       ]
+  Finite difference value: [2. 0. 0.]
 
   Input path: 'x', Output path: 'y', Index: (1,)
   vector_jacobian_product value: [0. 6. 0.]
-  Finite difference value: [0.        3.9982796 0.       ]
+  Finite difference value: [0. 4. 0.]
 
 ❌ Some gradient checks failed ❌
 To sample the same indices again, rerun with seed 3735928559.
@@ -88,14 +88,14 @@ If an endpoint raises an exception, the check reports it with the file and line 
 
 ## Choose a step size
 
-`--eps` (default `1e-4`) is an absolute step, applied unscaled to every input. No single step suits every problem. A step that is too large measures curvature as well as slope, while one that is too small drowns the difference in rounding error. The second problem is especially common with `float32` inputs. With `--eps 1e-7`, the correct VJP above fails:
+`--eps` (default `1e-4`) is an absolute step, applied unscaled to every input. No single step suits every problem. A step that is too large measures curvature as well as slope, while one that is too small drowns the difference in rounding error. The second problem is especially common with `float32` inputs. With `--eps 1e-7`, the correct VJP above fails at `x = 3`, where the step is below `float32` precision:
 
 ```
-  vector_jacobian_product value: [0. 4. 0.]
-  Finite difference value: [0.        2.3841858 0.       ]
+  Input path: 'x', Output path: 'y', Index: (2,)
+  Encountered exception: ValueError: 'A step of eps=1e-07 does not change input 'x' at index (2,), because it is below the precision of the input's dtype at that value. Values of its dtype are 2.38e-07 apart there, so use an eps well above that.'
 ```
 
-When finite differences come back as zero or as suspiciously round numbers, the step is too small for the input's precision. Try `1e-3` or `1e-2` for `float32`.
+A step only a few times larger than the input's precision runs, but rounding in the outputs can still dominate the difference. Try `1e-3` or `1e-2` for `float32`.
 
 Inputs whose magnitudes differ by orders of magnitude need their own steps. `--eps-for` sets one per input path and can be repeated, with every other input falling back to `--eps`:
 
