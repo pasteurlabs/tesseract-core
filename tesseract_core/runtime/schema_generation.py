@@ -97,8 +97,13 @@ def _is_namedtuple(obj: Any) -> bool:
     return isinstance(obj, type) and issubclass(obj, tuple) and hasattr(obj, "_fields")
 
 
-def _is_container(obj: Any) -> bool:
-    """Whether ``obj`` is a NamedTuple, dataclass or TypedDict class."""
+def _has_fields(obj: Any) -> bool:
+    """Whether ``obj`` is a NamedTuple, dataclass or TypedDict class.
+
+    These have a fixed set of named fields, unlike generics such as
+    ``list[...]``, whose children come from type arguments. Pydantic models
+    have fields too but are handled separately. Instances return False.
+    """
     return isinstance(obj, type) and (
         _is_namedtuple(obj) or dataclasses.is_dataclass(obj) or is_typeddict(obj)
     )
@@ -333,7 +338,7 @@ def apply_function_to_model_tree(
                 __base__=treeobj,
             )
 
-        elif _is_container(treeobj):
+        elif _has_fields(treeobj):
             # Recurse into NamedTuples, dataclasses and TypedDicts. A NamedTuple is
             # sent and received as a list, so its items are pathed by position
             # ("nt.[0]"), like a tuple's; the others' fields are pathed by name
