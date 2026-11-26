@@ -145,17 +145,27 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
         method, idx = path_to_index_op(key)
         if method in ("seq", "dict"):
             child = _set_recursive(tree[idx], path, value) if path else value
-            return _replace_child(tree, idx, child)
+            if isinstance(tree, tuple):
+                # Tuples cannot be assigned to, so rebuild this one, as the same type
+                items = (*tree[:idx], child, *tree[idx + 1 :])
+                return type(tree)(*items) if hasattr(tree, "_fields") else items
+            tree[idx] = child
+            return tree
         elif method == "getattr":
             if isinstance(tree, dict):
                 # Dumped models are dicts, so look up keys before attributes like dict.values
-                child = _set_recursive(tree[key], path, value) if path else value
-                return _replace_child(tree, key, child)
+                tree[key] = _set_recursive(tree[key], path, value) if path else value
+                return tree
             elif hasattr(tree, key):
                 child = (
                     _set_recursive(getattr(tree, key), path, value) if path else value
                 )
-                return _replace_attribute(tree, key, child)
+                if isinstance(tree, tuple) and hasattr(tree, "_fields"):
+                    return tree._replace(**{key: child})
+                if dataclasses.is_dataclass(tree):
+                    return _replace_dataclass_field(tree, key, child)
+                setattr(tree, key, child)
+                return tree
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -199,25 +209,6 @@ def path_children(tree: Any, *, root: bool = False) -> list[tuple[str, Any]]:
         f"A {type(tree).__name__} cannot be rebuilt; only dicts, lists, tuples and "
         "dataclasses can."
     )
-
-
-def _replace_child(tree: Any, key: Any, child: Any) -> Any:
-    """``tree`` with the item at ``key`` set to ``child``, rebuilding a tuple."""
-    if isinstance(tree, tuple):
-        items = (*tree[:key], child, *tree[key + 1 :])
-        return type(tree)(*items) if hasattr(tree, "_fields") else items
-    tree[key] = child
-    return tree
-
-
-def _replace_attribute(tree: Any, name: str, child: Any) -> Any:
-    """``tree`` with attribute ``name`` set to ``child``, rebuilding it if need be."""
-    if isinstance(tree, tuple) and hasattr(tree, "_fields"):
-        return tree._replace(**{name: child})
-    if dataclasses.is_dataclass(tree):
-        return _replace_dataclass_field(tree, name, child)
-    setattr(tree, name, child)
-    return tree
 
 
 def _attributes_preventing_rebuild(obj: Any) -> set[str]:
