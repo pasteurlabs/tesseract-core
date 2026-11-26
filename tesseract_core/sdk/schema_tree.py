@@ -21,7 +21,7 @@ import base64
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 
@@ -582,7 +582,12 @@ def iter_nodes(schema: SchemaNode) -> Iterator[SchemaNode]:
         yield from iter_nodes(child)
 
 
-def fold(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
+Result = TypeVar("Result")
+
+
+def fold(
+    func: Callable[[SchemaNode, dict[Any, Result]], Result], schema: SchemaNode
+) -> Result:
     """Build a value from ``schema`` bottom-up, one node at a time.
 
     For work on the schema alone, with no payload to walk (for that, see
@@ -590,6 +595,16 @@ def fold(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
     arrays are. ``fold`` does the recursion: ``func`` only says how to turn one
     node, plus the values already built for its children, into that node's
     value.
+
+    Every child is built before its parent sees it, including union members
+    ``func`` then ignores, and a ``$ref`` used in several places is built once
+    per use.
+
+    This is a tree fold, like Haskell's ``Data.Tree.foldTree``, rather than a
+    list fold such as :func:`functools.reduce`. There is no initial value:
+    ``func`` called on a node without children (``results`` empty) is the base
+    case. For a flat total, such as counting arrays, ``functools.reduce`` over
+    :func:`iter_nodes` is enough; ``fold`` is for results shaped by the tree.
 
     Args:
         func: Called as ``func(node, results)`` on every node, after it has
@@ -609,11 +624,8 @@ def fold(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
         schema: The parsed schema, from :func:`parse`.
 
     Returns:
-        What ``func`` returned for ``schema`` itself.
-
-    Every child is built before its parent sees it, including union members
-    ``func`` then ignores, and a ``$ref`` used in several places is built once
-    per use.
+        What ``func`` returned for ``schema`` itself, so ``fold`` returns
+        whatever type ``func`` does.
 
     Example:
         The deepest nesting in a schema, counting ``schema`` itself as 1::
