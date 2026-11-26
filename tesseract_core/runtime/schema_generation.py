@@ -119,10 +119,10 @@ def _without_required(annotation: Any) -> Any:
 def _container_hints(cls: type) -> dict[str, Any] | None:
     """The field annotations of container ``cls``, keeping ``Annotated`` metadata.
 
-    Returns None, with a warning, if they can't be resolved: pydantic resolves
-    some forward references that ``get_type_hints`` can't, such as names
-    defined inside a function. The container is then left as a single value,
-    as it was before containers were recursed into.
+    Returns None, with a warning, if they can't be resolved, and the container
+    is then treated as a single leaf. This happens for some forward references
+    that pydantic resolves but ``get_type_hints`` can't, such as names defined
+    inside a function.
     """
     try:
         hints = get_type_hints(cls, include_extras=True)
@@ -142,47 +142,34 @@ def _container_hints(cls: type) -> dict[str, Any] | None:
 
 def _rebuild_container(
     cls: type, hints: dict[str, Any], new_types: dict[str, Any], name: str
-) -> type | None:
-    """A container like ``cls`` with its fields' types replaced (``None`` drops one).
-
-    ``cls`` itself is returned if nothing changed, and None if every field is
-    dropped.
-    """
-    kept = {k: t for k, t in new_types.items() if t is not None}
-    if not kept:
-        return None
-    if kept == hints:
+) -> type:
+    """A container like ``cls`` with new field types, or ``cls`` itself if none changed."""
+    if new_types == hints:
         return cls
     if _is_namedtuple(cls):
-        return _rebuild_namedtuple(cls, kept, name)
+        return _rebuild_namedtuple(cls, new_types, name)
     if dataclasses.is_dataclass(cls):
-        return _rebuild_dataclass(cls, hints, kept, name)
-    return _rebuild_typeddict(cls, kept, name)
+        return _rebuild_dataclass(cls, hints, new_types, name)
+    return _rebuild_typeddict(cls, new_types, name)
 
 
-def _rebuild_namedtuple(cls: type, kept: dict[str, Any], name: str) -> type:
-    new = NamedTuple(name, list(kept.items()))
-    defaults = {k: v for k, v in cls._field_defaults.items() if k in kept}
-    if defaults:
-        # Defaults are always the trailing fields of a NamedTuple
-        new.__new__.__defaults__ = tuple(defaults.values())
-        new._field_defaults = defaults
+def _rebuild_namedtuple(cls: type, new_types: dict[str, Any], name: str) -> type:
+    new = NamedTuple(name, list(new_types.items()))
+    new.__new__.__defaults__ = cls.__new__.__defaults__
+    new._field_defaults = dict(cls._field_defaults)
     new.__module__ = cls.__module__
     return new
 
 
 def _rebuild_dataclass(
-    cls: type, hints: dict[str, Any], kept: dict[str, Any], name: str
+    cls: type, hints: dict[str, Any], new_types: dict[str, Any], name: str
 ) -> type:
     """A subclass of dataclass ``cls`` that re-declares the fields whose types changed.
 
     Subclassing keeps the original's methods and ``isinstance`` checks, as for
-    pydantic models. A dropped field cannot be removed from a subclass, so it
-    is inherited unchanged.
+    pydantic models.
     """
-    changed = {k: t for k, t in kept.items() if t != hints[k]}
-    if not changed:
-        return cls
+    changed = {k: t for k, t in new_types.items() if t != hints[k]}
     fields = {f.name: f for f in dataclasses.fields(cls)}
     namespace: dict[str, Any] = {
         "__annotations__": changed,
@@ -206,10 +193,10 @@ def _rebuild_dataclass(
     return new
 
 
-def _rebuild_typeddict(cls: type, kept: dict[str, Any], name: str) -> type:
+def _rebuild_typeddict(cls: type, new_types: dict[str, Any], name: str) -> type:
     fields = {
         k: Required[t] if k in cls.__required_keys__ else NotRequired[t]
-        for k, t in kept.items()
+        for k, t in new_types.items()
     }
     # pydantic needs typing_extensions' TypedDict before Python 3.12
     new = ExtTypedDict(name, fields)
@@ -233,9 +220,209 @@ def _wrap_default_factory(
     return wrapped
 
 
+@dataclasses.dataclass(frozen=True)
+class _RebuildOptions:
+    """How ``apply_function_to_model_tree`` rebuilds models and containers."""
+
+    model_prefix: str
+    default_model_config: dict[str, Any]
+    make_default_converter: Callable[[Any, Any], Callable[[Any], Any] | None] | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _SplitAnnotation:
+    """An annotation split into the annotations it contains.
+
+    Each child comes with the path segments that lead to it.
+    ``rebuild`` makes the annotation again from new children, in the same order.
+    """
+
+    children: list[tuple[tuple, Any]]
+    rebuild: Callable[[list[Any], _RebuildOptions], Any]
+
+
+def _split_model(annotation: Any) -> _SplitAnnotation | None:
+    if not safe_issubclass(annotation, BaseModel):
+        return None
+    fields = annotation.model_fields
+    old_types = [
+        _construct_annotated(field.annotation, field.metadata)
+        for field in fields.values()
+    ]
+
+    def rebuild(new_types: list[Any], opts: _RebuildOptions) -> type[BaseModel]:
+        new_fields = {}
+        for (name, field), old_type, new_type in zip(
+            fields.items(), old_types, new_types, strict=True
+        ):
+            new_field = copy(field)
+            # Need to strip off metadata to trigger re-evaluation of the field
+            new_field.metadata = []
+            convert = None
+            if opts.make_default_converter is not None and not field.is_required():
+                convert = opts.make_default_converter(old_type, new_type)
+            if convert is not None:
+                if field.default_factory is not None:
+                    new_field.default_factory = _wrap_default_factory(
+                        field.default_factory, convert
+                    )
+                else:
+                    new_field.default = convert(field.default)
+            new_fields[name] = (new_type, new_field)
+
+        # Only override model_config if it is not already present
+        # in the pydantic model definition
+        model_config = ConfigDict(**opts.default_model_config)
+        model_config.update(annotation.model_config)
+
+        # Make sure that reconstructed RootModels don't contain unsupported 'extra' config.
+        if safe_issubclass(annotation, RootModel):
+            model_config.pop("extra", None)
+
+        return create_model(
+            f"{opts.model_prefix}{annotation.__name__}",
+            **new_fields,
+            model_config=(ConfigDict, model_config),
+            __base__=annotation,
+        )
+
+    return _SplitAnnotation(
+        [((name,), t) for name, t in zip(fields, old_types, strict=True)], rebuild
+    )
+
+
+def _split_fields(annotation: Any) -> _SplitAnnotation | None:
+    if not _has_fields(annotation):
+        return None
+    hints = _container_hints(annotation)
+    if hints is None:
+        return None
+
+    def rebuild(new_types: list[Any], opts: _RebuildOptions) -> type:
+        return _rebuild_container(
+            annotation,
+            hints,
+            dict(zip(hints, new_types, strict=True)),
+            f"{opts.model_prefix}{annotation.__name__}",
+        )
+
+    # A NamedTuple is sent and received as a list, so its items are pathed by
+    # position ("nt.[0]"), like a tuple's. The fields of dataclasses and
+    # TypedDicts are pathed by name ("dc.a"), like a model's.
+    by_position = _is_namedtuple(annotation)
+    return _SplitAnnotation(
+        [
+            ((SEQ_INDEX_SENTINEL,) if by_position else (key,), t)
+            for key, t in hints.items()
+        ],
+        rebuild,
+    )
+
+
+def _split_annotated(annotation: Any) -> _SplitAnnotation | None:
+    if not _is_annotated(annotation):
+        return None
+    # __origin__ and __metadata__ instead of get_args for compatibility with
+    # typing_extensions.Annotated
+    metadata = annotation.__metadata__
+    return _SplitAnnotation(
+        [((), annotation.__origin__)],
+        lambda new, _: _construct_annotated(new[0], metadata),
+    )
+
+
+def _split_union(annotation: Any) -> _SplitAnnotation | None:
+    # Optional[X] is a Union too
+    if not any(get_origin(annotation) is t for t in UNION_TYPES):
+        return None
+    return _SplitAnnotation(
+        [((), arg) for arg in get_args(annotation)],
+        lambda new, _: Union[tuple(new)],  # noqa: UP007
+    )
+
+
+def _split_mapping(annotation: Any) -> _SplitAnnotation | None:
+    origin = get_origin(annotation)
+    if not safe_issubclass(origin, Mapping) or not get_args(annotation):
+        return None
+    key_type, value_type = get_args(annotation)
+    return _SplitAnnotation(
+        [((DICT_INDEX_SENTINEL,), value_type)],
+        lambda new, _: origin[key_type, new[0]],
+    )
+
+
+def _split_iterable(annotation: Any) -> _SplitAnnotation | None:
+    # list, set, tuple and the like
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if not safe_issubclass(origin, Iterable) or not args:
+        return None
+    # The ... in tuple[X, ...] marks a variable-length tuple and is not an item type
+    item_types = [arg for arg in args if arg is not Ellipsis]
+
+    def rebuild(new_types: list[Any], _: _RebuildOptions) -> Any:
+        new_items = iter(new_types)
+        return origin[
+            tuple(arg if arg is Ellipsis else next(new_items) for arg in args)
+        ]
+
+    return _SplitAnnotation([((SEQ_INDEX_SENTINEL,), t) for t in item_types], rebuild)
+
+
+# Tried in order until one returns a node. Annotations that none of them split
+# are leaves.
+_SPLITTERS: list[Callable[[Any], _SplitAnnotation | None]] = [
+    _split_model,
+    _split_fields,
+    _split_annotated,
+    _split_union,
+    _split_mapping,
+    _split_iterable,
+]
+
+
+def _split(
+    annotation: Any, path: tuple, enclosing_ids: frozenset[int]
+) -> _SplitAnnotation | None:
+    """Split ``annotation`` into its children, or return None for a leaf.
+
+    ``enclosing_ids`` holds the ids of the annotations that contain this one.
+    """
+    if id(annotation) in enclosing_ids:
+        if safe_issubclass(annotation, BaseModel):
+            raise ValueError(
+                f"Recursive model definition detected at path {list(path)}: "
+                f"{annotation.__name__}. Recursive models are not supported as "
+                "Tesseract schemas."
+            )
+        # A container nested inside itself is a leaf where it reappears
+        return None
+    for splitter in _SPLITTERS:
+        node = splitter(annotation)
+        if node is not None:
+            return node
+    return None
+
+
+def _iter_tree(
+    annotation: Any, path: tuple = (), enclosing_ids: frozenset[int] = frozenset()
+) -> Iterable[tuple[tuple, Any, _SplitAnnotation | None]]:
+    """Yield ``(path, annotation, node)`` for every annotation in the tree, parents first.
+
+    ``node`` is None for leaves.
+    """
+    node = _split(annotation, path, enclosing_ids)
+    yield path, annotation, node
+    if node is not None:
+        inner = enclosing_ids | {id(annotation)}
+        for segments, child in node.children:
+            yield from _iter_tree(child, (*path, *segments), inner)
+
+
 def apply_function_to_model_tree(
     Schema: type[BaseModel],
-    func: Callable[[type, tuple], type],
+    func: Callable[[Any, tuple], Any],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
     make_default_converter: Callable[[Any, Any], Callable[[Any], Any] | None]
@@ -243,190 +430,32 @@ def apply_function_to_model_tree(
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
-    A leaf is any type annotation that is not a Pydantic model or a container type.
-
-    The given function should take two arguments: the type annotation and the path to it
-    in the model tree (as a list of field names). It should return the new type annotation
-    for the field, or None to remove the field from the model.
+    A leaf is any annotation that isn't a Pydantic model or a container. ``func`` is
+    called as ``func(annotation, path)`` and returns the leaf's new annotation. A path
+    is a tuple of field names and sentinels. For example, the ``int`` in
+    ``a: list[dict[str, int]]`` has path ``("a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL)``.
 
     If given, make_default_converter is called as
     ``make_default_converter(old_type, new_type)`` for every field that has a default,
     when the model is built. It returns a function mapping the old default to the new
     one, or None to keep the default as is. A ``default=`` is converted right away,
     and a ``default_factory=`` is wrapped so that each value it produces is converted.
-
-    The notion of path is used to handle nested models and containers. For example, given
-    a model like this:
-
-    class MyModel(BaseModel):
-        a: list[dict[str, int]]
-
-    The path to the field "a" would be ["a"], and the path to the int type would be
-    ["a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL].
     """
-    if default_model_config is None:
-        default_model_config = {}
+    opts = _RebuildOptions(
+        model_prefix, default_model_config or {}, make_default_converter
+    )
 
-    seen_models = set()
-    seen_containers = set()
+    def visit(annotation: Any, path: tuple, enclosing_ids: frozenset[int]) -> Any:
+        node = _split(annotation, path, enclosing_ids)
+        if node is None:
+            return func(annotation, path)
+        inner = enclosing_ids | {id(annotation)}
+        new_children = [
+            visit(child, (*path, *segments), inner) for segments, child in node.children
+        ]
+        return node.rebuild(new_children, opts)
 
-    def _recurse_over_model_tree(treeobj: Any, path: list[str]) -> Any:
-        # Get the origin type of the annotation, e.g. List for List[int]
-        origin_type = get_origin(treeobj)
-        deprecated_types = ["List", "Dict", "Set", "FrozenSet", "Tuple"]
-
-        if origin_type is not None and origin_type.__name__ in deprecated_types:
-            # Raise error if the user tries to use a deprecated type
-            raise TypeError(
-                f"'{origin_type}' annotation deprecated. Use '{origin_type.lower()}' instead."
-            )
-
-        if safe_issubclass(treeobj, BaseModel):
-            # Recurse into (nested) pydantic models
-
-            if id(treeobj) in seen_models:
-                raise ValueError(
-                    f"Recursive model definition detected at path {path}: {treeobj.__name__}. "
-                    "Recursive models are not supported as Tesseract schemas."
-                )
-            seen_models.add(id(treeobj))
-
-            new_fields = {}
-
-            for field_name, field in treeobj.model_fields.items():
-                field_type = field.annotation
-                if field.metadata:
-                    field_type = _construct_annotated(field_type, field.metadata)
-
-                field_path = [*path, field_name]
-                new_type = _recurse_over_model_tree(field_type, field_path)
-                if new_type is None:
-                    continue
-
-                new_field = copy(field)
-                # Need to strip off metadata to trigger re-evaluation of the field
-                new_field.metadata = []
-                convert = None
-                if make_default_converter is not None and not field.is_required():
-                    convert = make_default_converter(field_type, new_type)
-                if convert is not None:
-                    if field.default_factory is not None:
-                        new_field.default_factory = _wrap_default_factory(
-                            field.default_factory, convert
-                        )
-                    else:
-                        new_field.default = convert(field.default)
-
-                new_fields[field_name] = (new_type, new_field)
-
-            # We only forbid encountering the same model twice if it is within the same subtree
-            seen_models.remove(id(treeobj))
-
-            # Only override model_config if it is not already present
-            # in the pydantic model definition
-            model_config = ConfigDict(**default_model_config)
-            model_config.update(treeobj.model_config)
-
-            # Make sure that reconstructed RootModels don't contain unsupported 'extra' config.
-            if safe_issubclass(treeobj, RootModel):
-                model_config.pop("extra", None)
-
-            return create_model(
-                f"{model_prefix}{treeobj.__name__}",
-                **new_fields,
-                model_config=(ConfigDict, model_config),
-                __base__=treeobj,
-            )
-
-        elif _has_fields(treeobj):
-            # Recurse into NamedTuples, dataclasses and TypedDicts. A NamedTuple is
-            # sent and received as a list, so its items are pathed by position
-            # ("nt.[0]"), like a tuple's; the others' fields are pathed by name
-            # ("dc.a"), like a model's.
-            if id(treeobj) in seen_containers:
-                # A container that contains itself: leave the inner one as is
-                return func(treeobj, tuple(path))
-            hints = _container_hints(treeobj)
-            if hints is None:
-                return func(treeobj, tuple(path))
-            seen_containers.add(id(treeobj))
-            try:
-                new_types = {
-                    key: _recurse_over_model_tree(
-                        t,
-                        [*path, SEQ_INDEX_SENTINEL if _is_namedtuple(treeobj) else key],
-                    )
-                    for key, t in hints.items()
-                }
-            finally:
-                seen_containers.discard(id(treeobj))
-            return _rebuild_container(
-                treeobj, hints, new_types, f"{model_prefix}{treeobj.__name__}"
-            )
-
-        elif _is_annotated(treeobj):
-            # Recurse into Annotated types by stripping off right-most (most recent) metadata
-
-            # Using __origin__ and __metadata__ instead of get_args for compatibility with typing_extensions.Annotated
-            inner_type = treeobj.__origin__
-            *other_meta, current_meta = treeobj.__metadata__
-
-            # Recurse into Annotated[inner_type, *other_meta] and re-attach current_meta to the result
-            inner_type = _construct_annotated(inner_type, other_meta)
-            new_type = _recurse_over_model_tree(inner_type, path)
-
-            if new_type is None:
-                return None
-
-            return Annotated[new_type, current_meta]
-
-        elif any(origin_type is t for t in UNION_TYPES):
-            # Recurse into Union and Optional (which is a subclass of Union)
-            args = get_args(treeobj)
-            newargs = [_recurse_over_model_tree(arg, path) for arg in args]
-            newargs = [arg for arg in newargs if arg is not None]
-            if not newargs:
-                return None
-
-            return Union[tuple(newargs)]  # noqa: UP007
-
-        elif safe_issubclass(origin_type, Mapping):
-            # Recurse into dict-likes
-            args = get_args(treeobj)
-            if not args:
-                return origin_type
-
-            key_type, value_type = args
-
-            # Append sentinel to path to indicate dict indexing occurred
-            new_path = [*path, DICT_INDEX_SENTINEL]
-
-            new_type = _recurse_over_model_tree(value_type, new_path)
-            if new_type is None:
-                return None
-
-            return origin_type[key_type, new_type]
-
-        elif safe_issubclass(origin_type, Iterable):
-            # Recurse into List, Set, Tuple
-            value_type = get_args(treeobj)
-            if not value_type:
-                return origin_type
-
-            # Append sentinel to path to indicate sequence indexing occurred
-            new_path = [*path, SEQ_INDEX_SENTINEL]
-
-            new_types = [_recurse_over_model_tree(vt, new_path) for vt in value_type]
-            new_types = [nt for nt in new_types if nt is not None]
-            if not new_types:
-                return None
-
-            return origin_type[tuple(new_types)]
-
-        # Reached a leaf -> apply func
-        return func(treeobj, tuple(path))
-
-    return _recurse_over_model_tree(Schema, [])
+    return visit(Schema, (), frozenset())
 
 
 def _path_tuple_to_str(pathtuple: tuple) -> str:
@@ -653,11 +682,9 @@ def create_abstract_eval_schema(
 def get_all_model_path_patterns(
     schema: type[BaseModel], filter_fn: Callable[[type], bool] | None = None
 ) -> dict[tuple, type]:
-    """Return a dictionary mapping path patterns to their types.
+    """Return a dictionary mapping the path of every leaf in the schema to its type.
 
-    For containers (dict, list), the path will include sentinels and map to the container's inner type.
-    For model fields, maps to the field's type.
-    For leaves (primitives, arrays), maps to the actual type.
+    Paths are as described in ``apply_function_to_model_tree``.
 
     Args:
         schema: The Pydantic model schema to traverse.
@@ -665,33 +692,27 @@ def get_all_model_path_patterns(
                    If None, includes all paths. If provided, only includes
                    paths where filter_fn(type) returns True.
     """
-    path_to_type = {}
-
-    def add_path(obj: T, path: tuple) -> T:
-        if filter_fn is None or filter_fn(obj):
-            path_to_type[path] = obj
-        return obj
-
-    apply_function_to_model_tree(schema, add_path)
-    return path_to_type
+    return {
+        path: annotation
+        for path, annotation, node in _iter_tree(schema)
+        if node is None and (filter_fn is None or filter_fn(annotation))
+    }
 
 
 def get_field_order(schema: type[BaseModel]) -> dict[tuple, list[str]]:
-    """Return a mapping {model_path: [field_names_in_declaration_order]} for every BaseModel in the tree.
+    """Return a mapping {path: [field_names_in_declaration_order]} for every object in the tree.
 
-    The root model is keyed by the empty tuple. Field names are collected as a side effect while
-    traversing leaf paths: any string at position `i` in a leaf path is a field of the model at
-    prefix `path[:i]`.
+    Objects are models, dataclasses and TypedDicts, i.e. everything sent as a JSON
+    object with fixed keys. The root model is keyed by the empty tuple. Objects at
+    the same path (e.g. the members of a Union) share one entry.
     """
     field_order_by_path: dict[tuple, dict[str, None]] = {}
-
-    def add_field(obj: T, path: tuple) -> T:
-        for i, part in enumerate(path):
-            if isinstance(part, str):
-                field_order_by_path.setdefault(path[:i], {})[part] = None
-        return obj
-
-    apply_function_to_model_tree(schema, add_field)
+    for path, _, node in _iter_tree(schema):
+        if node is None:
+            continue
+        names = [seg[0] for seg, _ in node.children if seg and isinstance(seg[0], str)]
+        if names:
+            field_order_by_path.setdefault(path, {}).update(dict.fromkeys(names))
     return {p: list(fields) for p, fields in field_order_by_path.items()}
 
 
