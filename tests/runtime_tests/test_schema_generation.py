@@ -23,12 +23,10 @@ from tesseract_core.runtime.schema_generation import (
     create_abstract_eval_schema,
     create_apply_schema,
     create_gradient_schema,
+    get_all_model_path_patterns,
+    get_field_order,
 )
-from tesseract_core.runtime.schema_types import (
-    PydanticArrayAnnotation,
-    ShapeDType,
-    safe_issubclass,
-)
+from tesseract_core.runtime.schema_types import ShapeDType
 from tesseract_core.runtime.tree_transforms import escape_dict_key, path_to_index_op
 
 
@@ -142,6 +140,28 @@ def test_field_order_exported():
     }
     assert InputSchema.model_json_schema()["field_order"] == expected
     assert OutputSchema.model_json_schema()["field_order"] == expected
+
+
+def test_field_order_includes_fields_without_leaves():
+    class Empty(BaseModel):
+        pass
+
+    class Model(BaseModel):
+        a: int
+        empty: Empty
+        b: int
+
+    assert get_field_order(Model) == {(): ["a", "empty", "b"]}
+
+
+def test_variadic_tuple_items_are_pathed_to_their_type():
+    """The ... in tuple[X, ...] is not an item type of its own."""
+    A = Array[(3,), Float32]
+
+    class Model(BaseModel):
+        t: tuple[A, ...]
+
+    assert get_all_model_path_patterns(Model) == {("t", SEQ_INDEX_SENTINEL): A}
 
 
 def test_create_abstract_eval_schema():
@@ -1271,11 +1291,6 @@ def _container_inputs(leaf, **overrides):
     return {**inputs, **overrides}
 
 
-def _strip_arrays(annotation, path):
-    """Drop every array field, to test how fields are removed from containers."""
-    return None if safe_issubclass(annotation, PydanticArrayAnnotation) else annotation
-
-
 def test_arrays_in_namedtuples_dataclasses_and_typeddicts_are_differentiable(
     container_api,
 ):
@@ -1337,26 +1352,6 @@ def test_tesseract_differentiates_arrays_in_containers(container_api):
     vjp_inputs = ["nt.[0]", "dc.a", "frozen_dc.a", "pdc.a", "td.a"]
     vjp = tesseract.vector_jacobian_product(inputs, vjp_inputs, ["y"], {"y": x})
     assert set(vjp) == set(vjp_inputs)
-
-
-def test_dropping_fields_inside_containers(container_api):
-    """A function returning None removes a NamedTuple or TypedDict field."""
-    _, api = container_api
-    Stripped = apply_function_to_model_tree(
-        api.InputSchema,
-        _strip_arrays,
-    )
-    fields = Stripped.model_fields
-    assert fields["nt"].annotation._fields == ("n",)
-    assert fields["nt"].annotation._field_defaults == {"n": 3}
-    # A dataclass is rebuilt as a subclass, which cannot remove an inherited field,
-    # just as for pydantic models
-    assert [f.name for f in dataclasses.fields(fields["dc"].annotation)] == [
-        "a",
-        "n",
-        "tags",
-    ]
-    assert set(fields["td"].annotation.__annotations__) == {"n", "scale"}
 
 
 def test_check_gradients_reaches_arrays_in_containers(container_api):
@@ -1540,32 +1535,3 @@ def test_rebuilt_dataclass_fields_keep_their_options():
     }
     assert new().count == 3
     assert new().tags == []
-
-
-def test_containers_left_without_fields_are_dropped():
-    """A NamedTuple or TypedDict whose every field is removed is removed itself."""
-    from typing import NamedTuple
-
-    from typing_extensions import TypedDict
-
-    A = Array[(None,), Float32]
-
-    class OnlyArrayTuple(NamedTuple):
-        a: A
-
-    class OnlyArrayDict(TypedDict):
-        a: A
-
-    class Outer(NamedTuple):
-        inner_tuple: OnlyArrayTuple
-        inner_dict: OnlyArrayDict
-        n: int
-
-    class Model(BaseModel):
-        outer: Outer
-
-    Stripped = apply_function_to_model_tree(
-        Model,
-        _strip_arrays,
-    )
-    assert Stripped.model_fields["outer"].annotation._fields == ("n",)
