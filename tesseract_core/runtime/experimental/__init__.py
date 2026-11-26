@@ -6,6 +6,7 @@ from .binref_passthrough import (
     BinrefWriter,
 )
 from .finite_differences import (
+    estimate_eps,
     finite_difference_jacobian,
     finite_difference_jvp,
     finite_difference_vjp,
@@ -51,6 +52,7 @@ for _obj in (
     TesseractReference,
     require_file,
     set_jax_vjp_cache_size,
+    estimate_eps,
     finite_difference_jacobian,
     finite_difference_jvp,
     finite_difference_vjp,
@@ -72,6 +74,7 @@ __all__ = [
     "LazySequence",
     "OutputPath",
     "TesseractReference",
+    "estimate_eps",
     "finite_difference_jacobian",
     "finite_difference_jvp",
     "finite_difference_vjp",
