@@ -134,6 +134,9 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
     - `a` is an attribute / key of the input tree
     - `b.[0]` is the first element of the list `b`
     - `c.{key}` is the value of the key `key` in the dictionary `c`
+
+    Containers that cannot be assigned to, such as tuples and dataclasses, are
+    rebuilt with the new value instead (see :func:`path_children`).
     """
     tree = deepcopy(tree)
 
@@ -142,33 +145,17 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
         method, idx = path_to_index_op(key)
         if method in ("seq", "dict"):
             child = _set_recursive(tree[idx], path, value) if path else value
-            if isinstance(tree, tuple):
-                # Tuples cannot be assigned to, so rebuild this one, as the same type
-                items = (*tree[:idx], child, *tree[idx + 1 :])
-                return type(tree)(*items) if hasattr(tree, "_fields") else items
-            tree[idx] = child
-            return tree
+            return _replace_child(tree, idx, child)
         elif method == "getattr":
             if isinstance(tree, dict):
                 # Dumped models are dicts, so look up keys before attributes like dict.values
-                tree[key] = _set_recursive(tree[key], path, value) if path else value
-                return tree
+                child = _set_recursive(tree[key], path, value) if path else value
+                return _replace_child(tree, key, child)
             elif hasattr(tree, key):
                 child = (
                     _set_recursive(getattr(tree, key), path, value) if path else value
                 )
-                if isinstance(tree, tuple) and hasattr(tree, "_fields"):
-                    return tree._replace(**{key: child})
-                if dataclasses.is_dataclass(tree):
-                    try:
-                        setattr(tree, key, child)
-                    except dataclasses.FrozenInstanceError:
-                        # Frozen dataclasses and equinox Modules cannot be assigned
-                        # to, so rebuild this one
-                        return replace_dataclass_field(tree, key, child)
-                    return tree
-                setattr(tree, key, child)
-                return tree
+                return _replace_attribute(tree, key, child)
             else:
                 raise AttributeError(f"Attribute {key} not found in {tree}")
         else:
@@ -181,13 +168,66 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
     return tree
 
 
-def unrebuildable_attributes(obj: Any) -> set[str]:
-    """Attributes of dataclass instance ``obj`` that a rebuild could not carry over.
+def path_children(tree: Any, *, root: bool = False) -> list[tuple[str, Any]]:
+    """The children of container ``tree`` that :func:`set_at_path` can replace.
 
-    :func:`replace_dataclass_field` rebuilds an instance from its fields. Cached
-    properties are dropped, so they are recomputed, and dunder metadata (such
-    as what ``functools.wraps`` sets) is copied. Any other attribute set on the
-    instance is returned here.
+    Each child comes with its path segment: ``[i]`` for list and tuple items,
+    ``{key}`` for dict values (plain ``key`` at the ``root``, as for model
+    fields), and the field name for dataclass fields.
+
+    Raises:
+        TypeError: If ``set_at_path`` cannot rebuild ``tree``, i.e. it is not a
+            dict, list, tuple or dataclass, or it is a dataclass with
+            attributes that keep it from being rebuilt from its fields.
+    """
+    if isinstance(tree, Mapping):
+        return [(str(k) if root else f"{{{k}}}", v) for k, v in tree.items()]
+    if isinstance(tree, list | tuple):
+        return [(f"[{i}]", v) for i, v in enumerate(tree)]
+    if dataclasses.is_dataclass(tree) and not isinstance(tree, type):
+        if extra := _attributes_preventing_rebuild(tree):
+            raise TypeError(
+                f"A {type(tree).__name__} can only be rebuilt from its fields, but it "
+                f"also has the attributes {', '.join(sorted(extra))}."
+            )
+        return [
+            (f.name, getattr(tree, f.name))
+            for f in dataclasses.fields(tree)
+            if hasattr(tree, f.name)
+        ]
+    raise TypeError(
+        f"A {type(tree).__name__} cannot be rebuilt; only dicts, lists, tuples and "
+        "dataclasses can."
+    )
+
+
+def _replace_child(tree: Any, key: Any, child: Any) -> Any:
+    """``tree`` with the item at ``key`` set to ``child``, rebuilding a tuple."""
+    if isinstance(tree, tuple):
+        items = (*tree[:key], child, *tree[key + 1 :])
+        return type(tree)(*items) if hasattr(tree, "_fields") else items
+    tree[key] = child
+    return tree
+
+
+def _replace_attribute(tree: Any, name: str, child: Any) -> Any:
+    """``tree`` with attribute ``name`` set to ``child``, rebuilding it if need be."""
+    if isinstance(tree, tuple) and hasattr(tree, "_fields"):
+        return tree._replace(**{name: child})
+    if dataclasses.is_dataclass(tree):
+        return _replace_dataclass_field(tree, name, child)
+    setattr(tree, name, child)
+    return tree
+
+
+def _attributes_preventing_rebuild(obj: Any) -> set[str]:
+    """Attributes of dataclass instance ``obj`` that keep it from being rebuilt.
+
+    A rebuild copies an instance's fields and dunder metadata (such as what
+    ``functools.wraps`` sets). Values cached by ``functools.cached_property``
+    are stored on the instance too, but aren't fields: the rebuild leaves them
+    out, so they are recomputed from the new fields. Any other attribute the
+    instance holds beyond its fields can't be carried over safely.
     """
     if not hasattr(obj, "__dict__"):
         return set()
@@ -202,28 +242,19 @@ def unrebuildable_attributes(obj: Any) -> set[str]:
     }
 
 
-def replace_dataclass_field(obj: Any, name: str, value: Any) -> Any:
+def _replace_dataclass_field(obj: Any, name: str, value: Any) -> Any:
     """A copy of dataclass instance ``obj`` with field ``name`` set to ``value``.
 
-    Like ``equinox.tree_at``, the copy is built from ``obj``'s fields without
-    calling ``__init__``, ``__post_init__`` or any validators, so it works for
-    frozen dataclasses, custom constructors and equinox Modules alike. Fields
-    derived from others are not recomputed. ``obj`` is left unchanged.
-
-    Raises:
-        AttributeError: If ``name`` is not one of ``obj``'s fields.
-        TypeError: If ``obj`` has attributes besides its fields that cannot be
-            carried over (see :func:`unrebuildable_attributes`).
+    In order to support frozen dataclasses and custom constructors, the copy is
+    built from ``obj``'s fields without calling ``__init__``, ``__post_init__``
+    or any validators, so fields derived from others are not recomputed. This
+    was partially inspired by ``equinox.tree_at``. The copy is an instance of
+    the same class, so it is as frozen as ``obj``, and ``obj`` is unchanged.
     """
     cls = type(obj)
     if name not in {f.name for f in dataclasses.fields(obj)}:
         raise AttributeError(f"{name!r} is not a field of {cls.__name__}")
-    if extra := unrebuildable_attributes(obj):
-        raise TypeError(
-            f"Cannot replace {name!r} in a {cls.__name__}: it has attributes that "
-            f"are not dataclass fields ({', '.join(sorted(extra))}), so it cannot "
-            "be rebuilt from its fields."
-        )
+    path_children(obj)  # raises if obj holds attributes that prevent a rebuild
     new = object.__new__(cls)
     if hasattr(obj, "__dict__"):
         for key, val in vars(obj).items():

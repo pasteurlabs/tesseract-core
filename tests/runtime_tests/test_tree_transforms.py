@@ -905,20 +905,6 @@ def _frozen_dataclass_cases():
         "init=False field": InitFalse(np.ones(2)),
         "slots": Slots(np.ones(2)),
     }
-    try:
-        import equinox as eqx
-    except ImportError:
-        return cases
-
-    class Module(eqx.Module):
-        a: object
-        scale: float
-
-        def __init__(self, a, factor=2.0):
-            self.a = a
-            self.scale = factor
-
-    cases["equinox Module"] = Module(np.ones(2))
     return cases
 
 
@@ -931,24 +917,8 @@ def test_set_at_path_rebuilds_frozen_dataclasses(case):
     out = set_at_path({"f": obj}, {"f.a": 5})["f"]
     assert type(out) is type(obj)
     assert out.a == 5
-    for f in dataclasses.fields(obj):
-        if f.name != "a":
-            assert getattr(out, f.name) == getattr(obj, f.name)
-    assert obj.a.tolist() == [1.0, 1.0]
-
-
-@pytest.mark.parametrize("case", list(_frozen_dataclass_cases()))
-def test_replace_dataclass_field_without_calling_init(case):
-    """The rebuild set_at_path falls back to when assignment is refused."""
-    import dataclasses
-
-    from tesseract_core.runtime.tree_transforms import replace_dataclass_field
-
-    obj = _frozen_dataclass_cases()[case]
-    out = replace_dataclass_field(obj, "a", 5)
-    assert type(out) is type(obj)
-    assert out is not obj
-    assert out.a == 5
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        out.a = 6  # still frozen
     for f in dataclasses.fields(obj):
         if f.name != "a":
             assert getattr(out, f.name) == getattr(obj, f.name)
@@ -995,14 +965,12 @@ def test_set_at_path_refuses_frozen_dataclasses_it_cannot_rebuild():
         def __post_init__(self):
             object.__setattr__(self, "extra", "not a field")
 
-    with pytest.raises(TypeError, match=r"not dataclass fields \(extra\)"):
+    with pytest.raises(TypeError, match="also has the attributes extra"):
         set_at_path({"f": Stash(1)}, {"f.a": 2})
 
 
-def test_replace_dataclass_field_keeps_metadata_and_unset_fields():
+def test_set_at_path_rebuild_keeps_metadata_and_unset_fields():
     import dataclasses
-
-    from tesseract_core.runtime.tree_transforms import replace_dataclass_field
 
     @dataclasses.dataclass(frozen=True)
     class Frozen:
@@ -1013,9 +981,48 @@ def test_replace_dataclass_field_keeps_metadata_and_unset_fields():
             # Dunder metadata, as functools.wraps would set, is carried over
             object.__setattr__(self, "__wrapped__", print)
 
-    out = replace_dataclass_field(Frozen(1), "a", 2)
+        @property
+        def doubled(self):
+            return 2 * self.a
+
+    out = set_at_path({"f": Frozen(1)}, {"f.a": 2})["f"]
     assert out.a == 2
     assert out.__wrapped__ is print
     assert not hasattr(out, "late")  # never set on the original either
-    with pytest.raises(AttributeError, match="'nope' is not a field of Frozen"):
-        replace_dataclass_field(out, "nope", 3)
+    with pytest.raises(AttributeError, match="'doubled' is not a field of Frozen"):
+        set_at_path({"f": out}, {"f.doubled": 3})
+
+
+def test_set_at_path_rebuilds_mutable_dataclasses_too():
+    import dataclasses
+
+    @dataclasses.dataclass
+    class Mutable:
+        a: object
+
+    shared = Mutable(1)
+    out = set_at_path({"x": shared, "y": shared}, {"x.a": 2})
+    assert (out["x"].a, out["y"].a, shared.a) == (2, 1, 1)
+
+
+def test_path_children_lists_what_set_at_path_can_replace():
+    import dataclasses
+    from typing import NamedTuple
+
+    from tesseract_core.runtime.tree_transforms import path_children
+
+    class Pair(NamedTuple):
+        a: int
+        b: int
+
+    @dataclasses.dataclass(frozen=True)
+    class Point:
+        x: int
+
+    assert path_children({"k": 1}, root=True) == [("k", 1)]
+    assert path_children({"k": 1}) == [("{k}", 1)]
+    assert path_children([1, 2]) == [("[0]", 1), ("[1]", 2)]
+    assert path_children(Pair(1, 2)) == [("[0]", 1), ("[1]", 2)]
+    assert path_children(Point(3)) == [("x", 3)]
+    with pytest.raises(TypeError, match="only dicts, lists, tuples and dataclasses"):
+        path_children(object())

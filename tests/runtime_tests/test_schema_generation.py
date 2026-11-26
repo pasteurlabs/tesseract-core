@@ -1412,8 +1412,9 @@ def test_check_gradients_reaches_arrays_in_containers(container_api):
     assert failures == []
 
 
-_EQUINOX_API = """
-import equinox as eqx
+_CUSTOM_DATACLASS_API = """
+import dataclasses
+
 import numpy as np
 from pydantic import BaseModel
 
@@ -1422,7 +1423,15 @@ from tesseract_core.runtime import Array, Differentiable, Float32
 A = Differentiable[Array[(None,), Float32]]
 
 
-class Params(eqx.Module):
+class AutoDataclass:
+    \"\"\"Makes every subclass a frozen dataclass, as some libraries' base classes do.\"\"\"
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        dataclasses.dataclass(frozen=True)(cls)
+
+
+class Params(AutoDataclass):
     w: A
     b: A
 
@@ -1430,13 +1439,14 @@ class Params(eqx.Module):
         return np.asarray(self.w) + np.asarray(self.b)
 
 
-class Scaled(eqx.Module):
+@dataclasses.dataclass(frozen=True)
+class Scaled:
     w: A
     scale: float
 
-    def __init__(self, w, scale=2.0):
-        self.w = w
-        self.scale = scale
+    def __init__(self, weights, factor=2.0):
+        object.__setattr__(self, "w", weights)
+        object.__setattr__(self, "scale", factor)
 
 
 class InputSchema(BaseModel):
@@ -1464,13 +1474,12 @@ def abstract_eval(abstract_inputs):
 """
 
 
-def test_equinox_modules_as_schema_fields(tmp_path):
-    """Modules work as inputs: validated, abstractly evaluated and differentiated."""
-    pytest.importorskip("equinox")
+def test_custom_dataclasses_as_schema_fields(tmp_path):
+    """Dataclasses with methods, custom constructors and dataclass-making bases work."""
     from tesseract_core import Tesseract
 
     path = tmp_path / "tesseract_api.py"
-    path.write_text(_EQUINOX_API)
+    path.write_text(_CUSTOM_DATACLASS_API)
     tesseract = Tesseract.from_tesseract_api(path)
     published = tesseract.openapi_schema["components"]["schemas"]["ApplyInputSchema"]
     assert set(published["differentiable_arrays"]) == {

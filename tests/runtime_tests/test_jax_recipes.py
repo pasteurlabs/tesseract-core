@@ -363,7 +363,9 @@ class TestCacheCorrectness:
         inp = Inputs(x=np.ones(2, dtype=np.float32))
         set_jax_vjp_cache_size(1)
         try:
-            with pytest.raises(TypeError, match=r"_StashingPair at p with attributes"):
+            with pytest.raises(
+                TypeError, match=r"_StashingPair at p, .*attributes note"
+            ):
                 jax_apply(apply_jit, inp)
         finally:
             set_jax_vjp_cache_size(0)

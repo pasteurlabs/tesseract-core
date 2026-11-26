@@ -159,8 +159,8 @@ def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type 
     if is_pydantic_dataclass(cls):
         return pydantic_dataclass(new, config=cls.__pydantic_config__)
     if "__dataclass_fields__" not in new.__dict__:
-        # A plain subclass isn't a dataclass yet. Classes whose metaclass makes
-        # them dataclasses (such as equinox Modules) already are.
+        # A plain subclass isn't a dataclass yet; one whose base makes its
+        # subclasses dataclasses (e.g. via a metaclass) already is.
         params = cls.__dataclass_params__
         new = dataclasses.dataclass(
             eq=params.eq,
@@ -358,7 +358,7 @@ def apply_function_to_model_tree(
             and isinstance(treeobj, type)
             and (hints := _type_hints(treeobj)) is not None
         ):
-            # Recurse into dataclasses (standard library, pydantic, equinox Modules)
+            # Recurse into dataclasses (standard library and pydantic) like into models
             new_types = {
                 f.name: _recurse_over_model_tree(hints[f.name], [*path, f.name])
                 for f in dataclasses.fields(treeobj)
