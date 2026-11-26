@@ -23,6 +23,7 @@ from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     filter_func,
     flatten_with_paths,
+    path_children,
     set_at_path,
 )
 
@@ -234,22 +235,23 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
 def _check_cacheable_outputs(tree: Any, path: tuple[str, ...] = ()) -> None:
     """Raise if ``tree`` nests a container that the VJP cache cannot rebuild.
 
-    A cache hit rebuilds the cotangent with ``set_at_path``, which supports
-    dicts, lists, tuples and NamedTuples only.
+    A cache hit rebuilds the cotangent with ``set_at_path``, so every container
+    in the outputs must be one it can rebuild (see ``path_children``).
     """
-    if isinstance(tree, dict):
-        children = ((f"{{{k}}}" if path else str(k), v) for k, v in tree.items())
-    elif isinstance(tree, list | tuple):
-        children = ((f"[{i}]", v) for i, v in enumerate(tree))
-    elif jax.tree_util.treedef_is_leaf(jax.tree.structure(tree)):
+    # Dicts, lists and tuples are always pytree nodes; checking them first saves
+    # flattening every subtree just to ask whether it is a leaf
+    if not isinstance(tree, dict | list | tuple) and jax.tree_util.treedef_is_leaf(
+        jax.tree.structure(tree)
+    ):
         return
-    else:
+    try:
+        children = path_children(tree, root=not path)
+    except TypeError as exc:
         where = ".".join(path) or "the top level"
         raise TypeError(
-            f"apply returned a {type(tree).__name__} at {where}. With the VJP cache "
-            "enabled, outputs may only nest dicts, lists, tuples and NamedTuples; "
-            "convert it to one of those, or disable the cache."
-        )
+            f"apply returned a {type(tree).__name__} at {where}, which the VJP cache "
+            f"cannot rebuild: {exc} Convert it, or disable the cache."
+        ) from exc
     for key, child in children:
         _check_cacheable_outputs(child, (*path, key))
 

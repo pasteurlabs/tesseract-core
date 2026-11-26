@@ -53,11 +53,11 @@ In Tesseracts, both inputs and outputs can be arbitrarily nested tree-like objec
 
 The `jac_inputs` and `jac_outputs` arguments (and analogously `jvp_inputs`, `vjp_inputs`, etc.) use dot-separated path strings to refer to individual differentiable arrays within nested structures. The path syntax supports:
 
-| Structure   | Syntax  | Example              |
-| ----------- | ------- | -------------------- |
-| Model field | `field` | `"x"`, `"params.z"`  |
-| Dict key    | `{key}` | `"params.{my_key}"`  |
-| List index  | `[i]`   | `"coefficients.[0]"` |
+| Structure                               | Syntax  | Example              |
+| --------------------------------------- | ------- | -------------------- |
+| Model or dataclass field; TypedDict key | `field` | `"x"`, `"params.z"`  |
+| Dict key                                | `{key}` | `"params.{my_key}"`  |
+| List, tuple or NamedTuple index         | `[i]`   | `"coefficients.[0]"` |
 
 These can be combined freely: `"beta.gamma.{u}"` refers to the `"u"` key of the `gamma` dict inside the `beta` sub-model. `"delta.[0]"` refers to the first element of the `delta` list.
 

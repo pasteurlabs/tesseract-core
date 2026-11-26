@@ -1,3 +1,5 @@
+import dataclasses
+import functools
 from typing import NamedTuple
 
 import numpy as np
@@ -863,3 +865,155 @@ class TestIsArraylike:
 class _Pair(NamedTuple):
     a: int
     b: int
+
+
+def _frozen_dataclass_cases():
+
+    @dataclasses.dataclass(frozen=True)
+    class Plain:
+        a: object
+
+    @dataclasses.dataclass(frozen=True)
+    class CustomInit:
+        a: object
+        scale: float
+
+        def __init__(self, a, factor=2.0):
+            object.__setattr__(self, "a", a)
+            object.__setattr__(self, "scale", factor)
+
+    @dataclasses.dataclass(frozen=True)
+    class WithInitVar:
+        a: object
+        seed: dataclasses.InitVar[int]
+
+        def __post_init__(self, seed):
+            pass
+
+    @dataclasses.dataclass(frozen=True)
+    class InitFalse:
+        a: object
+        label: str = dataclasses.field(init=False, default="kept")
+
+    @dataclasses.dataclass(frozen=True, slots=True)
+    class Slots:
+        a: object
+
+    cases = {
+        "plain": Plain(np.ones(2)),
+        "custom __init__": CustomInit(np.ones(2)),
+        "InitVar": WithInitVar(np.ones(2), 0),
+        "init=False field": InitFalse(np.ones(2)),
+        "slots": Slots(np.ones(2)),
+    }
+    return cases
+
+
+@pytest.mark.parametrize("case", list(_frozen_dataclass_cases()))
+def test_set_at_path_rebuilds_frozen_dataclasses(case):
+    """Without calling __init__, so custom constructors and InitVars are fine."""
+    obj = _frozen_dataclass_cases()[case]
+    out = set_at_path({"f": obj}, {"f.a": 5})["f"]
+    assert type(out) is type(obj)
+    assert out.a == 5
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        out.a = 6  # still frozen
+    for f in dataclasses.fields(obj):
+        if f.name != "a":
+            assert getattr(out, f.name) == getattr(obj, f.name)
+    assert obj.a.tolist() == [1.0, 1.0]
+
+
+def test_set_at_path_does_not_change_a_shared_frozen_dataclass():
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        a: object
+
+    shared = Frozen(1)
+    out = set_at_path({"x": shared, "y": shared}, {"x.a": 2})
+    assert (out["x"].a, out["y"].a) == (2, 1)
+
+
+def test_set_at_path_recomputes_cached_properties_of_frozen_dataclasses():
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        a: int
+
+        @functools.cached_property
+        def doubled(self):
+            return 2 * self.a
+
+    obj = Frozen(1)
+    assert obj.doubled == 2
+    out = set_at_path({"f": obj}, {"f.a": 5})["f"]
+    assert out.doubled == 10
+
+
+def test_set_at_path_refuses_frozen_dataclasses_it_cannot_rebuild():
+
+    @dataclasses.dataclass(frozen=True)
+    class Stash:
+        a: object
+
+        def __post_init__(self):
+            object.__setattr__(self, "extra", "not a field")
+
+    with pytest.raises(TypeError, match="also has the attributes extra"):
+        set_at_path({"f": Stash(1)}, {"f.a": 2})
+
+
+def test_set_at_path_rebuild_keeps_metadata_and_unset_fields():
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        a: object
+        late: int = dataclasses.field(init=False)
+
+        def __post_init__(self):
+            # Dunder metadata, as functools.wraps would set, is carried over
+            object.__setattr__(self, "__wrapped__", print)
+
+        @property
+        def doubled(self):
+            return 2 * self.a
+
+    out = set_at_path({"f": Frozen(1)}, {"f.a": 2})["f"]
+    assert out.a == 2
+    assert out.__wrapped__ is print
+    assert not hasattr(out, "late")  # never set on the original either
+    with pytest.raises(AttributeError, match="'doubled' is not a field of Frozen"):
+        set_at_path({"f": out}, {"f.doubled": 3})
+
+
+def test_set_at_path_rebuilds_mutable_dataclasses_too():
+
+    @dataclasses.dataclass
+    class Mutable:
+        a: object
+
+    shared = Mutable(1)
+    out = set_at_path({"x": shared, "y": shared}, {"x.a": 2})
+    assert (out["x"].a, out["y"].a, shared.a) == (2, 1, 1)
+
+
+def test_path_children_lists_what_set_at_path_can_replace():
+
+    from tesseract_core.runtime.tree_transforms import path_children
+
+    class Pair(NamedTuple):
+        a: int
+        b: int
+
+    @dataclasses.dataclass(frozen=True)
+    class Point:
+        x: int
+
+    assert path_children({"k": 1}, root=True) == [("k", 1)]
+    assert path_children({"k": 1}) == [("{k}", 1)]
+    assert path_children([1, 2]) == [("[0]", 1), ("[1]", 2)]
+    assert path_children(Pair(1, 2)) == [("[0]", 1), ("[1]", 2)]
+    assert path_children(Point(3)) == [("x", 3)]
+    with pytest.raises(TypeError, match="only dicts, lists, tuples and dataclasses"):
+        path_children(object())

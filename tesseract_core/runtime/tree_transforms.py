@@ -1,6 +1,9 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
+import functools
+import inspect
 import re
 import threading
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -131,6 +134,9 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
     - `a` is an attribute / key of the input tree
     - `b.[0]` is the first element of the list `b`
     - `c.{key}` is the value of the key `key` in the dictionary `c`
+
+    Containers that cannot be assigned to, such as tuples and dataclasses, are
+    rebuilt with the new value instead (see :func:`path_children`).
     """
     tree = deepcopy(tree)
 
@@ -156,6 +162,8 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                 )
                 if isinstance(tree, tuple) and hasattr(tree, "_fields"):
                     return tree._replace(**{key: child})
+                if dataclasses.is_dataclass(tree):
+                    return _replace_dataclass_field(tree, key, child)
                 setattr(tree, key, child)
                 return tree
             else:
@@ -168,6 +176,91 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
         tree = _set_recursive(tree, path_parts, value)
 
     return tree
+
+
+def path_children(tree: Any, *, root: bool = False) -> list[tuple[str, Any]]:
+    """The children of container ``tree`` that :func:`set_at_path` can replace.
+
+    Each child comes with its path segment: ``[i]`` for list and tuple items,
+    ``{key}`` for dict values (plain ``key`` at the ``root``, as for model
+    fields), and the field name for dataclass fields.
+
+    Raises:
+        TypeError: If ``set_at_path`` cannot rebuild ``tree``, i.e. it is not a
+            dict, list, tuple or dataclass, or it is a dataclass with
+            attributes that keep it from being rebuilt from its fields.
+    """
+    if isinstance(tree, dict):
+        return [(str(k) if root else f"{{{k}}}", v) for k, v in tree.items()]
+    if isinstance(tree, list | tuple):
+        return [(f"[{i}]", v) for i, v in enumerate(tree)]
+    if dataclasses.is_dataclass(tree) and not isinstance(tree, type):
+        if extra := _attributes_preventing_rebuild(tree):
+            raise TypeError(
+                f"A {type(tree).__name__} can only be rebuilt from its fields, but it "
+                f"also has the attributes {', '.join(sorted(extra))}."
+            )
+        return [
+            (f.name, getattr(tree, f.name))
+            for f in dataclasses.fields(tree)
+            if hasattr(tree, f.name)
+        ]
+    raise TypeError(
+        f"A {type(tree).__name__} cannot be rebuilt; only dicts, lists, tuples and "
+        "dataclasses can."
+    )
+
+
+def _is_dunder(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
+
+
+def _attributes_preventing_rebuild(obj: Any) -> set[str]:
+    """Attributes of dataclass instance ``obj`` that keep it from being rebuilt.
+
+    A rebuild copies an instance's fields and dunder metadata (such as what
+    ``functools.wraps`` sets). Values cached by ``functools.cached_property``
+    are stored on the instance too, but aren't fields: the rebuild leaves them
+    out, so they are recomputed from the new fields. Any other attribute the
+    instance holds beyond its fields can't be carried over safely.
+    """
+    if not hasattr(obj, "__dict__"):
+        return set()
+    names = set(vars(obj)) - {f.name for f in dataclasses.fields(obj)}
+    return {
+        name
+        for name in names
+        if not _is_dunder(name)
+        and not isinstance(
+            inspect.getattr_static(type(obj), name, None), functools.cached_property
+        )
+    }
+
+
+def _replace_dataclass_field(obj: Any, name: str, value: Any) -> Any:
+    """A copy of dataclass instance ``obj`` with field ``name`` set to ``value``.
+
+    In order to support frozen dataclasses and custom constructors, the copy is
+    built from ``obj``'s fields without calling ``__init__``, ``__post_init__``
+    or any validators, so fields derived from others are not recomputed. This
+    was partially inspired by ``equinox.tree_at``. The copy is an instance of
+    the same class, so it is as frozen as ``obj``, and ``obj`` is unchanged.
+    """
+    cls = type(obj)
+    if name not in {f.name for f in dataclasses.fields(obj)}:
+        raise AttributeError(f"{name!r} is not a field of {cls.__name__}")
+    path_children(obj)  # raises if obj holds attributes that prevent a rebuild
+    new = object.__new__(cls)
+    if hasattr(obj, "__dict__"):
+        for key, val in vars(obj).items():
+            if _is_dunder(key):
+                new.__dict__[key] = val
+    for f in dataclasses.fields(obj):
+        if f.name == name:
+            object.__setattr__(new, f.name, value)
+        elif hasattr(obj, f.name):
+            object.__setattr__(new, f.name, getattr(obj, f.name))
+    return new
 
 
 def flatten_with_paths(
