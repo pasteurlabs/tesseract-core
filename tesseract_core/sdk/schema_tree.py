@@ -8,7 +8,7 @@ plain dataclasses, one per kind of type pydantic emits, so client code can ask
 where a payload's arrays are and what shape and dtype they should have without
 re-implementing JSON Schema traversal. :func:`map` maps a function
 over a payload's leaves alongside that tree, :func:`iter_nodes` lists its
-nodes, and :func:`fold` computes a value from them, children first.
+nodes, and :func:`fold` builds a value from it bottom-up.
 
 Every node keeps the (resolved) JSON Schema it was parsed from as ``schema``,
 for constraints that aren't modelled here, such as ``minimum`` or
@@ -583,22 +583,46 @@ def iter_nodes(schema: SchemaNode) -> Iterator[SchemaNode]:
 
 
 def fold(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
-    """Compute a value for ``schema`` from the values computed for its children.
+    """Build a value from ``schema`` bottom-up, one node at a time.
 
-    ``func(node, results)`` is called on every node, children first, and the
-    value it returns for ``schema`` itself is the result. ``results`` holds
-    what ``func`` returned for each child of ``node``, keyed by:
+    For work on the schema alone, with no payload to walk (for that, see
+    :func:`map`), such as generating an example payload or listing where the
+    arrays are. ``fold`` does the recursion: ``func`` only says how to turn one
+    node, plus the values already built for its children, into that node's
+    value.
 
-    - property name, for an :class:`ObjectSchema`'s ``properties``;
-    - position, for a :class:`SequenceSchema`'s ``prefix`` or a
-      :class:`UnionSchema`'s ``members``;
-    - ``...``, for any other key or item (``additional`` or ``items``).
+    Args:
+        func: Called as ``func(node, results)`` on every node, after it has
+            been called on all of the node's children. ``results`` is a dict
+            of what ``func`` returned for each child, keyed by where the child
+            sits in ``node``:
 
-    Other nodes have no children, so ``results`` is empty for them. Every
-    child is computed, including union members ``func`` then ignores.
+            - :class:`ObjectSchema`: the property name for each of
+              ``properties``, and ``...`` for ``additional``;
+            - :class:`SequenceSchema`: the index for each of ``prefix``, and
+              ``...`` for ``items``;
+            - :class:`UnionSchema`: the index for each of ``members``.
 
-    For example, an example payload for a schema (see ``_example``), or the
-    paths of its differentiable arrays.
+            ``additional`` or ``items`` that is ``None`` has no entry, and
+            every other kind of node has no children, so its ``results`` is
+            empty.
+        schema: The parsed schema, from :func:`parse`.
+
+    Returns:
+        What ``func`` returned for ``schema`` itself.
+
+    Every child is built before its parent sees it, including union members
+    ``func`` then ignores, and a ``$ref`` used in several places is built once
+    per use.
+
+    Example:
+        The deepest nesting in a schema, counting ``schema`` itself as 1::
+
+            def depth(node, results):
+                return 1 + max(results.values(), default=0)
+
+
+            schema_tree.fold(depth, schema)
     """
     results = {k: fold(func, c) for k, c in schema._children().items()}
     return func(schema, results)
