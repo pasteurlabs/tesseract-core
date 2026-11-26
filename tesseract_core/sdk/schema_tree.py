@@ -7,8 +7,8 @@ was generated from. :func:`parse` turns that schema into a tree of
 plain dataclasses, one per kind of type pydantic emits, so client code can ask
 where a payload's arrays are and what shape and dtype they should have without
 re-implementing JSON Schema traversal. :func:`map` maps a function
-over a payload's leaves alongside that tree, and :func:`iter_nodes` lists its
-nodes.
+over a payload's leaves alongside that tree, :func:`iter_nodes` lists its
+nodes, and :func:`fold` builds a value from it bottom-up.
 
 Every node keeps the (resolved) JSON Schema it was parsed from as ``schema``,
 for constraints that aren't modelled here, such as ``minimum`` or
@@ -21,7 +21,7 @@ import base64
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 
@@ -35,6 +35,7 @@ __all__ = [
     "SequenceSchema",
     "UnionSchema",
     "UnsupportedSchema",
+    "fold",
     "iter_nodes",
     "map",
     "map_with_path",
@@ -581,13 +582,61 @@ def iter_nodes(schema: SchemaNode) -> Iterator[SchemaNode]:
         yield from iter_nodes(child)
 
 
-def _fold_schema(func: Callable[[SchemaNode, dict], Any], schema: SchemaNode) -> Any:
-    """Call ``func(node, results)`` on every node, children first.
+Result = TypeVar("Result")
 
-    ``results`` maps each of ``node._children()``'s keys to the value
-    ``func`` returned for that child.
+
+def fold(
+    func: Callable[[SchemaNode, dict[Any, Result]], Result], schema: SchemaNode
+) -> Result:
+    """Build a value from ``schema`` bottom-up, one node at a time.
+
+    For work on the schema alone, with no payload to walk (for that, see
+    :func:`map`), such as generating an example payload or listing where the
+    arrays are. ``fold`` does the recursion: ``func`` only says how to turn one
+    node, plus the values already built for its children, into that node's
+    value.
+
+    Every child is built before its parent sees it, including union members
+    ``func`` then ignores, and a ``$ref`` used in several places is built once
+    per use.
+
+    This is a tree fold, like Haskell's ``Data.Tree.foldTree``, rather than a
+    list fold such as :func:`functools.reduce`. There is no initial value:
+    ``func`` called on a node without children (``results`` empty) is the base
+    case. For a flat total, such as counting arrays, ``functools.reduce`` over
+    :func:`iter_nodes` is enough; ``fold`` is for results shaped by the tree.
+
+    Args:
+        func: Called as ``func(node, results)`` on every node, after it has
+            been called on all of the node's children. ``results`` is a dict
+            of what ``func`` returned for each child, keyed by where the child
+            sits in ``node``:
+
+            - :class:`ObjectSchema`: the property name for each of
+              ``properties``, and ``...`` for ``additional``;
+            - :class:`SequenceSchema`: the index for each of ``prefix``, and
+              ``...`` for ``items``;
+            - :class:`UnionSchema`: the index for each of ``members``.
+
+            ``additional`` or ``items`` that is ``None`` has no entry, and
+            every other kind of node has no children, so its ``results`` is
+            empty.
+        schema: The parsed schema, from :func:`parse`.
+
+    Returns:
+        What ``func`` returned for ``schema`` itself, so ``fold`` returns
+        whatever type ``func`` does.
+
+    Example:
+        The deepest nesting in a schema, counting ``schema`` itself as 1::
+
+            def depth(node, results):
+                return 1 + max(results.values(), default=0)
+
+
+            schema_tree.fold(depth, schema)
     """
-    results = {k: _fold_schema(func, c) for k, c in schema._children().items()}
+    results = {k: fold(func, c) for k, c in schema._children().items()}
     return func(schema, results)
 
 
@@ -598,7 +647,7 @@ def _example(schema: SchemaNode, seed: int = 42) -> Any:
     open), base64-encoded, with every dimension of size 1 so it broadcasts to
     any fixed size.
     """
-    return _fold_schema(partial(_example_of, np.random.RandomState(seed)), schema)
+    return fold(partial(_example_of, np.random.RandomState(seed)), schema)
 
 
 def _example_of(rng: np.random.RandomState, node: SchemaNode, results: dict) -> Any:

@@ -86,10 +86,14 @@ SUB = ObjectSchema(
 
 
 @pytest.fixture(scope="module")
-def input_schema(tmp_path_factory):
+def openapi(tmp_path_factory):
     api = tmp_path_factory.mktemp("schema_tree") / "tesseract_api.py"
     api.write_text(TESSERACT_API)
-    openapi = Tesseract.from_tesseract_api(api).openapi_schema
+    return Tesseract.from_tesseract_api(api).openapi_schema
+
+
+@pytest.fixture(scope="module")
+def input_schema(openapi):
     return schema_tree.parse(openapi, "#/components/schemas/Apply_InputSchema")
 
 
@@ -590,3 +594,47 @@ def test_refs_that_cannot_be_followed_are_reported():
 def test_parse_rejects_a_pointer_outside_the_document(pointer):
     with pytest.raises(ValueError, match="does not point into the document"):
         schema_tree.parse({"components": {"schemas": {}}}, pointer)
+
+
+def _differentiable_paths(node, results):
+    """Path patterns of the differentiable arrays below ``node``, as a ``fold`` function."""
+    if isinstance(node, ArraySchema):
+        return {""} if node.differentiable else set()
+    if isinstance(node, UnionSchema):
+        return set().union(*results.values())
+    paths = set()
+    for key, below in results.items():
+        if isinstance(node, SequenceSchema):
+            segment = "[]"
+        else:
+            segment = "{}" if key is ... else key
+        paths |= {f"{segment}.{p}" if p else segment for p in below}
+    return paths
+
+
+def test_fold_derives_the_published_differentiable_arrays(openapi, input_schema):
+    """A use of fold besides examples: the paths tesseract-core publishes."""
+    published = openapi["components"]["schemas"]["ApplyInputSchema"]
+    assert schema_tree.fold(_differentiable_paths, input_schema) == set(
+        published["differentiable_arrays"]
+    )
+
+
+def test_fold_passes_children_results_by_key():
+    seen = []
+
+    def record(node, results):
+        seen.append((type(node).__name__, sorted(map(repr, results))))
+        return type(node).__name__
+
+    schema_tree.fold(
+        record,
+        schema_tree.parse(
+            {
+                "properties": {"a": {"type": "integer"}},
+                "additionalProperties": {"type": "string"},
+                "required": ["a"],
+            }
+        ),
+    )
+    assert seen[-1] == ("ObjectSchema", ["'a'", "Ellipsis"])
