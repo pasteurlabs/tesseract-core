@@ -190,7 +190,7 @@ def path_children(tree: Any, *, root: bool = False) -> list[tuple[str, Any]]:
             dict, list, tuple or dataclass, or it is a dataclass with
             attributes that keep it from being rebuilt from its fields.
     """
-    if isinstance(tree, Mapping):
+    if isinstance(tree, dict):
         return [(str(k) if root else f"{{{k}}}", v) for k, v in tree.items()]
     if isinstance(tree, list | tuple):
         return [(f"[{i}]", v) for i, v in enumerate(tree)]
@@ -211,6 +211,10 @@ def path_children(tree: Any, *, root: bool = False) -> list[tuple[str, Any]]:
     )
 
 
+def _is_dunder(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
+
+
 def _attributes_preventing_rebuild(obj: Any) -> set[str]:
     """Attributes of dataclass instance ``obj`` that keep it from being rebuilt.
 
@@ -226,7 +230,7 @@ def _attributes_preventing_rebuild(obj: Any) -> set[str]:
     return {
         name
         for name in names
-        if not (name.startswith("__") and name.endswith("__"))
+        if not _is_dunder(name)
         and not isinstance(
             inspect.getattr_static(type(obj), name, None), functools.cached_property
         )
@@ -249,7 +253,7 @@ def _replace_dataclass_field(obj: Any, name: str, value: Any) -> Any:
     new = object.__new__(cls)
     if hasattr(obj, "__dict__"):
         for key, val in vars(obj).items():
-            if key.startswith("__") and key.endswith("__"):
+            if _is_dunder(key):
                 new.__dict__[key] = val
     for f in dataclasses.fields(obj):
         if f.name == name:

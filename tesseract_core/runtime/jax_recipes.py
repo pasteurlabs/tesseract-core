@@ -238,7 +238,11 @@ def _check_cacheable_outputs(tree: Any, path: tuple[str, ...] = ()) -> None:
     A cache hit rebuilds the cotangent with ``set_at_path``, so every container
     in the outputs must be one it can rebuild (see ``path_children``).
     """
-    if jax.tree_util.treedef_is_leaf(jax.tree.structure(tree)):
+    # Dicts, lists and tuples are always pytree nodes; checking them first saves
+    # flattening every subtree just to ask whether it is a leaf
+    if not isinstance(tree, dict | list | tuple) and jax.tree_util.treedef_is_leaf(
+        jax.tree.structure(tree)
+    ):
         return
     try:
         children = path_children(tree, root=not path)

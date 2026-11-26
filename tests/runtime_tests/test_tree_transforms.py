@@ -1,3 +1,5 @@
+import dataclasses
+import functools
 from typing import NamedTuple
 
 import numpy as np
@@ -866,7 +868,6 @@ class _Pair(NamedTuple):
 
 
 def _frozen_dataclass_cases():
-    import dataclasses
 
     @dataclasses.dataclass(frozen=True)
     class Plain:
@@ -911,8 +912,6 @@ def _frozen_dataclass_cases():
 @pytest.mark.parametrize("case", list(_frozen_dataclass_cases()))
 def test_set_at_path_rebuilds_frozen_dataclasses(case):
     """Without calling __init__, so custom constructors and InitVars are fine."""
-    import dataclasses
-
     obj = _frozen_dataclass_cases()[case]
     out = set_at_path({"f": obj}, {"f.a": 5})["f"]
     assert type(out) is type(obj)
@@ -926,7 +925,6 @@ def test_set_at_path_rebuilds_frozen_dataclasses(case):
 
 
 def test_set_at_path_does_not_change_a_shared_frozen_dataclass():
-    import dataclasses
 
     @dataclasses.dataclass(frozen=True)
     class Frozen:
@@ -938,8 +936,6 @@ def test_set_at_path_does_not_change_a_shared_frozen_dataclass():
 
 
 def test_set_at_path_recomputes_cached_properties_of_frozen_dataclasses():
-    import dataclasses
-    import functools
 
     @dataclasses.dataclass(frozen=True)
     class Frozen:
@@ -956,7 +952,6 @@ def test_set_at_path_recomputes_cached_properties_of_frozen_dataclasses():
 
 
 def test_set_at_path_refuses_frozen_dataclasses_it_cannot_rebuild():
-    import dataclasses
 
     @dataclasses.dataclass(frozen=True)
     class Stash:
@@ -970,7 +965,6 @@ def test_set_at_path_refuses_frozen_dataclasses_it_cannot_rebuild():
 
 
 def test_set_at_path_rebuild_keeps_metadata_and_unset_fields():
-    import dataclasses
 
     @dataclasses.dataclass(frozen=True)
     class Frozen:
@@ -994,7 +988,6 @@ def test_set_at_path_rebuild_keeps_metadata_and_unset_fields():
 
 
 def test_set_at_path_rebuilds_mutable_dataclasses_too():
-    import dataclasses
 
     @dataclasses.dataclass
     class Mutable:
@@ -1006,8 +999,6 @@ def test_set_at_path_rebuilds_mutable_dataclasses_too():
 
 
 def test_path_children_lists_what_set_at_path_can_replace():
-    import dataclasses
-    from typing import NamedTuple
 
     from tesseract_core.runtime.tree_transforms import path_children
 

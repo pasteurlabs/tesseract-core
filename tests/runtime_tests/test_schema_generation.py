@@ -13,6 +13,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
+from tesseract_core.runtime.core import load_module_from_path
 from tesseract_core.runtime.experimental import LazySequence
 from tesseract_core.runtime.schema_generation import (
     DICT_INDEX_SENTINEL,
@@ -23,7 +24,11 @@ from tesseract_core.runtime.schema_generation import (
     create_apply_schema,
     create_gradient_schema,
 )
-from tesseract_core.runtime.schema_types import ShapeDType
+from tesseract_core.runtime.schema_types import (
+    PydanticArrayAnnotation,
+    ShapeDType,
+    safe_issubclass,
+)
 from tesseract_core.runtime.tree_transforms import escape_dict_key, path_to_index_op
 
 
@@ -1250,18 +1255,25 @@ _CONTAINER_PATHS = {"nt.[]", "dc.a", "frozen_dc.a", "pdc.a", "td.a"}
 @pytest.fixture(scope="module")
 def container_api(tmp_path_factory):
     """A Tesseract whose only differentiable arrays sit inside non-model containers."""
-    import importlib.util
-
     path = tmp_path_factory.mktemp("containers") / "tesseract_api.py"
     path.write_text(_CONTAINER_API)
-    spec = importlib.util.spec_from_file_location("container_tesseract_api", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return path, module
+    return path, load_module_from_path(path)
 
 
 def _abstract(shape):
     return {"shape": list(shape), "dtype": "float32"}
+
+
+def _container_inputs(leaf, **overrides):
+    """Inputs for ``_CONTAINER_API`` with ``leaf`` at every array."""
+    inputs = {"nt": [leaf]}
+    inputs.update({k: {"a": leaf} for k in ("dc", "frozen_dc", "pdc", "td")})
+    return {**inputs, **overrides}
+
+
+def _strip_arrays(annotation, path):
+    """Drop every array field, to test how fields are removed from containers."""
+    return None if safe_issubclass(annotation, PydanticArrayAnnotation) else annotation
 
 
 def test_arrays_in_namedtuples_dataclasses_and_typeddicts_are_differentiable(
@@ -1276,17 +1288,7 @@ def test_apply_schema_keeps_the_user_container_types(container_api):
     _, api = container_api
     ApplyInputSchema, _ = create_apply_schema(api.InputSchema, api.OutputSchema)
     x = np.ones(2, dtype=np.float32)
-    inputs = ApplyInputSchema.model_validate(
-        {
-            "inputs": {
-                "nt": [x],
-                "dc": {"a": x},
-                "frozen_dc": {"a": x},
-                "pdc": {"a": x},
-                "td": {"a": x},
-            }
-        }
-    ).inputs
+    inputs = ApplyInputSchema.model_validate({"inputs": _container_inputs(x)}).inputs
     assert type(inputs.nt) is api.NT
     assert type(inputs.dc) is api.DC
     assert type(inputs.frozen_dc) is api.FrozenDC
@@ -1299,15 +1301,7 @@ def test_abstract_eval_schema_reaches_arrays_in_containers(container_api):
         api.InputSchema, api.OutputSchema
     )
     inputs = AbstractInputSchema.model_validate(
-        {
-            "inputs": {
-                "nt": [_abstract((2,))],
-                "dc": {"a": _abstract((2,))},
-                "frozen_dc": {"a": _abstract((2,))},
-                "pdc": {"a": _abstract((2,))},
-                "td": {"a": _abstract((2,))},
-            }
-        }
+        {"inputs": _container_inputs(_abstract((2,)))}
     ).inputs
     for value in (inputs.nt.a, inputs.dc.a, inputs.frozen_dc.a, inputs.pdc.a):
         assert isinstance(value, ShapeDType)
@@ -1323,11 +1317,9 @@ def test_abstract_eval_schema_reaches_arrays_in_containers(container_api):
     with pytest.raises(ValidationError, match="greater than 0"):
         AbstractInputSchema.model_validate(
             {
-                "inputs": {
-                    "nt": [_abstract((2,))],
-                    **{k: {"a": _abstract((2,))} for k in ("dc", "frozen_dc", "pdc")},
-                    "td": {"a": _abstract((2,)), "scale": -1.0},
-                }
+                "inputs": _container_inputs(
+                    _abstract((2,)), td={"a": _abstract((2,)), "scale": -1.0}
+                )
             }
         )
 
@@ -1338,19 +1330,8 @@ def test_tesseract_differentiates_arrays_in_containers(container_api):
     path, _ = container_api
     tesseract = Tesseract.from_tesseract_api(path)
     x = np.ones(2, dtype=np.float32)
-    inputs = {
-        "nt": [x],
-        "dc": {"a": x},
-        "frozen_dc": {"a": x},
-        "pdc": {"a": x},
-        "td": {"a": x},
-    }
-    abstract = tesseract.abstract_eval(
-        {
-            "nt": [_abstract((2,))],
-            **{k: {"a": _abstract((2,))} for k in ("dc", "frozen_dc", "pdc", "td")},
-        }
-    )
+    inputs = _container_inputs(x)
+    abstract = tesseract.abstract_eval(_container_inputs(_abstract((2,))))
     assert tuple(abstract["y"]["shape"]) == (2,)
 
     vjp_inputs = ["nt.[0]", "dc.a", "frozen_dc.a", "pdc.a", "td.a"]
@@ -1360,16 +1341,10 @@ def test_tesseract_differentiates_arrays_in_containers(container_api):
 
 def test_dropping_fields_inside_containers(container_api):
     """A function returning None removes a NamedTuple or TypedDict field."""
-    from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
-    from tesseract_core.runtime.schema_types import (
-        PydanticArrayAnnotation,
-        safe_issubclass,
-    )
-
     _, api = container_api
     Stripped = apply_function_to_model_tree(
         api.InputSchema,
-        lambda t, _: None if safe_issubclass(t, PydanticArrayAnnotation) else t,
+        _strip_arrays,
     )
     fields = Stripped.model_fields
     assert fields["nt"].annotation._fields == ("n",)
@@ -1390,15 +1365,7 @@ def test_check_gradients_reaches_arrays_in_containers(container_api):
 
     _, api = container_api
     x = [1.0, 2.0]
-    inputs = {
-        "inputs": {
-            "nt": [x],
-            "dc": {"a": x},
-            "frozen_dc": {"a": x},
-            "pdc": {"a": x},
-            "td": {"a": x},
-        }
-    }
+    inputs = {"inputs": _container_inputs(x)}
     [(endpoint, failures, _)] = check_gradients(
         api,
         inputs,
@@ -1508,7 +1475,8 @@ def test_containers_with_unresolvable_annotations_are_leaves():
     """If get_type_hints can't resolve a container's annotations, it isn't recursed into.
 
     pydantic can still resolve names defined in the enclosing function, so such
-    a schema keeps working as it did before containers were recursed into.
+    a schema keeps working as it did before containers were recursed into, with
+    a warning that arrays inside it won't be found.
     """
 
     class Local(BaseModel):
@@ -1521,14 +1489,37 @@ def test_containers_with_unresolvable_annotations_are_leaves():
     class Model(BaseModel):
         holder: Holder
 
-    InputSchema, _ = create_apply_schema(Model, Model)
+    with pytest.warns(UserWarning, match="Cannot resolve the annotations of"):
+        InputSchema, _ = create_apply_schema(Model, Model)
     value = InputSchema.model_validate({"inputs": {"holder": {"local": {"n": 1}}}})
     assert value.inputs.holder.local.n == 1
 
 
+@dataclasses.dataclass
+class _TreeNode:
+    """A dataclass that contains itself; defined here so its forward reference resolves."""
+
+    value: Differentiable[Array[(None,), Float32]]
+    children: "list[_TreeNode]" = dataclasses.field(default_factory=list)
+
+
+def test_a_container_that_contains_itself_is_not_recursed_into_forever():
+    """The repeated container is left as it is, as it was before this was supported."""
+
+    class Model(BaseModel):
+        tree: _TreeNode
+
+    InputSchema, _ = create_apply_schema(Model, Model)
+    assert set(InputSchema.differentiable_arrays) == {"tree.value"}
+    x = np.ones(2, dtype=np.float32)
+    value = InputSchema.model_validate(
+        {"inputs": {"tree": {"value": x, "children": [{"value": x}]}}}
+    )
+    assert value.inputs.tree.children[0].value.shape == (2,)
+
+
 def test_rebuilt_dataclass_fields_keep_their_options():
     """A re-declared field keeps its default or default factory."""
-    from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
 
     @dataclasses.dataclass
     class Settings:
@@ -1557,12 +1548,6 @@ def test_containers_left_without_fields_are_dropped():
 
     from typing_extensions import TypedDict
 
-    from tesseract_core.runtime.schema_generation import apply_function_to_model_tree
-    from tesseract_core.runtime.schema_types import (
-        PydanticArrayAnnotation,
-        safe_issubclass,
-    )
-
     A = Array[(None,), Float32]
 
     class OnlyArrayTuple(NamedTuple):
@@ -1581,6 +1566,6 @@ def test_containers_left_without_fields_are_dropped():
 
     Stripped = apply_function_to_model_tree(
         Model,
-        lambda t, _: None if safe_issubclass(t, PydanticArrayAnnotation) else t,
+        _strip_arrays,
     )
     assert Stripped.model_fields["outer"].annotation._fields == ("n",)

@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import re
 import types
+import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import copy
 from typing import (
@@ -37,7 +38,7 @@ from pydantic import (
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from pydantic.dataclasses import is_pydantic_dataclass
 from pydantic_core import PydanticSerializationError
-from typing_extensions import NotRequired, Required
+from typing_extensions import NotRequired, Required, is_typeddict
 from typing_extensions import TypedDict as ExtTypedDict
 
 from .schema_types import (
@@ -96,33 +97,65 @@ def _is_namedtuple(obj: Any) -> bool:
     return isinstance(obj, type) and issubclass(obj, tuple) and hasattr(obj, "_fields")
 
 
-def _is_typeddict(obj: Any) -> bool:
-    # Duck-typed, so it covers both typing.TypedDict and typing_extensions.TypedDict
-    return (
-        isinstance(obj, type)
-        and issubclass(obj, dict)
-        and hasattr(obj, "__required_keys__")
+def _is_container(obj: Any) -> bool:
+    """Whether ``obj`` is a NamedTuple, dataclass or TypedDict class."""
+    return isinstance(obj, type) and (
+        _is_namedtuple(obj) or dataclasses.is_dataclass(obj) or is_typeddict(obj)
     )
 
 
 def _without_required(annotation: Any) -> Any:
     """Strip a ``Required[...]`` / ``NotRequired[...]`` wrapper from a TypedDict field."""
-    origin = get_origin(annotation)
-    if origin is not None and getattr(origin, "_name", None) in (
-        "Required",
-        "NotRequired",
-    ):
+    if get_origin(annotation) in (Required, NotRequired):
         return get_args(annotation)[0]
     return annotation
 
 
-def _rebuild_namedtuple(cls: type, new_types: dict[str, Any], name: str) -> type | None:
-    """A NamedTuple like ``cls`` with its fields' types replaced (``None`` drops one)."""
+def _container_hints(cls: type) -> dict[str, Any] | None:
+    """The field annotations of container ``cls``, keeping ``Annotated`` metadata.
+
+    Returns None, with a warning, if they can't be resolved: pydantic resolves
+    some forward references that ``get_type_hints`` can't, such as names
+    defined inside a function. The container is then left as a single value,
+    as it was before containers were recursed into.
+    """
+    try:
+        hints = get_type_hints(cls, include_extras=True)
+    except (NameError, TypeError) as exc:
+        warnings.warn(
+            f"Cannot resolve the annotations of {cls.__qualname__} ({exc}), so "
+            "arrays inside it are not treated as arrays, e.g. not differentiable.",
+            stacklevel=2,
+        )
+        return None
+    if _is_namedtuple(cls):
+        return {name: hints[name] for name in cls._fields}
+    if dataclasses.is_dataclass(cls):
+        return {f.name: hints[f.name] for f in dataclasses.fields(cls)}
+    return {key: _without_required(t) for key, t in hints.items()}
+
+
+def _rebuild_container(
+    cls: type, hints: dict[str, Any], new_types: dict[str, Any], name: str
+) -> type | None:
+    """A container like ``cls`` with its fields' types replaced (``None`` drops one).
+
+    ``cls`` itself is returned if nothing changed, and None if every field is
+    dropped.
+    """
     kept = {k: t for k, t in new_types.items() if t is not None}
     if not kept:
         return None
-    if kept == get_type_hints(cls, include_extras=True):
+    if kept == hints:
         return cls
+    if _is_namedtuple(cls):
+        return _rebuild_namedtuple(cls, kept, name)
+    if dataclasses.is_dataclass(cls):
+        return _rebuild_dataclass(cls, hints, kept, name)
+    return _rebuild_typeddict(cls, kept, name)
+
+
+def _rebuild_namedtuple(cls: type, kept: dict[str, Any], name: str) -> type:
     new = NamedTuple(name, list(kept.items()))
     defaults = {k: v for k, v in cls._field_defaults.items() if k in kept}
     if defaults:
@@ -133,18 +166,15 @@ def _rebuild_namedtuple(cls: type, new_types: dict[str, Any], name: str) -> type
     return new
 
 
-def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type | None:
+def _rebuild_dataclass(
+    cls: type, hints: dict[str, Any], kept: dict[str, Any], name: str
+) -> type:
     """A subclass of dataclass ``cls`` that re-declares the fields whose types changed.
 
     Subclassing keeps the original's methods and ``isinstance`` checks, as for
-    pydantic models. A field whose new type is ``None`` cannot be removed from
-    a subclass, so it is inherited unchanged; the class is dropped only if
-    every field is.
+    pydantic models. A dropped field cannot be removed from a subclass, so it
+    is inherited unchanged.
     """
-    kept = {k: t for k, t in new_types.items() if t is not None}
-    if not kept:
-        return None
-    hints = get_type_hints(cls, include_extras=True)
     changed = {k: t for k, t in kept.items() if t != hints[k]}
     if not changed:
         return cls
@@ -152,9 +182,9 @@ def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type 
     namespace: dict[str, Any] = {
         "__annotations__": changed,
         "__module__": cls.__module__,
+        # The dataclass decorator re-reads each copied field's name and type
+        **{key: copy(fields[key]) for key in changed},
     }
-    for key in changed:
-        namespace[key] = _copy_field(fields[key])
     new = types.new_class(name, (cls,), exec_body=lambda ns: ns.update(namespace))
     if is_pydantic_dataclass(cls):
         return pydantic_dataclass(new, config=cls.__pydantic_config__)
@@ -171,47 +201,7 @@ def _rebuild_dataclass(cls: type, new_types: dict[str, Any], name: str) -> type 
     return new
 
 
-def _copy_field(f: dataclasses.Field) -> dataclasses.Field:
-    """A new ``dataclasses.field`` with the same options as ``f``."""
-    options = {
-        "init": f.init,
-        "repr": f.repr,
-        "hash": f.hash,
-        "compare": f.compare,
-        "metadata": f.metadata,
-        "kw_only": f.kw_only,
-    }
-    if f.default is not dataclasses.MISSING:
-        options["default"] = f.default
-    if f.default_factory is not dataclasses.MISSING:
-        options["default_factory"] = f.default_factory
-    return dataclasses.field(**options)
-
-
-def _type_hints(obj: type) -> dict[str, Any] | None:
-    """``obj``'s annotations with ``Annotated`` metadata, or None if unresolvable.
-
-    pydantic can resolve some forward references that ``get_type_hints`` can't,
-    such as names defined inside a function. Such a container is then treated
-    as a leaf, as it was before containers were recursed into.
-    """
-    try:
-        return get_type_hints(obj, include_extras=True)
-    except (NameError, TypeError):
-        return None
-
-
-def _rebuild_typeddict(cls: type, new_types: dict[str, Any], name: str) -> type | None:
-    """A TypedDict like ``cls`` with its fields' types replaced (``None`` drops one)."""
-    kept = {k: t for k, t in new_types.items() if t is not None}
-    if not kept:
-        return None
-    hints = {
-        k: _without_required(t)
-        for k, t in get_type_hints(cls, include_extras=True).items()
-    }
-    if kept == hints:
-        return cls
+def _rebuild_typeddict(cls: type, kept: dict[str, Any], name: str) -> type:
     fields = {
         k: Required[t] if k in cls.__required_keys__ else NotRequired[t]
         for k, t in kept.items()
@@ -273,6 +263,7 @@ def apply_function_to_model_tree(
         default_model_config = {}
 
     seen_models = set()
+    seen_containers = set()
 
     def _recurse_over_model_tree(treeobj: Any, path: list[str]) -> Any:
         # Get the origin type of the annotation, e.g. List for List[int]
@@ -342,40 +333,29 @@ def apply_function_to_model_tree(
                 __base__=treeobj,
             )
 
-        elif _is_namedtuple(treeobj) and (hints := _type_hints(treeobj)) is not None:
-            # Recurse into NamedTuples; on the wire they are tuples, so index like one
-            new_path = [*path, SEQ_INDEX_SENTINEL]
-            new_types = {
-                name: _recurse_over_model_tree(hints[name], new_path)
-                for name in treeobj._fields
-            }
-            return _rebuild_namedtuple(
-                treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
-            )
-
-        elif (
-            dataclasses.is_dataclass(treeobj)
-            and isinstance(treeobj, type)
-            and (hints := _type_hints(treeobj)) is not None
-        ):
-            # Recurse into dataclasses (standard library and pydantic) like into models
-            new_types = {
-                f.name: _recurse_over_model_tree(hints[f.name], [*path, f.name])
-                for f in dataclasses.fields(treeobj)
-            }
-            return _rebuild_dataclass(
-                treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
-            )
-
-        elif _is_typeddict(treeobj) and (hints := _type_hints(treeobj)) is not None:
-            # Recurse into TypedDicts; their keys are fixed, so path them like fields.
-            # Keep Annotated metadata; Required / NotRequired is restored on rebuild.
-            new_types = {
-                key: _recurse_over_model_tree(_without_required(t), [*path, key])
-                for key, t in hints.items()
-            }
-            return _rebuild_typeddict(
-                treeobj, new_types, f"{model_prefix}{treeobj.__name__}"
+        elif _is_container(treeobj):
+            # Recurse into NamedTuples, dataclasses and TypedDicts. A NamedTuple is
+            # a tuple on the wire, so its items are indexed like one; the others'
+            # fields are named, like a model's.
+            if id(treeobj) in seen_containers:
+                # A container that contains itself: leave the inner one as is
+                return func(treeobj, tuple(path))
+            hints = _container_hints(treeobj)
+            if hints is None:
+                return func(treeobj, tuple(path))
+            seen_containers.add(id(treeobj))
+            try:
+                new_types = {
+                    key: _recurse_over_model_tree(
+                        t,
+                        [*path, SEQ_INDEX_SENTINEL if _is_namedtuple(treeobj) else key],
+                    )
+                    for key, t in hints.items()
+                }
+            finally:
+                seen_containers.discard(id(treeobj))
+            return _rebuild_container(
+                treeobj, hints, new_types, f"{model_prefix}{treeobj.__name__}"
             )
 
         elif _is_annotated(treeobj):
