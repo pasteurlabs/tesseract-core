@@ -335,8 +335,9 @@ def apply_function_to_model_tree(
 
         elif _is_container(treeobj):
             # Recurse into NamedTuples, dataclasses and TypedDicts. A NamedTuple is
-            # a tuple on the wire, so its items are indexed like one; the others'
-            # fields are named, like a model's.
+            # sent and received as a list, so its items are pathed by position
+            # ("nt.[0]"), like a tuple's; the others' fields are pathed by name
+            # ("dc.a"), like a model's.
             if id(treeobj) in seen_containers:
                 # A container that contains itself: leave the inner one as is
                 return func(treeobj, tuple(path))
