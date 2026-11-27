@@ -138,6 +138,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ../concepts/design-patterns.md
 ../concepts/differentiable-programming.md
 ../concepts/performance.md
+../concepts/security.md
 ```
 
 ```{toctree}
