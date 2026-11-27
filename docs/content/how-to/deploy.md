@@ -2,6 +2,10 @@
 
 Tesseracts built via `tesseract build` are standard Docker images, so they can be shared, pushed, pulled, and deployed like any other container.
 
+```{warning}
+A served Tesseract doesn't check who is calling it: anyone who can reach its port can call every endpoint. Restrict access with your network (firewall, VPN) or an authenticating reverse proxy. See {doc}`/content/concepts/security`.
+```
+
 ## Using Docker tools
 
 Built Tesseracts are Docker images named after the Tesseract. Standard Docker commands work directly:
